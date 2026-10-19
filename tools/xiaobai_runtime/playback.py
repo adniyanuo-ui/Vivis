@@ -14,7 +14,10 @@ class SensorReadingError(RuntimeError):pass
 class PositionEdgeReadingError(RuntimeError):pass
 
 class AudioClock:
-    def __init__(self,path,device):
+    def __init__(self,path,device,latency='low'):
+        if not (latency in ('low','high') if isinstance(latency,str) else
+                type(latency) in (int,float) and math.isfinite(latency) and .01<=latency<=1):
+            raise ValueError('Audio latency must be low, high, or 0.01..1 seconds')
         import sounddevice as sd
         from scipy.signal import resample_poly
         self.sd=sd;self.first_dac=None;self.fault=None;self.cursor=0
@@ -28,7 +31,7 @@ class AudioClock:
         self.data=resample_poly(data,self.rate//common,original_rate//common,axis=0).astype(np.float32)
         self.duration=len(data)/original_rate
         self.stream=sd.OutputStream(device=device,samplerate=self.rate,channels=self.data.shape[1],
-            dtype='float32',blocksize=0,latency='low',callback=self.callback)
+            dtype='float32',blocksize=0,latency=latency,callback=self.callback)
     def callback(self,outdata,n,timing,status):
         if status:self.fault=str(status)
         outdata.fill(0)
@@ -94,7 +97,7 @@ def verified_feedback(bus,sid,motor,confirm,records,should_stop=lambda:False,ini
                 return state
     raise RuntimeError(f'{sid}: feedback anomaly did not clear with two consecutive healthy confirmations')
 
-def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=None):
+def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=None,gaze_override=None):
     if (not isinstance(ids,list) or not ids or len(set(ids))!=len(ids)
             or any(type(sid) is not int or not 0<=sid<=253 for sid in ids)):
         raise ValueError('Playback IDs must be nonempty, unique servo IDs')
@@ -110,6 +113,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             len(set(command_ids))!=len(command_ids)):
         raise ValueError('Diagnostic command IDs must be a nonempty unique subset of monitored IDs')
     command_ids=set(command_ids)
+    if gaze_override is not None and not {a['id'] for a in gaze_override.axes} <= command_ids:
+        raise ValueError('Tracked eye axes must be among commanded IDs')
     feedback_age_limit=profile.get('feedback_max_age_s')
     if feedback_age_limit is not None and not 0<feedback_age_limit<=1:
         raise ValueError('Feedback age limit must be positive and at most one second')
@@ -170,14 +175,16 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     try:
         if should_stop():raise RuntimeError('Stop file exists')
         # Verify physical audio output has been configured before opening the bus.
-        clock=AudioClock(audio_path,profile['audio_device'])
+        audio_latency=profile.get('audio_latency_seconds','low')
+        clock=AudioClock(audio_path,profile['audio_device'],latency=audio_latency)
+        result['audio_requested_latency']=audio_latency
         if abs(len(trajectory)/fps-clock.duration)>1/fps:raise ValueError('Clip/audio duration mismatch')
         run_duration=min(clock.duration,max_seconds) if max_seconds is not None else clock.duration
         result.update(requested_duration_seconds=run_duration,full_clip_requested=run_duration==clock.duration)
         if profile.get('serial_backend')=='feetech_python':
             from .feetech_sdk import OfficialSDKBus
             trace_path=Path(log_path).with_name('serial_trace.json') if profile.get('capture_serial_trace') else None
-            bus=OfficialSDKBus(profile['port'],profile['baud'],profile.get('feedback_mode','block'),profile.get('write_mode','position_speed'),profile.get('changed_goals_only',False),trace_path,profile.get('post_goal_quiet_ms',0),profile.get('sync_group_size',30),profile.get('sync_group_gap_ms',0),profile.get('sdk_transaction_timeout_ms'))
+            bus=OfficialSDKBus(profile['port'],profile['baud'],profile.get('feedback_mode','block'),profile.get('write_mode','position_speed'),profile.get('changed_goals_only',False),trace_path,profile.get('post_goal_quiet_ms',0),profile.get('sync_group_size',30),profile.get('sync_group_gap_ms',0),profile.get('sdk_transaction_timeout_ms'),servo_status_policy='record_only' if record_only else 'raise')
         else:
             bus=Bus(profile['port'],profile['baud'])
         result['serial_backend']=profile.get('serial_backend','local')
@@ -257,11 +264,22 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             if feedback_age_limit is not None and not record_only:
                 stale=[sid for sid in ids if now-last_good_feedback[sid]>feedback_age_limit]
                 if stale:raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
-            last=limit_step(last,trajectory[index],speed,max(dt,1e-6));last_tick=now
+            target=trajectory[index]
+            if gaze_override is not None:
+                target=gaze_override.apply(target,last,max(dt,1e-6),now)
+                # Validate dynamic targets independently of the vision worker;
+                # feedback policy never widens command limits.
+                if (np.shape(target)!=last.shape or not np.isfinite(target).all()
+                        or any(not motors[sid]['safe_min']<=target[j]<=motors[sid]['safe_max']
+                               for j,sid in enumerate(ids))):
+                    raise ValueError('Live gaze target exceeds command limits')
+            last=limit_step(last,target,speed,max(dt,1e-6));last_tick=now
             goals={sid:int(round(v)) for sid,v in zip(ids,last) if sid in command_ids}
             bus.goals(goals,speeds);last_sent=goals
             if previous_index>=0:skipped+=max(0,index-previous_index-1)
             events.append({'audio_seconds':t,'frame':index,'sent_monotonic':now,'goals':goals})
+            if gaze_override is not None:
+                events[-1]['person_gaze']=gaze_override.last_diagnostic
             if profile.get('changed_goals_only'):
                 events[-1]['transmitted_ids']=list(bus.last_transmitted_ids)
             previous_index=index
@@ -297,6 +315,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 'packets_sent':getattr(bus,'goal_packets_sent',0)}
         if bus is not None and isinstance(getattr(bus,'read_requests',None),int):
             result['serial_diagnostics']={'read_requests':bus.read_requests,'corrupt_responses':bus.corrupt_responses,'read_failures':bus.read_failures}
+            if isinstance(getattr(bus,'servo_status_notifications',None),list):
+                result['serial_diagnostics']['servo_status_notifications']=bus.servo_status_notifications
             if isinstance(getattr(bus,'last_sdk_response',None),dict):
                 result['serial_diagnostics']['last_sdk_response']=bus.last_sdk_response
                 result['serial_diagnostics']['goal_packets_sent']=bus.goal_packets_sent

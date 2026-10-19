@@ -321,6 +321,35 @@ class FinalCalibrationTests(unittest.TestCase):
         profile=copy.deepcopy(profile);profile['power_checked']=False
         with self.assertRaisesRegex(ValueError,'power_checked'):live_preflight(profile,ids)
 
+class AudioClockTests(unittest.TestCase):
+    def test_buffered_output_keeps_dac_clock_and_reports_underflow(self):
+        import sys
+        import wave
+        from types import SimpleNamespace
+        from unittest.mock import Mock,patch
+        from xiaobai_runtime.playback import AudioClock
+        sd=Mock();sd.query_devices.return_value={'default_samplerate':48000}
+        sd.CallbackStop=type('CallbackStop',(Exception,),{})
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'audio.wav'
+            with wave.open(str(path),'wb') as wav:
+                wav.setparams((1,2,48000,0,'NONE','not compressed'))
+                wav.writeframes(np.zeros(48000,dtype='<i2').tobytes())
+            with patch.dict(sys.modules,{'sounddevice':sd}):
+                clock=AudioClock(path,'pulse',latency=.2)
+                self.assertEqual(sd.OutputStream.call_args.kwargs['latency'],.2)
+                clock.callback(np.empty((480,1),np.float32),480,
+                               SimpleNamespace(outputBufferDacTime=10.2),False)
+                clock.stream.time=10.1
+                self.assertAlmostEqual(clock.time(),-.1)
+                clock.stream.time=10.5
+                self.assertAlmostEqual(clock.time(),.3)
+                clock.callback(np.empty((480,1),np.float32),480,
+                               SimpleNamespace(outputBufferDacTime=10.21),'output underflow')
+                self.assertEqual(clock.fault,'output underflow')
+                self.assertAlmostEqual(clock.first_dac,10.2)
+                clock.close()
+
 class PlaybackTests(unittest.TestCase):
     def test_invalid_trajectory_is_rejected_before_opening_devices_in_both_policies(self):
         from unittest.mock import patch
