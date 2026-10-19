@@ -1,0 +1,126 @@
+{
+  "repo": "nvidia/Audio2Face-3D-v2.3.1-Claire",
+  "revision": "a46eafb067adfdd7cc8f5c7941586b309004561c",
+  "files": [
+    {
+      "type": "file",
+      "oid": "a6344aac8c09253b3b630fb776ae94478aa0275b",
+      "size": 1519,
+      "path": ".gitattributes"
+    },
+    {
+      "type": "file",
+      "oid": "c8d201c7a575073ebfa0b28ed9fbadd3082f8463",
+      "size": 11162,
+      "path": "README.md"
+    },
+    {
+      "type": "file",
+      "oid": "6f2209995ccc7aa6d28217edc4733b83b7bd06e3",
+      "size": 7413,
+      "path": "a2f_ms_config.json"
+    },
+    {
+      "type": "file",
+      "oid": "1ffc9f9197c2bec2b527a3e140472514751564c2",
+      "size": 39182291,
+      "lfs": {
+        "oid": "cc94a937af9438f007b811b3f686015d7e96fc0ce964974905e130724ff1c4db",
+        "size": 39182291,
+        "pointerSize": 133
+      },
+      "xetHash": "2e0e0fe82ece3a012e8943373528ffc0fe8d97e8a3f5ab201cca7166255ae0c8",
+      "path": "bs_skin.npz"
+    },
+    {
+      "type": "file",
+      "oid": "8d497d0cb37f3fc461fec8bf33cf04be7cc1af0d",
+      "size": 4944,
+      "path": "bs_skin_config.json"
+    },
+    {
+      "type": "file",
+      "oid": "a46864bcc0a89fa10f6b1ac3654996a5185db6b1",
+      "size": 1147669,
+      "lfs": {
+        "oid": "82032cb3a4f08d1f6e543ce80e8d9587aca8394b8cc009384ef21db19a90450e",
+        "size": 1147669,
+        "pointerSize": 132
+      },
+      "xetHash": "00094a3a5264b60d699341a5389b7dd7020e96ff7e884c42626d9af0cfd761d8",
+      "path": "bs_tongue.npz"
+    },
+    {
+      "type": "file",
+      "oid": "52cc478ca8ad74eba5989688d7c79a9caa2a0206",
+      "size": 1871,
+      "path": "bs_tongue_config.json"
+    },
+    {
+      "type": "file",
+      "oid": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "size": 0,
+      "path": "config.json"
+    },
+    {
+      "type": "file",
+      "oid": "841323e6c2a09d3db3c6f8bc7b0ae902d0f61006",
+      "size": 1713860,
+      "lfs": {
+        "oid": "562ee9fac5eded20753eb40230519a7304156c177f52d9aa44580d5cf57c0447",
+        "size": 1713860,
+        "pointerSize": 132
+      },
+      "xetHash": "47fedb36c1365fb5fcc420385941e2f2c09a99821b60921c11c581c6559f042d",
+      "path": "implicit_emo_db.npz"
+    },
+    {
+      "type": "file",
+      "oid": "b16193c043c05033eae97c78f5a98d01a0a26a01",
+      "size": 484,
+      "path": "model.json"
+    },
+    {
+      "type": "file",
+      "oid": "fd02f043900f775d3830fbad48e5b89a32760681",
+      "size": 980,
+      "path": "model_config.json"
+    },
+    {
+      "type": "file",
+      "oid": "8515ca3ebd585c5a4f814f2f89cac9f61c0adf91",
+      "size": 106350002,
+      "lfs": {
+        "oid": "4c2205365533790add8219170b9505960e31d2fca82708f2e3db31c5ccf092a4",
+        "size": 106350002,
+        "pointerSize": 134
+      },
+      "xetHash": "309d4aa49601e65c17283e5a948d8e8500aac81a1f37ae84f4c6573f59473340",
+      "path": "model_data.npz"
+    },
+    {
+      "type": "file",
+      "oid": "b113c95420acb4399432c225195e28b07d242a2a",
+      "size": 159044772,
+      "lfs": {
+        "oid": "6bb7a3a3c22491960e71a14742891e0d7205d7c80414aebe326cad82fd6867c3",
+        "size": 159044772,
+        "pointerSize": 134
+      },
+      "xetHash": "ff14c531cb384742e8bad3d3af5693bd2317df8a62e4bbcfbe27c5d0b12d2a92",
+      "path": "network.onnx"
+    },
+    {
+      "type": "file",
+      "oid": "36396efb928a07ba8d2767f7349af84b708ec3be",
+      "size": 1017,
+      "path": "network_info.json"
+    },
+    {
+      "type": "file",
+      "oid": "0f9d57e6290ee75afac96bdaaf31336de1c448ad",
+      "size": 506,
+      "path": "trt_info.json"
+    }
+  ]
+}

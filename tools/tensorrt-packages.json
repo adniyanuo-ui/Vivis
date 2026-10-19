@@ -1,0 +1,44 @@
+{
+  "libnvinfer10": {
+    "Package": "libnvinfer10",
+    "Version": "10.13.3.9-1+cuda12.9",
+    "Filename": "./libnvinfer10_10.13.3.9-1+cuda12.9_amd64.deb",
+    "Size": "1214368526",
+    "SHA256": "f2ad17faf67559f0a882fe294e5dff8e38c53257971d03407b14500ebdebbc6c"
+  },
+  "libnvinfer-headers-dev": {
+    "Package": "libnvinfer-headers-dev",
+    "Version": "10.13.3.9-1+cuda12.9",
+    "Filename": "./libnvinfer-headers-dev_10.13.3.9-1+cuda12.9_amd64.deb",
+    "Size": "111414",
+    "SHA256": "51b5ba285dac90ca35527f1cea9f04a20cd206475bb8c5d4ca06146dc0149e99"
+  },
+  "libnvinfer-headers-plugin-dev": {
+    "Package": "libnvinfer-headers-plugin-dev",
+    "Version": "10.13.3.9-1+cuda12.9",
+    "Filename": "./libnvinfer-headers-plugin-dev_10.13.3.9-1+cuda12.9_amd64.deb",
+    "Size": "6060",
+    "SHA256": "f288017f25cf4a8d3f4541d42e296dc7cbf2d46a95f1247806ba919c1ca007b9"
+  },
+  "libnvinfer-plugin10": {
+    "Package": "libnvinfer-plugin10",
+    "Version": "10.13.3.9-1+cuda12.9",
+    "Filename": "./libnvinfer-plugin10_10.13.3.9-1+cuda12.9_amd64.deb",
+    "Size": "15317532",
+    "SHA256": "af4dabb33e16e2753233524ab47ed1260a3888ace3d05e514ce0cd365919fb4a"
+  },
+  "libnvonnxparsers10": {
+    "Package": "libnvonnxparsers10",
+    "Version": "10.13.3.9-1+cuda12.9",
+    "Filename": "./libnvonnxparsers10_10.13.3.9-1+cuda12.9_amd64.deb",
+    "Size": "1437290",
+    "SHA256": "5e9f56105a2baca3c4d64cb6150132ab4b71bdc3a0f6e9f2b11b07f2e3fdbc01"
+  },
+  "python3-libnvinfer": {
+    "Package": "python3-libnvinfer",
+    "Version": "10.13.3.9-1+cuda12.9",
+    "Filename": "./python3-libnvinfer_10.13.3.9-1+cuda12.9_amd64.deb",
+    "Size": "799046",
+    "SHA256": "ba6e4c265b3adaf7af76aac67426962a4f25a2101c772dacf112c0f20211ff74"
+  }
+}

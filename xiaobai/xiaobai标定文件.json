@@ -1,0 +1,846 @@
+{
+    "blendShapes": [
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 2,
+                    "position": 2400
+                },
+                {
+                    "id": 3,
+                    "position": 2200
+                },
+                {
+                    "id": 4,
+                    "position": 2230
+                }
+            ],
+            "shape": "BrowDownLeft"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 17,
+                    "position": 1851
+                },
+                {
+                    "id": 18,
+                    "position": 1921
+                },
+                {
+                    "id": 19,
+                    "position": 1840
+                }
+            ],
+            "shape": "BrowDownRight"
+        },
+        {
+            "posSize": 6,
+            "positions": [
+                {
+                    "id": 2,
+                    "position": 1720
+                },
+                {
+                    "id": 3,
+                    "position": 1850
+                },
+                {
+                    "id": 4,
+                    "position": 2230
+                },
+                {
+                    "id": 17,
+                    "position": 2350
+                },
+                {
+                    "id": 18,
+                    "position": 2220
+                },
+                {
+                    "id": 19,
+                    "position": 1840
+                }
+            ],
+            "shape": "BrowInnerUp"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 2,
+                    "position": 1720
+                },
+                {
+                    "id": 3,
+                    "position": 1850
+                },
+                {
+                    "id": 4,
+                    "position": 1900
+                }
+            ],
+            "shape": "BrowOuterUpLeft"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 17,
+                    "position": 2350
+                },
+                {
+                    "id": 18,
+                    "position": 2220
+                },
+                {
+                    "id": 19,
+                    "position": 2130
+                }
+            ],
+            "shape": "BrowOuterUpRight"
+        },
+        {
+            "posSize": 2,
+            "positions": [
+                {
+                    "id": 5,
+                    "position": 1700
+                },
+                {
+                    "id": 6,
+                    "position": 2200
+                }
+            ],
+            "shape": "EyeBlinkLeft"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 5,
+                    "position": 1830
+                },
+                {
+                    "id": 6,
+                    "position": 1950
+                },
+                {
+                    "id": 7,
+                    "position": 1954
+                }
+            ],
+            "shape": "EyeLookDownLeft"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 8,
+                    "position": 2332
+                }
+            ],
+            "shape": "EyeLookInLeft"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 8,
+                    "position": 1600
+                }
+            ],
+            "shape": "EyeLookOutLeft"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 5,
+                    "position": 2230
+                },
+                {
+                    "id": 6,
+                    "position": 2200
+                },
+                {
+                    "id": 7,
+                    "position": 2117
+                }
+            ],
+            "shape": "EyeLookUpLeft"
+        },
+        {
+            "posSize": 2,
+            "positions": [
+                {
+                    "id": 5,
+                    "position": 1996
+                },
+                {
+                    "id": 6,
+                    "position": 2147
+                }
+            ],
+            "shape": "EyeSquintLeft"
+        },
+        {
+            "posSize": 2,
+            "positions": [
+                {
+                    "id": 5,
+                    "position": 2230
+                },
+                {
+                    "id": 6,
+                    "position": 1983
+                }
+            ],
+            "shape": "EyeWideLeft"
+        },
+        {
+            "posSize": 2,
+            "positions": [
+                {
+                    "id": 20,
+                    "position": 2375
+                },
+                {
+                    "id": 21,
+                    "position": 1902
+                }
+            ],
+            "shape": "EyeBlinkRight"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 20,
+                    "position": 2259
+                },
+                {
+                    "id": 21,
+                    "position": 2198
+                },
+                {
+                    "id": 22,
+                    "position": 2116
+                }
+            ],
+            "shape": "EyeLookDownRight"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 23,
+                    "position": 1750
+                }
+            ],
+            "shape": "EyeLookInRight"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 23,
+                    "position": 2365
+                }
+            ],
+            "shape": "EyeLookOutRight"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 20,
+                    "position": 1920
+                },
+                {
+                    "id": 21,
+                    "position": 1933
+                },
+                {
+                    "id": 22,
+                    "position": 2001
+                }
+            ],
+            "shape": "EyeLookUpRight"
+        },
+        {
+            "posSize": 2,
+            "positions": [
+                {
+                    "id": 20,
+                    "position": 2127
+                },
+                {
+                    "id": 21,
+                    "position": 1960
+                }
+            ],
+            "shape": "EyeSquintRight"
+        },
+        {
+            "posSize": 2,
+            "positions": [
+                {
+                    "id": 20,
+                    "position": 1920
+                },
+                {
+                    "id": 21,
+                    "position": 2165
+                }
+            ],
+            "shape": "EyeWideRight"
+        },
+        {
+            "posSize": 0,
+            "positions": [
+            ],
+            "shape": "JawForward"
+        },
+        {
+            "posSize": 0,
+            "positions": [
+            ],
+            "shape": "JawLeft"
+        },
+        {
+            "posSize": 0,
+            "positions": [
+            ],
+            "shape": "JawRight"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 31,
+                    "position": 1950
+                }
+            ],
+            "shape": "JawOpen"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 28,
+                    "position": 2134
+                }
+            ],
+            "shape": "MouthClose"
+        },
+        {
+            "posSize": 10,
+            "positions": [
+                {
+                    "id": 10,
+                    "position": 2460
+                },
+                {
+                    "id": 11,
+                    "position": 1771
+                },
+                {
+                    "id": 12,
+                    "position": 2297
+                },
+                {
+                    "id": 13,
+                    "position": 1815
+                },
+                {
+                    "id": 15,
+                    "position": 1925
+                },
+                {
+                    "id": 25,
+                    "position": 1620
+                },
+                {
+                    "id": 26,
+                    "position": 2292
+                },
+                {
+                    "id": 27,
+                    "position": 1768
+                },
+                {
+                    "id": 28,
+                    "position": 2271
+                },
+                {
+                    "id": 30,
+                    "position": 1922
+                }
+            ],
+            "shape": "MouthFunnel"
+        },
+        {
+            "posSize": 10,
+            "positions": [
+                {
+                    "id": 10,
+                    "position": 1700
+                },
+                {
+                    "id": 11,
+                    "position": 1653
+                },
+                {
+                    "id": 12,
+                    "position": 2700
+                },
+                {
+                    "id": 13,
+                    "position": 2300
+                },
+                {
+                    "id": 15,
+                    "position": 2130
+                },
+                {
+                    "id": 25,
+                    "position": 2300
+                },
+                {
+                    "id": 26,
+                    "position": 2300
+                },
+                {
+                    "id": 27,
+                    "position": 1200
+                },
+                {
+                    "id": 28,
+                    "position": 1920
+                },
+                {
+                    "id": 30,
+                    "position": 2200
+                }
+            ],
+            "shape": "MouthPucker"
+        },
+        {
+            "posSize": 5,
+            "positions": [
+                {
+                    "id": 11,
+                    "position": 2650
+                },
+                {
+                    "id": 12,
+                    "position": 2378
+                },
+                {
+                    "id": 26,
+                    "position": 2300
+                },
+                {
+                    "id": 27,
+                    "position": 1200
+                },
+                {
+                    "id": 28,
+                    "position": 1920
+                }
+            ],
+            "shape": "MouthLeft"
+        },
+        {
+            "posSize": 5,
+            "positions": [
+                {
+                    "id": 11,
+                    "position": 1661
+                },
+                {
+                    "id": 12,
+                    "position": 2700
+                },
+                {
+                    "id": 13,
+                    "position": 2300
+                },
+                {
+                    "id": 26,
+                    "position": 1563
+                },
+                {
+                    "id": 27,
+                    "position": 1737
+                }
+            ],
+            "shape": "MouthRight"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 11,
+                    "position": 2649
+                }
+            ],
+            "shape": "MouthSmileLeft"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 26,
+                    "position": 1451
+                }
+            ],
+            "shape": "MouthSmileRight"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 12,
+                    "position": 1650
+                }
+            ],
+            "shape": "MouthFrownLeft"
+        },
+        {
+            "posSize": 2,
+            "positions": [
+                {
+                    "id": 26,
+                    "position": 2048
+                },
+                {
+                    "id": 27,
+                    "position": 2480
+                }
+            ],
+            "shape": "MouthFrownRight"
+        },
+        {
+            "posSize": 2,
+            "positions": [
+                {
+                    "id": 11,
+                    "position": 2650
+                },
+                {
+                    "id": 12,
+                    "position": 1650
+                }
+            ],
+            "shape": "MouthDimpleLeft"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 11,
+                    "position": 2048
+                },
+                {
+                    "id": 26,
+                    "position": 1450
+                },
+                {
+                    "id": 27,
+                    "position": 2467
+                }
+            ],
+            "shape": "MouthDimpleRight"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 11,
+                    "position": 1650
+                },
+                {
+                    "id": 12,
+                    "position": 1650
+                },
+                {
+                    "id": 13,
+                    "position": 1997
+                }
+            ],
+            "shape": "MouthStretchLeft"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 26,
+                    "position": 2300
+                },
+                {
+                    "id": 27,
+                    "position": 2480
+                },
+                {
+                    "id": 28,
+                    "position": 2183
+                }
+            ],
+            "shape": "MouthStretchRight"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 13,
+                    "position": 2297
+                },
+                {
+                    "id": 28,
+                    "position": 1979
+                },
+                {
+                    "id": 30,
+                    "position": 2199
+                }
+            ],
+            "shape": "MouthRollLower"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 10,
+                    "position": 1821
+                },
+                {
+                    "id": 15,
+                    "position": 2130
+                },
+                {
+                    "id": 25,
+                    "position": 2300
+                }
+            ],
+            "shape": "MouthRollUpper"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 13,
+                    "position": 2300
+                },
+                {
+                    "id": 28,
+                    "position": 1920
+                },
+                {
+                    "id": 30,
+                    "position": 2200
+                }
+            ],
+            "shape": "MouthShrugLower"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 10,
+                    "position": 2485
+                },
+                {
+                    "id": 15,
+                    "position": 1900
+                },
+                {
+                    "id": 25,
+                    "position": 1620
+                }
+            ],
+            "shape": "MouthShrugUpper"
+        },
+        {
+            "posSize": 4,
+            "positions": [
+                {
+                    "id": 10,
+                    "position": 2196
+                },
+                {
+                    "id": 11,
+                    "position": 2650
+                },
+                {
+                    "id": 12,
+                    "position": 1650
+                },
+                {
+                    "id": 13,
+                    "position": 2193
+                }
+            ],
+            "shape": "MouthPressLeft"
+        },
+        {
+            "posSize": 4,
+            "positions": [
+                {
+                    "id": 25,
+                    "position": 1869
+                },
+                {
+                    "id": 26,
+                    "position": 1450
+                },
+                {
+                    "id": 27,
+                    "position": 2480
+                },
+                {
+                    "id": 28,
+                    "position": 1920
+                }
+            ],
+            "shape": "MouthPressRight"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 13,
+                    "position": 1815
+                },
+                {
+                    "id": 28,
+                    "position": 1920
+                },
+                {
+                    "id": 30,
+                    "position": 1944
+                }
+            ],
+            "shape": "MouthLowerDownLeft"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 13,
+                    "position": 2300
+                },
+                {
+                    "id": 28,
+                    "position": 2280
+                },
+                {
+                    "id": 30,
+                    "position": 1955
+                }
+            ],
+            "shape": "MouthLowerDownRight"
+        },
+        {
+            "posSize": 2,
+            "positions": [
+                {
+                    "id": 10,
+                    "position": 2485
+                },
+                {
+                    "id": 15,
+                    "position": 1994
+                }
+            ],
+            "shape": "MouthUpperUpLeft"
+        },
+        {
+            "posSize": 2,
+            "positions": [
+                {
+                    "id": 15,
+                    "position": 1985
+                },
+                {
+                    "id": 25,
+                    "position": 1620
+                }
+            ],
+            "shape": "MouthUpperUpRight"
+        },
+        {
+            "posSize": 0,
+            "positions": [
+            ],
+            "shape": "CheekPuff"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 5,
+                    "position": 1969
+                },
+                {
+                    "id": 6,
+                    "position": 2164
+                },
+                {
+                    "id": 9,
+                    "position": 2303
+                }
+            ],
+            "shape": "CheekSquintLeft"
+        },
+        {
+            "posSize": 3,
+            "positions": [
+                {
+                    "id": 20,
+                    "position": 2132
+                },
+                {
+                    "id": 21,
+                    "position": 1957
+                },
+                {
+                    "id": 24,
+                    "position": 1923
+                }
+            ],
+            "shape": "CheekSquintRight"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 14,
+                    "position": 2156
+                }
+            ],
+            "shape": "NoseSneerLeft"
+        },
+        {
+            "posSize": 1,
+            "positions": [
+                {
+                    "id": 16,
+                    "position": 1830
+                }
+            ],
+            "shape": "NoseSneerRight"
+        },
+        {
+            "posSize": 0,
+            "positions": [
+            ],
+            "shape": "TongueOut"
+        }
+    ],
+    "shapeSize": 52,
+    "version": "1.0.0"
+}

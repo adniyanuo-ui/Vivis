@@ -1,0 +1,5 @@
+numpy==1.23.5
+scipy==1.11.4
+jsonschema==4.26.0
+pyserial==3.5
+sounddevice==0.5.3
