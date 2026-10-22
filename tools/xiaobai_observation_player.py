@@ -18,12 +18,22 @@ def main():
     parser.add_argument('--monitor-neck-hold',action='store_true')
     parser.add_argument('--max-seconds',type=float)
     parser.add_argument('--feedback-polls-per-frame',type=int,choices=[1,2,3,4])
+    parser.add_argument('--audio-latency',type=float,help='Requested audio buffer latency in seconds (0.01..1)')
+    parser.add_argument('--port',help='Serial port matched to the confirmed USB adapter')
+    parser.add_argument('--audio-device',help='PortAudio output device name on this machine')
     parser.add_argument('--check',action='store_true',help='Read-only readiness check; no audio playback or motion')
     parser.add_argument('--clip',type=Path,default=ROOT/'outputs/0001_CLAIRE_SINGING_GAZE_v3.0-Claire_BLENDSHAPES_61_60fps.json')
     parser.add_argument('--audio',type=Path,default=ROOT/'0001.wav')
     args=parser.parse_args()
     if args.output.exists():raise SystemExit('Use a new output directory to preserve evidence')
     profile=read_json(args.profile)
+    if args.audio_latency is not None:
+        if not .01<=args.audio_latency<=1:raise SystemExit('Audio latency must be 0.01..1 seconds')
+        profile['audio_latency_s']=args.audio_latency
+    if args.port is not None:
+        profile['port']=args.port
+    if args.audio_device is not None:
+        profile['audio_device']=args.audio_device
     if args.feedback_polls_per_frame is not None:
         profile['feedback_polls_per_frame']=args.feedback_polls_per_frame
     calibration=ROOT/'xiaobai/xiaobai标定文件.json'

@@ -13,7 +13,7 @@ import subprocess
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SERIAL = '5B79033160'
+SERIAL = os.environ.get('XIAOBAI_USB_SERIAL', '5B79033160')
 MODULE = ROOT / 'xiaobai/reference/ch343ser_linux/driver/ch343.ko'
 
 
@@ -64,6 +64,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['status', 'vendor', 'cdc'])
     args = parser.parse_args()
+    access_user = os.environ.get('SUDO_USER') or os.environ.get('USER')
+    if args.action != 'status' and not access_user:
+        raise SystemExit('Cannot determine serial access user; set SUDO_USER.')
     device, interface = find_interface()
     report = {'serial': SERIAL, 'usb_device': str(device), 'interface': interface.name,
               'driver_before': driver(interface), 'ttys_before': tty_devices(device),
@@ -100,14 +103,14 @@ def main():
             if driver(interface) != target:
                 raise RuntimeError('Driver binding did not stick')
             for tty in ttys:
-                subprocess.run(['setfacl', '-m', 'u:ubuntu:rw', tty], check=True)
+                subprocess.run(['setfacl', '-m', f'u:{access_user}:rw', tty], check=True)
         except Exception:
             if args.action == 'vendor':
                 subprocess.run(['modprobe', 'cdc_acm'], check=True)
                 bind(interface, 'cdc_acm')
                 subprocess.run(['udevadm', 'settle', '--timeout=5'], check=False)
                 for tty in tty_devices(device):
-                    subprocess.run(['setfacl', '-m', 'u:ubuntu:rw', tty], check=False)
+                    subprocess.run(['setfacl', '-m', f'u:{access_user}:rw', tty], check=False)
             raise
     report.update(driver_after=driver(interface), ttys_after=tty_devices(device))
     print(json.dumps(report, ensure_ascii=False, indent=2))

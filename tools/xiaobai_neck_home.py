@@ -29,6 +29,7 @@ def neck_limits(state, motor):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',required=True,type=Path)
+    parser.add_argument('--port',default='/dev/ttyCH343USB0')
     parser.add_argument('--supported',action='store_true',help='Onsite operator has confirmed supporting the head')
     args=parser.parse_args()
     if not args.supported:raise SystemExit('Requires onsite head-support confirmation')
@@ -43,7 +44,7 @@ def main():
     signal.signal(signal.SIGINT,stop);signal.signal(signal.SIGTERM,stop)
     def guard():
         if stopped or (ROOT/'outputs/xiaobai/STOP').exists():raise RuntimeError('Operator stop')
-    bus=OfficialSDKBus('/dev/ttyCH343USB0',trace_path=args.output/'serial_trace.json')
+    bus=OfficialSDKBus(args.port,trace_path=args.output/'serial_trace.json')
     limits={}
     def feedback(sid):
         guard();s=bus.feedback(sid);check_feedback(sid,s,limits[sid]);return s

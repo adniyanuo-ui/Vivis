@@ -14,7 +14,10 @@ class SensorReadingError(RuntimeError):pass
 class PositionEdgeReadingError(RuntimeError):pass
 
 class AudioClock:
-    def __init__(self,path,device):
+    def __init__(self,path,device,latency='low'):
+        if not (isinstance(latency,str) and latency in ('low','high') or
+                type(latency) in (int,float) and math.isfinite(latency) and .01<=latency<=1):
+            raise ValueError('Audio latency must be low/high or 0.01..1 seconds')
         import sounddevice as sd
         from scipy.signal import resample_poly
         self.sd=sd;self.first_dac=None;self.fault=None;self.cursor=0
@@ -28,7 +31,7 @@ class AudioClock:
         self.data=resample_poly(data,self.rate//common,original_rate//common,axis=0).astype(np.float32)
         self.duration=len(data)/original_rate
         self.stream=sd.OutputStream(device=device,samplerate=self.rate,channels=self.data.shape[1],
-            dtype='float32',blocksize=0,latency='low',callback=self.callback)
+            dtype='float32',blocksize=0,latency=latency,callback=self.callback)
     def callback(self,outdata,n,timing,status):
         if status:self.fault=str(status)
         outdata.fill(0)
@@ -170,7 +173,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     try:
         if should_stop():raise RuntimeError('Stop file exists')
         # Verify physical audio output has been configured before opening the bus.
-        clock=AudioClock(audio_path,profile['audio_device'])
+        clock=AudioClock(audio_path,profile['audio_device'],latency=profile.get('audio_latency_s','low'))
         if abs(len(trajectory)/fps-clock.duration)>1/fps:raise ValueError('Clip/audio duration mismatch')
         run_duration=min(clock.duration,max_seconds) if max_seconds is not None else clock.duration
         result.update(requested_duration_seconds=run_duration,full_clip_requested=run_duration==clock.duration)

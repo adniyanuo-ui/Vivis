@@ -12,13 +12,19 @@ while [[ $# -gt 0 ]]; do
     --fps)
       [[ $# -ge 2 ]] || { echo '用法：--fps 30 或 --fps 60' >&2; exit 2; }
       XIAOBAI_PLAY_FPS="$2"; shift 2 ;;
+    --audio-latency)
+      [[ $# -ge 2 ]] || { echo '用法：--audio-latency 秒数' >&2; exit 2; }
+      XIAOBAI_PLAY_EXTRA+=(--audio-latency "$2"); shift 2 ;;
+    --audio-device)
+      [[ $# -ge 2 ]] || { echo '用法：--audio-device 设备名称' >&2; exit 2; }
+      XIAOBAI_PLAY_EXTRA+=(--audio-device "$2"); shift 2 ;;
     --check)
       XIAOBAI_PLAY_EXTRA+=(--check); shift ;;
     --max-seconds)
       [[ $# -ge 2 ]] || { echo '用法：--max-seconds 秒数' >&2; exit 2; }
       XIAOBAI_PLAY_EXTRA+=(--max-seconds "$2"); shift 2 ;;
     -h|--help)
-      echo '用法：./play_0001_xiaobai.sh [--fps 30|60] [--check] [--max-seconds 秒数]'
+      echo '用法：./play_0001_xiaobai.sh [--fps 30|60] [--check] [--max-seconds 秒数] [--audio-device 名称] [--audio-latency 秒数]'
       echo '默认：指定0001 JSON + 0001.wav，60fps、100%幅度、反馈只记录、颈部保持。'
       echo '--check 只检查资料、串口权限与已归位颈部，不播放或驱动。'
       exit 0 ;;
@@ -31,21 +37,28 @@ if [[ -e "$XIAOBAI_PLAY_ROOT/outputs/xiaobai/STOP" ]]; then
   echo '存在 outputs/xiaobai/STOP；请确认现场可以启动后再移除该停止文件。' >&2
   exit 2
 fi
-if ! "$XIAOBAI_PLAY_ROOT/.venv/bin/python" - <<'PY'
+if ! XIAOBAI_PLAY_PORT="$("$XIAOBAI_PLAY_ROOT/.venv/bin/python" - <<'PY'
 import os
 import sys
 from pathlib import Path
 sys.path.insert(0,'tools')
 from xiaobai_switch_usb_driver import find_interface,driver,tty_devices
-device,interface=find_interface()
-port=Path('/dev/ttyCH343USB0')
-ready=(driver(interface)=='usb_ch343' and str(port) in tty_devices(device)
+try:
+    device,interface=find_interface()
+except RuntimeError as exc:
+    print(str(exc), file=sys.stderr)
+    print('请核对转接器身份；如已更换，设置 XIAOBAI_USB_SERIAL 为现场确认的序列号。', file=sys.stderr)
+    raise SystemExit(1)
+ports=tty_devices(device)
+port=Path(ports[0]) if len(ports)==1 else None
+ready=(driver(interface)=='usb_ch343' and port is not None
        and port.exists() and os.access(port,os.R_OK|os.W_OK))
+if ready:print(port)
 raise SystemExit(0 if ready else 1)
 PY
-then
+)"; then
   echo '串口未就绪。USB拔插后，请先恢复驱动与权限：' >&2
-  echo "sudo python3 $XIAOBAI_PLAY_ROOT/tools/xiaobai_switch_usb_driver.py vendor" >&2
+  echo "sudo XIAOBAI_USB_SERIAL=${XIAOBAI_USB_SERIAL:-5B79033160} python3 $XIAOBAI_PLAY_ROOT/tools/xiaobai_switch_usb_driver.py vendor" >&2
   exit 2
 fi
 
@@ -62,6 +75,7 @@ exec "$XIAOBAI_PLAY_ROOT/.venv/bin/python" "$XIAOBAI_PLAY_ROOT/tools/xiaobai_obs
   --profile "$XIAOBAI_PLAY_ROOT/xiaobai/playback_profile_0001_observation.json" \
   --clip "$XIAOBAI_PLAY_ROOT/outputs/0001_CLAIRE_SINGING_GAZE_v3.0-Claire_BLENDSHAPES_61_60fps.json" \
   --audio "$XIAOBAI_PLAY_ROOT/0001.wav" \
+  --port "$XIAOBAI_PLAY_PORT" \
   --fps "$XIAOBAI_PLAY_FPS" --monitor-neck-hold \
   --feedback-polls-per-frame "$((60 / XIAOBAI_PLAY_FPS))" \
   --output "$XIAOBAI_PLAY_OUTPUT" "${XIAOBAI_PLAY_EXTRA[@]}"

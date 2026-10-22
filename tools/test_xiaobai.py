@@ -641,4 +641,35 @@ class BranchIsolationTests(unittest.TestCase):
         rows=self.rows(range(31,35));rows[-1]['model_raw']=521
         with self.assertRaises(ValueError):validate_branch_probe(rows,'rs485-jaw')
 
+
+
+
+class AudioBufferTests(unittest.TestCase):
+    def test_invalid_latency_rejected_before_opening_resources(self):
+        from xiaobai_runtime.playback import AudioClock
+        for latency in [True, 0, -1, 1.1, float('nan'), float('inf'), 'invalid', None]:
+            with self.subTest(latency=latency), self.assertRaises(ValueError):
+                AudioClock('unused.wav', 'unused', latency=latency)
+
+    def test_buffer_override_preserves_dac_clock(self):
+        import wave
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from xiaobai_runtime.playback import AudioClock
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'audio.wav'
+            with wave.open(str(path),'wb') as wav:
+                wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(16000)
+                wav.writeframes(bytes(320))
+            with patch('sounddevice.query_devices',return_value={'default_samplerate':48000}), patch('sounddevice.OutputStream') as stream:
+                clock=AudioClock(path,'USB Audio Device',latency=.2)
+                try:
+                    self.assertEqual(stream.call_args.kwargs['latency'],.2)
+                    self.assertIsNone(clock.time())
+                    clock.callback(np.zeros((48,1)),48,SimpleNamespace(outputBufferDacTime=10.),False)
+                    clock.stream.time=10.125
+                    self.assertAlmostEqual(clock.time(),.125)
+                    self.assertAlmostEqual(clock.duration,.01)
+                finally:clock.close()
+
 if __name__=='__main__':unittest.main()
