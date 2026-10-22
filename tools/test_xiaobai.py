@@ -616,7 +616,9 @@ class BranchIsolationTests(unittest.TestCase):
                 bus.goals.side_effect=prime
                 bus.sdk.write1ByteTxRx.side_effect=enable
                 bus.feedback.return_value=dict(position=2047,temperature_c=40,load_raw=0,status_register=0,voltage_raw=70)
-                with patch('sys.argv',['rearm','--apply','--output',str(Path(temp)/'run')]),patch('xiaobai_branch_trial.probe_branch'),patch('xiaobai_runtime.feetech_sdk.OfficialSDKBus',return_value=bus),patch('xiaobai_rearm_ttl.signal.signal'):
+                # Keep a real operator STOP in the workspace independent of this mock-device test.
+                with patch('xiaobai_rearm_ttl.ROOT',Path(temp)),patch('xiaobai_rearm_ttl.read_json',return_value=profile), \
+                        patch('sys.argv',['rearm','--apply','--output',str(Path(temp)/'run')]),patch('xiaobai_branch_trial.probe_branch'),patch('xiaobai_runtime.feetech_sdk.OfficialSDKBus',return_value=bus),patch('xiaobai_rearm_ttl.signal.signal'):
                     if verified:xiaobai_rearm_ttl.main()
                     else:
                         with self.assertRaisesRegex(RuntimeError,'priming verification failed'):xiaobai_rearm_ttl.main()
