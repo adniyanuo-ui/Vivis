@@ -38,21 +38,86 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
-    def test_half_eye_lead_starts_neck_earlier_without_changing_eyes(self):
+    def test_growing_error_recruits_neck_after_eyes_and_preserves_eye_outputs(self):
         c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
-        old=copy.deepcopy(c);old['neck']['eye_lead_s']=.08
-        c['neck']['eye_lead_s']=.04
-        validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',True,True)
-        controllers=[MojiaPursuit(a,[8,23,7,22,32],[300,300,100,100,900],True) for a in [old,c]]
-        previous=[np.full(5,2047.),np.full(5,2047.)];starts=[None,None]
-        for i in range(120):
+        coupled=MojiaPursuit(c,[8,23,7,22,32],[300,300,100,100,900],True)
+        eyes=MojiaPursuit(c,[8,23,7,22],[300,300,100,100])
+        previous=np.full(5,2047.);flat=previous[:4].copy();eye_start=neck_start=None
+        for i in range(90):
+            now=10+(i+1)/60;p=packet(now,.16+i*.005)
+            previous,d=coupled.step(p,previous,1/60,now)
+            flat,_=eyes.step(p,flat,1/60,now)
+            np.testing.assert_allclose(previous[:4],flat)
+            if eye_start is None and abs(previous[1]-2047)>=1:eye_start=now
+            if neck_start is None and d['neck_velocity']>0:neck_start=now
+        self.assertIsNotNone(neck_start)
+        self.assertGreater(neck_start,eye_start)
+        self.assertLess(neck_start-eye_start,.3)
+
+    def test_measured_eye_must_move_before_growth_recruits_neck(self):
+        c=config();controller=MojiaPursuit(c,[8,23,32],[300,300,900],True)
+        old=np.full(3,2047.);controller.observe_eye(2047,10.)
+        for i in range(12):
             now=10+(i+1)/60
-            for j,controller in enumerate(controllers):
-                previous[j],d=controller.step(packet(now,.8),previous[j],1/60,now)
-                if starts[j] is None and abs(d['neck_velocity'])>1e-6:starts[j]=now
-            np.testing.assert_allclose(previous[0][:4],previous[1][:4])
-        self.assertIsNotNone(starts[0]);self.assertIsNotNone(starts[1])
-        self.assertLess(starts[1],starts[0])
+            old,d=controller.step(packet(now,.16+i*.01),old,1/60,now)
+            self.assertEqual(d['neck_velocity'],0.)
+        controller.observe_eye(2049,10.2)
+        old,d=controller.step(packet(10.22,.4),old,.02,10.22)
+        self.assertGreater(d['neck_velocity'],0.)
+        self.assertEqual(d['eye_motion_source'],'encoder')
+
+    def test_repeated_frame_cannot_invent_growing_error(self):
+        c=config();controller=MojiaPursuit(c,[8,23,32],[300,300,900],True)
+        old=np.full(3,2047.);p=packet(10.,.2)
+        for i in range(15):
+            old,d=controller.step(p,old,1/60,10+i/60)
+            self.assertEqual(d['neck_velocity'],0.)
+            self.assertEqual(d['image_error_growth'],0.)
+
+    def test_past_growth_does_not_recruit_neck_after_error_starts_falling(self):
+        c=config();controller=MojiaPursuit(c,[8,23,32],[300,300,900],True)
+        old=np.full(3,2047.);controller.observe_eye(2047,10.)
+        for i in range(12):
+            now=10+(i+1)/60
+            old,d=controller.step(packet(now,.16+i*.01),old,1/60,now)
+        controller.observe_eye(2049,10.2)
+        old,d=controller.step(packet(10.22,.25),old,.02,10.22)
+        self.assertEqual(d['neck_velocity'],0.)
+
+    def test_reversal_leaves_neck_limit_while_eyes_still_right_of_centre(self):
+        c=config();c['neck']['offset_counts']=80
+        for a in c['control']['axes']:a.update(negative=1987,positive=2107)
+        controller=MojiaPursuit(c,[8,23,32],[300,300,900],True)
+        old=np.array([2107.,2107.,2127.]);first=None
+        for i in range(50):
+            now=10+(i+1)/60
+            old,d=controller.step(packet(now,-.16-i*.006),old,1/60,now)
+            if first is None and d['neck_velocity']<0:first=old.copy()
+        self.assertIsNotNone(first)
+        self.assertGreater(first[1],2047)
+        self.assertLess(first[2],2127)
+        self.assertLess(old[2],2120)
+
+    def test_decreasing_error_keeps_eyes_in_charge(self):
+        controller=MojiaPursuit(config(),[8,23,32],[300,300,900],True)
+        old=np.full(3,2047.)
+        for i in range(45):
+            now=10+(i+1)/60
+            old,d=controller.step(packet(now,.25*(1-i/45)),old,1/60,now)
+            self.assertEqual(d['neck_velocity'],0.)
+        self.assertGreater(old[1],2047)
+
+    def test_saturated_eye_with_constant_error_can_request_help(self):
+        c=config();controller=MojiaPursuit(c,[8,23,32],[300,300,900],True)
+        old=np.array([2087.,2087.,2047.]);controller.observe_eye(2087,10.)
+        old,d=controller.step(packet(10.02,.3),old,.02,10.02)
+        self.assertGreater(d['neck_velocity'],0.)
+        self.assertEqual(d['neck_assist_reason'],'eye_limit')
+
+    def test_no_fixed_delay_or_old_coordination_config_is_accepted(self):
+        c=config();c['neck']['eye_lead_s']=.04
+        with self.assertRaisesRegex(ValueError,'without a fixed eye delay'):
+            validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',True,True)
 
     def test_neck_fixed_speed_900_does_not_get_overwritten_by_coalescing(self):
         scheduler=NeckCommandScheduler(2047,10,900,adaptive_speed=False)
@@ -151,7 +216,7 @@ class MojiaGazeTests(unittest.TestCase):
         c,p=config(),profile()
         c['control'].update(calibration_confirmed=True,speed_counts_s=300)
         c['neck'].update(speed_counts_s=75,acceleration_counts_s2=70,offset_counts=160,
-                         gain_counts_s=180,eye_lead_s=.08,deadband=.14,stop_deadband=.07,filter_tau_s=.12)
+                         gain_counts_s=180,deadband=.14,stop_deadband=.07,filter_tau_s=.12)
         with self.assertRaises(ValueError):validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,False)
         c['neck']['direction_confirmed']=True
         validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,False)
@@ -215,7 +280,8 @@ class MojiaGazeTests(unittest.TestCase):
             errors.append(error)
             old,_=controller.step(packet(now,error),old,1/60,now)
         self.assertLess(abs(errors[-1]),.08)
-        self.assertGreater(old[2],2047)
+        # A stationary target that the eyes can acquire needs no neck motion.
+        self.assertAlmostEqual(old[2],2047)
 
     def test_eyes_only_never_adds_neck_axis(self):
         c=config();controller=MojiaPursuit(c,[8,23],[60,60],False)

@@ -112,6 +112,7 @@ def main():
         controller = MojiaPursuit(config, ids, [speeds[sid] for sid in ids], args.neck)
         previous = np.array([initial_positions[sid] for sid in ids],dtype=float)
         start = last = time.monotonic();next_tick = start+1/60;poll = 0
+        controller.observe_eye(initial_positions[23],start)
         neck_scheduler=NeckCommandScheduler(initial_positions[32],start,speeds[32],
                                             adaptive_speed=config['neck'].get('adaptive_speed',True)) if args.neck else None
         while time.monotonic()-start < args.seconds:
@@ -133,11 +134,16 @@ def main():
             bus.goals(goals,speeds)
             sid = ids[poll%len(ids)];poll+=1
             feedback = bus.feedback(sid);check_feedback(sid,feedback,motors[sid])
+            if sid == 23:
+                controller.observe_eye(feedback['position'],time.monotonic())
             result['events'].append(dict(seconds=now-start,goals=goals,feedback=dict(id=sid,**feedback),**diagnostic))
             if poll%12==0:
                 publish(dict(active=True,state=diagnostic['state'],command_ids=ids,goals=goals,
                              feedback=dict(id=sid,**feedback),
                              neck_speed_command=speeds.get(32),
+                             neck_assist_reason=diagnostic['neck_assist_reason'],
+                             image_error_x=diagnostic['image_error_x'],
+                             neck_requested_velocity=diagnostic['neck_requested_velocity'],
                              remaining_seconds=max(0,args.seconds-(now-start))))
             last = now;next_tick=max(next_tick+1/60,now+1/60)
         for sid in ids:

@@ -54,6 +54,10 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         if trial and max(abs(v-2047) for v in values) > cap:
             raise ValueError('Eye trial exceeds coordinate-specific limits')
     n = config['neck']
+    if n.get('coordination_mode') != 'visual_error_assist' or 'eye_lead_s' in n:
+        raise ValueError('Mojia neck requires visual_error_assist without a fixed eye delay')
+    if type(config['camera']['width']) is not int or config['camera']['width'] <= 0:
+        raise ValueError('Need positive camera width for image growth threshold')
     if type(n.get('adaptive_speed',True)) is not bool:
         raise ValueError('Invalid neck adaptive speed flag')
     if (n['id'] != 32 or n['sign'] not in (-1, 1) or type(n['sign']) is not int
@@ -64,7 +68,7 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
             or not motors[32]['device_min'] <= 2047-n['offset_counts'] < 2047+n['offset_counts'] <= motors[32]['device_max']):
         raise ValueError('Invalid bounded Mojia neck setup')
     for key,default,low,high in [('gain_counts_s',n['speed_counts_s'],1,180),
-                                ('eye_lead_s',.15,.02,.5),('deadband',.18,.05,.5),
+                                ('deadband',.18,.05,.5),
                                 ('stop_deadband',.08,0,.3),('filter_tau_s',.12,.01,1)]:
         value=n.get(key,default)
         if not finite(value) or not low <= value <= high:
@@ -73,14 +77,92 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Neck hysteresis thresholds must be ordered')
 
 
+class VisualNeckAssist:
+    """Recruit the neck from fresh image-error growth, never an eye-position timer.
+
+    The existing neck hysteresis now applies to normalized image error. Two
+    image pixels of accumulated growth reject subpixel trend noise. Actual eye
+    feedback supplies movement evidence in production; command evidence is an
+    explicit offline simulation fallback. Saturated eyes can request help even
+    when they can no longer move. No command is treated as measured head motion.
+    """
+    def __init__(self, config):
+        self.config = config
+        self.reset()
+
+    def reset(self):
+        self.stamp = None
+        self.raw = self.filtered = self.growth = 0.
+        self.direction = 0
+        self.reason = 'eyes_only'
+
+    def step(self, packet, state, eye, eye_motion, eye_span):
+        n = self.config['neck']
+        if state != 'tracking':
+            self.reset()
+            self.reason = 'no_fresh_face'
+            return 0.
+        stamp = packet['timestamp_monotonic']
+        if self.stamp is None or stamp > self.stamp:
+            raw = float(packet['target']['x'])
+            increasing = self.stamp is not None and raw*self.raw > 0 and abs(raw) > abs(self.raw)
+            if self.stamp is None:
+                self.filtered, self.growth = raw, 0.
+            else:
+                frame_dt = stamp-self.stamp
+                same_side = raw*self.raw > 0
+                self.growth = (max(0., self.growth+abs(raw)-abs(self.raw))
+                               if same_side else 0.)
+                self.filtered += -math.expm1(-frame_dt/n['filter_tau_s'])*(raw-self.filtered)
+            self.raw, self.stamp = raw, stamp
+            sign = int(np.sign(raw))
+            # A reversal must first brake the old request. It does not wait for
+            # the eye to cross its mechanical centre, even at a neck endpoint.
+            if self.direction and (sign != self.direction or abs(raw) <= n['stop_deadband']):
+                self.direction = 0
+                self.growth = 0.
+                self.reason = 'braking'
+            saturated = eye*sign >= 1.-1./eye_span
+            growing = increasing and self.growth >= 4./self.config['camera']['width']
+            if not self.direction:
+                if abs(raw) >= n['deadband'] and growing and eye_motion*sign > 0:
+                    self.direction, self.reason = sign, 'growing_error'
+                elif abs(raw) > n['stop_deadband'] and saturated:
+                    self.direction, self.reason = sign, 'eye_limit'
+            if self.direction:
+                self.reason = 'assisting' if self.reason == 'eyes_only' else self.reason
+        if not self.direction:
+            return 0.
+        # Filtering cannot request motion in the old direction after a reversal.
+        error = self.direction*max(0., self.direction*self.filtered-n['stop_deadband'])
+        return n['sign']*n['gain_counts_s']*error
+
+
 class MojiaPursuit:
     def __init__(self, config, ids, speeds, neck=False):
         self.config, self.ids, self.speeds, self.neck = config, ids, np.asarray(speeds), neck
         self.policy = GazePolicy(config)
         self.velocity = 0.
-        self.direction = 0
-        self.pending = None
-        self.filtered_eye = 0.
+        self.assist = VisualNeckAssist(config)
+        self.eye_observation = None
+        self.eye_motion = 0.
+        self.eye_motion_at = -math.inf
+        self.measured_eye = False
+
+    def observe_eye(self, position, now, measured=True):
+        """Record ID23 feedback without adding serial reads to the control loop."""
+        if not math.isfinite(position) or not math.isfinite(now):
+            raise ValueError('Invalid eye observation')
+        if measured and not self.measured_eye:
+            self.eye_observation = None
+            self.eye_motion = 0.
+        self.measured_eye = self.measured_eye or measured
+        if self.eye_observation is None:
+            self.eye_observation = float(position)
+        delta = position-self.eye_observation
+        if abs(delta) >= 1.:
+            self.eye_motion, self.eye_motion_at = float(np.sign(delta)), now
+            self.eye_observation = float(position)
 
     def step(self, packet, previous, dt, now, returning=False):
         c, n = self.config['control'], self.config['neck']
@@ -89,6 +171,11 @@ class MojiaPursuit:
         applied = [axis_normalized(anchor, previous[self.ids.index(23)]),
                    axis_normalized(vertical,previous[self.ids.index(22)]) if vertical else 0.]
         xy, weight, state = self.policy.step(packet, now, dt, applied)
+        if not self.measured_eye:
+            self.observe_eye(previous[self.ids.index(23)], now, measured=False)
+        eye_motion = self.eye_motion if now-self.eye_motion_at <= self.config['transport']['max_age_s'] else 0.
+        if anchor['positive'] < anchor['neutral']:
+            eye_motion = -eye_motion
         result = np.full(len(previous), 2047.)
         for a in c['axes']:
             coordinate=0 if a['coordinate']=='x' else 1
@@ -98,23 +185,13 @@ class MojiaPursuit:
             eye = applied[0]
             desired = 0.
             if returning:
+                self.assist.reset()
                 delta = 2047-position
                 desired = math.copysign(min(n['speed_counts_s'], abs(delta)*2,
                                            math.sqrt(2*n['acceleration_counts_s2']*abs(delta))), delta)
-            elif state == 'tracking' and weight >= .95:
-                self.filtered_eye += -math.expm1(-dt/n.get('filter_tau_s',.12))*(eye-self.filtered_eye)
-                stop_band=n.get('stop_deadband',.08)
-                direction = int(np.sign(eye)) if abs(eye) >= n.get('deadband',.18) else self.direction if abs(eye) > stop_band else 0
-                if self.direction and eye*self.direction<0:
-                    direction=0
-                if direction != self.direction:
-                    self.direction, self.pending = direction, now if direction else None
-                if direction and self.pending is not None and now-self.pending >= n.get('eye_lead_s',.15):
-                    error=direction*max(0.,direction*self.filtered_eye-stop_band)
-                    desired = n['sign']*n.get('gain_counts_s',n['speed_counts_s'])*error
             else:
-                self.direction, self.pending = 0, None
-                self.filtered_eye=0.
+                span = abs(anchor['positive' if eye >= 0 else 'negative']-anchor['neutral'])
+                desired = self.assist.step(packet,state,eye,eye_motion,span)
             low, high = 2047-n['offset_counts'], 2047+n['offset_counts']
             distance = high-position if desired >= 0 else position-low
             cap = min(n['speed_counts_s'], math.sqrt(2*n['acceleration_counts_s2']*max(0., distance)))
@@ -127,7 +204,14 @@ class MojiaPursuit:
             if returning and abs(position-2047) < .25 and abs(self.velocity) <= n['acceleration_counts_s2']*dt:
                 goal, self.velocity = 2047., 0.
             result[col] = goal
-        return limit_step(previous, result, self.speeds, dt), dict(state=state, weight=weight, eye_error_x=float(xy[0]), neck_velocity=self.velocity)
+        return limit_step(previous, result, self.speeds, dt), dict(
+            state=state, weight=weight, eye_error_x=float(xy[0]), neck_velocity=self.velocity,
+            image_error_x=self.assist.raw, filtered_image_error_x=self.assist.filtered,
+            image_error_growth=self.assist.growth, camera_timestamp=self.assist.stamp,
+            eye_motion_direction=eye_motion, eye_motion_source='encoder' if self.measured_eye else 'command_simulation',
+            neck_assist_reason='returning' if returning else self.assist.reason,
+            neck_requested_velocity=desired if self.neck else 0.,
+            neck_at_limit=bool(self.neck and abs(result[self.ids.index(32)]-2047)>=self.config['neck']['offset_counts']))
 
 
 class NeckCommandScheduler:
