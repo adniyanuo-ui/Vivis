@@ -326,7 +326,7 @@ class MojiaPerformanceTests(unittest.TestCase):
                 [dict(id=32,config_0_39_hex=raw.hex(),state_40_70_hex=ram.hex())],10.)
 
     def test_audio_loop_keeps_jaw_and_prioritizes_eye_feedback(self):
-        import tempfile,time
+        import tempfile,time,gc
         from pathlib import Path
         from unittest.mock import patch
         from test_xiaobai import PlaybackTests
@@ -352,11 +352,18 @@ class MojiaPerformanceTests(unittest.TestCase):
                         voltage_raw=120 if sid in [31,32,33,34,35] else 60)
         bus.feedback.side_effect=feedback
         a=MojiaPlaybackGaze(c,p,ids,r)
+        gc_before=gc.isenabled();original_clock=clock.time.side_effect
+        def audio_time():
+            self.assertFalse(gc.isenabled())
+            return original_clock()
+        clock.time.side_effect=audio_time
         trajectory=np.full((18,len(ids)),2047.)
         trajectory[:,ids.index(31)]=2047-np.arange(18)
         with tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.playback.Bus',return_value=bus),patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
             result=play(p,ids,trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP',gaze_override=a)
         self.assertTrue(result['completed'])
+        self.assertEqual(gc.isenabled(),gc_before)
+        self.assertTrue(result['cyclic_gc_suspended_during_audio'])
         for event in result['events']:
             self.assertEqual(event['goals'][31],trajectory[event['frame'],ids.index(31)])
             self.assertNotIn(33,event['goals']);self.assertNotIn(34,event['goals'])

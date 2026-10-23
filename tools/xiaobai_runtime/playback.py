@@ -1,5 +1,6 @@
 """Audio DAC clock drives motion; no catch-up burst, no automatic torque enabling."""
 import json
+import gc
 import math
 import signal
 import threading
@@ -146,7 +147,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     stop=threading.Event();previous_handlers={}
     for sig in [signal.SIGINT,signal.SIGTERM]:
         previous_handlers[sig]=signal.signal(sig,lambda *_:stop.set())
-    clock=None;bus=None;events=[];result={'completed':False,'stop_policy':profile['stop_method'],
+    clock=None;bus=None;gc_suspended=False;events=[];result={'completed':False,'stop_policy':profile['stop_method'],
         'initial_approach_commands':0,'servo_ids':ids,'motion_gain':profile.get('motion_gain',1),
         'preflight_snapshots':[],'sensor_confirmations':[],
         'command_ids':sorted(command_ids),'monitor_ids':list(ids),
@@ -256,6 +257,11 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             if settled:break
             if time.monotonic()>deadline:raise RuntimeError('Servos did not settle at first frame')
             stop.wait(.05)
+        if mojia_gaze and gc.isenabled():
+            # This bounded clip retains a large telemetry graph. Collect between
+            # clips, never traverse that graph in the 60 Hz command deadline.
+            gc.collect();gc.disable();gc_suspended=True
+            result['cyclic_gc_suspended_during_audio']=True
         clock.start();last_tick=time.monotonic();previous_index=-1;skipped=0;started=time.monotonic()
         while True:
             if should_stop():raise RuntimeError('Operator stop')
@@ -270,7 +276,9 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             if index==previous_index:stop.wait(.001);continue
             now=time.monotonic();dt=(1/fps if previous_index<0 else now-last_tick)
             # A blocked USB call must not cause an unbounded jump on its return.
-            if dt>.1:raise RuntimeError('Playback watchdog: stalled for >100 ms')
+            if dt>.1:
+                result['watchdog_interval_s']=dt
+                raise RuntimeError('Playback watchdog: stalled for >100 ms')
             if feedback_age_limit is not None and not record_only:
                 stale=[sid for sid in ids if now-last_good_feedback[sid]>feedback_age_limit]
                 if stale:raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
@@ -340,6 +348,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 try:resource.close()
                 except Exception as exc:cleanup_errors.append(str(exc))
         if cleanup_errors:result['cleanup_errors']=cleanup_errors
+        if gc_suspended:gc.enable()
         for sig,handler in previous_handlers.items():signal.signal(sig,handler)
         result['events']=events;result['sent_frames']=len(events)
         Path(log_path).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')

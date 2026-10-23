@@ -18,6 +18,9 @@ def prepare(config,profile,ids,positions,authorize_tongue=False):
     monitored=list(ids)+[32,33,34]
     if len(set(monitored))!=len(monitored):raise ValueError('Repeated motor ownership')
     p=tracking_profile(config,profile,monitored)
+    # Allow UART transmission and servo broadcast parsing to finish before a
+    # feedback query. The SDK accounts for wire time in addition to this gap.
+    p['post_goal_quiet_ms']=1
     motors={m['id']:m for m in p['motors']}
     for sid in [12,13,27,28,29,31]:motors[sid]['max_speed_counts_s']=900
     if authorize_tongue:
@@ -122,6 +125,7 @@ def main():
                 sent_frames=result['sent_frames'],skipped_source_frames=result['skipped_source_frames']))
             (args.output/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
             print(f'ROUND {lap}/{args.repeat} COMPLETE',flush=True)
+            del result
         summary['completed']=True
     except BaseException as exc:
         summary['error']=str(exc)
