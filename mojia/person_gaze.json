@@ -1,0 +1,65 @@
+{
+  "schema_version": "mojia-person-gaze-1.0",
+  "camera": {
+    "device": "/dev/v4l/by-id/usb-HHWei_Technology_Co.__Ltd._USB_Camera_HHW000-video-index0",
+    "width": 640,
+    "height": 480,
+    "fps": 30,
+    "rotation_deg": 0,
+    "mirror_x": false
+  },
+  "detector": {
+    "model": "assets/models/yunet/face_detection_yunet_2023mar.onnx",
+    "score_threshold": 0.8,
+    "min_face_area_ratio": 0.002,
+    "max_width": 640,
+    "hz": 20
+  },
+  "transport": {
+    "host": "127.0.0.1",
+    "port": 14787,
+    "max_age_s": 0.3
+  },
+  "control": {
+    "camera_mount": "unconfirmed",
+    "camera_eye": "right",
+    "mount_confirmed": false,
+    "calibration_confirmed": false,
+    "direction_confirmation_source": "Pending Mojia small-range onsite verification",
+    "deadband": 0.035,
+    "filter_tau_s": 0.06,
+    "fixed_gain": 1.0,
+    "eye_velocity_gain": 0.8,
+    "max_axis_speed": 2.5,
+    "acquire_s": 0.12,
+    "lost_hold_s": 0.4,
+    "release_s": 0.8,
+    "axes": [
+      {
+        "name": "left_yaw",
+        "coordinate": "x",
+        "id": 8,
+        "negative": 2007,
+        "neutral": 2047,
+        "positive": 2087
+      },
+      {
+        "name": "right_yaw",
+        "coordinate": "x",
+        "id": 23,
+        "negative": 2007,
+        "neutral": 2047,
+        "positive": 2087
+      }
+    ]
+  },
+  "calibration_sha256": "8264e3370aae554bc116749378c2cd5fc7a865af959ab800f7331d6f60a70fbe",
+  "neck": {
+    "id": 32,
+    "sign": 1,
+    "offset_counts": 20,
+    "speed_counts_s": 25,
+    "acceleration_counts_s2": 35,
+    "direction_confirmed": false
+  }
+}

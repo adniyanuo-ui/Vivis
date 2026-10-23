@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Commission Mojia eyes8/23 and optional neck32; never command mouth axes."""
+import argparse
+import json
+import signal
+import time
+from pathlib import Path
+
+import numpy as np
+from xiaobai_runtime.mapping import ROOT, read_json, live_preflight
+from xiaobai_runtime.mojia_gaze import validate_mojia, MojiaPursuit
+from xiaobai_runtime.person_gaze import TargetReceiver
+from xiaobai_runtime.playback import check_feedback
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--config', type=Path, default=ROOT/'mojia/person_gaze.json')
+    parser.add_argument('--profile', type=Path, required=True)
+    parser.add_argument('--port', default='/dev/ttyCH343USB0')
+    parser.add_argument('--neck', action='store_true')
+    parser.add_argument('--direction-trial', action='store_true')
+    parser.add_argument('--seconds', type=float, default=20)
+    parser.add_argument('--check', action='store_true', help='Offline configuration validation; no hardware opened')
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    if not np.isfinite(args.seconds) or not 10 <= args.seconds <= 60:
+        parser.error('Commissioning duration must be 10..60 seconds')
+    config, profile = read_json(args.config), read_json(args.profile)
+    validate_mojia(config, profile, ROOT/'mojia/墨甲9.23.json', args.neck, args.direction_trial)
+    ids = [8, 23]+([32] if args.neck else [])
+    motors = {m['id']: dict(m) for m in profile['motors'] if m['id'] in ids}
+    for axis in config['control']['axes']:
+        m = motors[axis['id']]
+        m.update(safe_min=min(axis['negative'], axis['positive']),
+                 safe_max=max(axis['negative'], axis['positive']), max_speed_counts_s=60)
+    if args.neck:
+        n = config['neck']
+        motors[32].update(safe_min=2047-n['offset_counts'], safe_max=2047+n['offset_counts'],
+                          max_speed_counts_s=n['speed_counts_s'])
+    selected = {**profile, 'port': args.port, 'motors': list(motors.values())}
+    live_preflight(selected, ids)
+    if args.check:
+        print(json.dumps(dict(offline_valid=True, ids=ids, camera=config['camera'], command_limits={sid:[m['safe_min'],m['safe_max']] for sid,m in motors.items()})))
+        return
+    if args.output.exists():
+        raise ValueError('Choose a new output directory')
+    stop_file = ROOT/'outputs/mojia/STOP'
+    if stop_file.exists():
+        raise RuntimeError('Operator STOP file exists')
+    args.output.mkdir(parents=True)
+    (args.output/'config.json').write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n')
+    (args.output/'profile.json').write_text(json.dumps(selected,ensure_ascii=False,indent=2)+'\n')
+    stopped = False
+    def stop(*_):
+        nonlocal stopped
+        stopped = True
+    handlers = {sig: signal.signal(sig,stop) for sig in (signal.SIGINT,signal.SIGTERM)}
+    receiver = bus = None
+    result = dict(completed=False, command_ids=ids, events=[], snapshots=[], error=None,
+                  stop_policy='Stop sending; preserve bounded goals and neck torque')
+    try:
+        receiver = TargetReceiver(config)
+        receiver.wait_ready()
+        from xiaobai_runtime.feetech_sdk import OfficialSDKBus
+        bus = OfficialSDKBus(args.port, profile['baud'], feedback_mode='short_registers',
+                             changed_goals_only=True, transaction_timeout_ms=20,
+                             trace_path=args.output/'serial_trace.json')
+        # Check every selected axis and the two uncommanded neck axes before writes.
+        for sid in sorted(set(ids)|{32,33,34}):
+            s = bus.snapshot(sid);result['snapshots'].append(s)
+            expected = 521 if sid in (8,23) else 10760
+            if s['model_raw'] != expected or s['mode'] != 0 or s['torque_enable'] != 1:
+                raise RuntimeError(f'ID{sid}: wrong hardware/mode or disabled torque')
+            if abs(s['position_raw']-2047)>10 or s['goal_position_raw']!=2047:
+                raise RuntimeError(f'ID{sid}: start from measured neutral and neutral goal')
+            if sid in motors:
+                m = motors[sid]
+                if (s['configured_min'],s['configured_max']) != (m['device_min'],m['device_max']):
+                    raise RuntimeError(f'ID{sid}: device limits changed')
+                if not bytes.fromhex(s['config_0_39_hex'])[18]&4:
+                    raise RuntimeError(f'ID{sid}: unexpected speed unit; do not write raw counts/s')
+                if m['max_temperature_c']>s['configured_max_temperature']:
+                    raise RuntimeError(f'ID{sid}: temperature ceiling exceeds device protection')
+                check_feedback(sid,dict(position=s['position_raw'],**{k:s[k] for k in ['load_raw','temperature_c','voltage_raw','status_register']}),m)
+        speeds = {sid:int(motors[sid]['max_speed_counts_s']) for sid in ids}
+        controller = MojiaPursuit(config, ids, [speeds[sid] for sid in ids], args.neck)
+        previous = np.full(len(ids),2047.)
+        start = last = time.monotonic();next_tick = start+1/60;poll = 0
+        while time.monotonic()-start < args.seconds:
+            if stopped or stop_file.exists():
+                raise RuntimeError('Operator stop')
+            now = time.monotonic()
+            if now < next_tick:
+                time.sleep(min(.002,next_tick-now));continue
+            dt = now-last
+            if dt>.1:
+                raise RuntimeError('Tracking watchdog stalled >100ms')
+            packet = receiver.poll(now)
+            previous, diagnostic = controller.step(packet,previous,dt,now,returning=now-start>=args.seconds-5)
+            goals = {sid:int(round(previous[i])) for i,sid in enumerate(ids)}
+            bus.goals(goals,speeds)
+            sid = ids[poll%len(ids)];poll+=1
+            feedback = bus.feedback(sid);check_feedback(sid,feedback,motors[sid])
+            result['events'].append(dict(seconds=now-start,goals=goals,feedback=dict(id=sid,**feedback),**diagnostic))
+            last = now;next_tick=max(next_tick+1/60,now+1/60)
+        for sid in ids:
+            measured=bus.feedback(sid);check_feedback(sid,measured,motors[sid])
+            if abs(measured['position']-2047)>20 or abs(previous[ids.index(sid)]-2047)>1:
+                raise RuntimeError(f'ID{sid}: normal return home not confirmed')
+        result['completed']=True
+    except BaseException as exc:
+        result['error']=str(exc)
+        raise
+    finally:
+        if bus is not None:
+            bus.close()
+        if receiver is not None:
+            receiver.close()
+        for sig,handler in handlers.items():
+            signal.signal(sig,handler)
+        (args.output/'tracking_log.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+    print('Tracking completed:',result['completed'])
+
+
+if __name__=='__main__':
+    main()

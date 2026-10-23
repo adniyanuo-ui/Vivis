@@ -16,8 +16,10 @@ def finite(value):
 
 
 def validate_config(config, live=False, profile=None, ids=None, direction_trial=False):
-    if config.get('schema_version') != 'xiaobai-person-gaze-1.0':
+    if config.get('schema_version') not in ('xiaobai-person-gaze-1.0', 'mojia-person-gaze-1.0'):
         raise ValueError('Unsupported person gaze configuration')
+    if live and config['schema_version'] != 'xiaobai-person-gaze-1.0':
+        raise ValueError('Mojia requires its own tracking entrypoint')
     transport = config['transport']
     if (transport['host'] != '127.0.0.1' or type(transport['port']) is not int
             or not 1024 <= transport['port'] <= 65535):

@@ -106,6 +106,25 @@ python3 tools/xiaobai_switch_usb_driver.py status
 
 后续 ID31 动态辨识按[电机动态响应测试计划 V1.0](MOJIA_MOTOR_DYNAMIC_RESPONSE_TEST_PLAN_V1.0.md)执行。先完成 SM45BL 固件2.53的加速度语义核验，再实施单轴高频采样和参数对照。
 
+## 墨甲右眼相机跟踪（方向待现场验证）
+
+配置为 `mojia/person_gaze.json`，标定哈希绑定墨甲，使用独立UDP端口14787。当前只有一台HHWei USB Camera，video0为已验证图像接口；video1不能直接当作另一只眼。相机物理归属、是否随眼球转动仍待确认，配置保留 `mount_confirmed=false`，运动入口会拒绝启动。固定头部相机使用位置型图像误差控制，随右眼转动的相机使用图像误差积分追踪，不能直接沿用小白固定相机配置。
+
+```bash
+# 摄像头服务：只采图、检测和预览，不打开舵机串口。
+.venv/bin/python tools/xiaobai_track_person.py --config mojia/person_gaze.json
+# 先完成相机归属/安装关系确认，再以独立新输出目录验证小幅方向。
+.venv/bin/python tools/mojia_track_person.py --config mojia/person_gaze.json --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json --direction-trial --seconds 20 --output outputs/mojia/eye_direction_新编号
+# 眼球方向正确、颈部可靠支撑后，再增加小幅ID32跟随。
+.venv/bin/python tools/mojia_track_person.py --config mojia/person_gaze.json --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json --direction-trial --neck --seconds 20 --output outputs/mojia/eye_neck_direction_新编号
+```
+
+预览为 `http://127.0.0.1:8765/`。运动入口只发送ID8/23和可选ID32，要求眼球与颈部已使能并在2047附近，核对墨甲型号、设备范围、速度单位位及温度上限；不自动使能、改加速度或写EEPROM。眼轴首试±40计数、60计数/秒；颈轴首试±20、25计数/秒、软件加速度35计数/秒²。其它轴不发命令，不播放歌曲；避免和任何播放或DMS程序同时启动。视觉服务不占舵机串口，可与运动入口一起运行。
+
+随眼相机采用右眼命令状态作为积分基准；颈部在眼球偏转后缓慢分担，通过真实画面变化形成反馈，不把颈部命令当成实际运动直接扣除。这里没有标定视角或传动比，不保证双眼精确共视。丢脸时眼球缓释回中、颈部减速保持；正常结束最后5秒回中，Ctrl+C或STOP文件则停止发送并保持最后目标及颈部扭矩。试验方向尚未确认时只能显式使用 `--direction-trial`；扩大行程前必须检查实际跟随方向。
+
+2026-10-23：Orin上OpenCV4.10.0.84与固定YuNet模型通过10秒实拍检测，134帧均检出人脸，平均12.99Hz、处理P50为65.23ms、主机图像年龄P95为180.32ms；未连接舵机控制。软件129项测试中128通过、1项可选模型跳过，不能据此宣称墨甲眼头跟随已实机验收。
+
 ## 可选 A2F 与视频环境
 
 `tools/requirements-env.txt` 保存完整 Python 环境版本；CUDA 12.9、TensorRT 10.13.3.9、Blender 4.5.3 和模型另行安装，二进制不入库。SDK/驱动分别通过 `bootstrap_sources.py --component a2f`、`--component driver` 恢复；驱动需针对当前内核编译，恢复命令不安装或切换驱动。

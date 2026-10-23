@@ -51,6 +51,8 @@
 !/tools/prepare_mark_mesh.py
 !/tools/prepare_mojia.py
 !/tools/mojia_player.py
+!/tools/mojia_track_person.py
+!/tools/test_mojia_gaze.py
 !/tools/inspect_mojia_dynamics.py
 !/tools/prepare_trt_layout.py
 !/tools/prepare_variant_mesh.py
@@ -108,6 +110,7 @@
 !/mojia/
 /mojia/*
 !/mojia/墨甲9.23.json
+!/mojia/person_gaze.json
 !/xiaobai/person_gaze.json
 !/tests/
 /tests/*
