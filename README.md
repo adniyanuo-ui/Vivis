@@ -61,6 +61,35 @@ python3 tools/xiaobai_switch_usb_driver.py status
 
 音频设备名称需按本机枚举结果填写，并现场确认声音输出。USB 音频若出现 `output underflow`，可用 `--audio-latency 0.2` 请求 200 毫秒缓冲；动作继续跟随 DAC 输出时钟。端口通过已确认序列号自动定位，支持 USB 拔插后端口编号变化。`--check` 不播放音频，其通过不代表已确认扬声器可听，也不等于逐帧机械到位验证。Jetson 播放适配不代表已验证 Jetson 上的 A2F 推理；下面的 GPU 安装和构建辅助脚本仍含原 x86_64 环境路径及 GPU 配置，不能直接作为 Jetson 安装流程。
 
+## 墨甲标定转换与播放
+
+墨甲使用 `mojia/墨甲9.23.json`，不能复用小白标定及硬件限位。52 个表情中 51 个映射发生变化；标定新增使用 ID29、35、36，停止使用 ID9、24。物理新增两轴为 ID35、36；ID29 是原有轴启用吐舌。用户提供的型号分组为 ID2–30、36：STS3032，ID31–35：SM45BL；型号字符串不等于已验证寄存器布局。
+
+墨甲的 ID31 同时被七个表情引用。当前按用户要求使用墨甲全部映射，选择 `all_calibrated` 参与有界加权合成；零权重基准 2047 已由用户确认。小白默认保留 `JawOpen` 独占。眨眼等端点方向按墨甲文件计算，眼球沿用 30 度艺术映射，不代表实测眼球角度。
+
+```bash
+.venv/bin/python tools/prepare_mojia.py --baseline 2047 --jaw-policy all_calibrated
+```
+
+上述命令只生成离线提案：`mojia/0001_MOJIA_MOTOR_TARGETS_60fps.json` 和同名 `_REVIEW.json` 差异报告。输出是电机目标矩阵，`motor_ids` 定义列顺序，行 i 的时间为 i/fps 秒；它不是原始 61 通道 blendshape 格式，也不是可直接发送的串口数据。文件包含输入与标定 SHA256，默认标记 `playback_ready=false`，端点包络不等于机械安全限位，仍需核对实机型号、设备限位和运行限速后接入播放器。转换器不会打开串口或使能电机。媒体和生成矩阵留在本机。
+
+传入完整 ID2–36 扫描文件 `--scan 路径` 后，转换器验证型号分组（STS3032 读数 521、SM45BL 读数 10760），将标定包络与各轴设备限位取交集，并输出同名 `_PROFILE.json`；保留全部标定映射和原始 61 通道数据。专用播放器接受生成的电机目标矩阵，核对目标、音频与标定哈希，再做实时启动检查。默认反馈故障停止；不沿用小白现场授权的反馈只记录模式。目标范围仍为标定包络与设备限位的交集；面部实际反馈单独按设备限位检查，颈部保持范围继续单独检查。ID31 首帧准备容差按本机观察设为 32 计数（其它轴默认 20），不扩大任何目标或设备位置范围。
+
+```bash
+.venv/bin/python tools/mojia_player.py check --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json --output outputs/mojia/check_新编号
+# 仅在现场支撑墨甲颈部、所有轴处于设备允许范围后使用；有任何轴不满足时，在首次写入前退出：
+.venv/bin/python tools/mojia_player.py arm --supported-neck --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json --output outputs/mojia/arm_新编号
+.venv/bin/python tools/mojia_player.py play --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json --output outputs/mojia/play_新编号
+```
+
+必要时用 `--port` 指定经核对的当前串口。播放器不发送 ID9、24 及颈部歌曲动画；ID32–34 保持 2047，仅监测。`outputs/mojia/STOP` 或 Ctrl+C 停止发送并保留最后目标及颈部扭矩。新建输出目录，避免覆盖日志。设备限位或标定改变后需重新生成目标和配置。
+
+2026-10-22 实机结果：用户确认未使能时偏移正常、头部可靠支撑且无卡滞后，完成 ID29 两次观察试验（最终回到 2047），并完成 ID35、36 及颈部启动恢复。墨甲整段播放成功：112.893 秒、60fps、100% 幅度，反馈故障停止模式，发送 6773 帧、跳过 1 帧；27314 次串口读取中未记录损坏回复、读取失败或反馈通知。最高采样温度 48℃，不代表未采样时刻峰值。现场操作员已确认声音和面部动作正常；后续嘴部五轴 900 对照亦确认平顺、无明显拉扯。证据位于本机 `outputs/mojia/full_play_9/`。
+
+实际使用文件为 `mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json` 及同名 `_PROFILE.json`；早期提案和 `DEVICE_LIMITS`/`RUNTIME` 文件用于保留调试证据，不应替代最终配置。目标文件的 `playback_ready=false` 表示仍须每次实时预检，并非绕过启动检查的运行授权。恢复与播放日志、媒体及生成目标矩阵均留在本机。
+
+后续 ID31 动态辨识按[电机动态响应测试计划 V1.0](MOJIA_MOTOR_DYNAMIC_RESPONSE_TEST_PLAN_V1.0.md)执行。先完成 SM45BL 固件2.53的加速度语义核验，再实施单轴高频采样和参数对照。
+
 ## 可选 A2F 与视频环境
 
 `tools/requirements-env.txt` 保存完整 Python 环境版本；CUDA 12.9、TensorRT 10.13.3.9、Blender 4.5.3 和模型另行安装，二进制不入库。SDK/驱动分别通过 `bootstrap_sources.py --component a2f`、`--component driver` 恢复；驱动需针对当前内核编译，恢复命令不安装或切换驱动。

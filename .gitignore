@@ -5,6 +5,7 @@
 !/AGENTS.md
 !/README.md
 !/PLAY_0001_XIAOBAI.md
+!/MOJIA_MOTOR_DYNAMIC_RESPONSE_TEST_PLAN_V1.0.md
 !/EVA_AUDIO2FACE_PIPELINE_V1.1.md
 !/FACEMOTION_52_SCHEMA_V1.0.json
 !/标准json示例.json
@@ -48,6 +49,9 @@
 !/tools/measure_facemotion_replay.py
 !/tools/package_wz2_facemotion.py
 !/tools/prepare_mark_mesh.py
+!/tools/prepare_mojia.py
+!/tools/mojia_player.py
+!/tools/inspect_mojia_dynamics.py
 !/tools/prepare_trt_layout.py
 !/tools/prepare_variant_mesh.py
 !/tools/prepare_vocals_singing.py
@@ -58,6 +62,7 @@
 !/tools/replay_facemotion52.py
 !/tools/run_a2f_smoke.sh
 !/tools/test_facemotion52.py
+!/tools/test_mojia.py
 !/tools/test_xiaobai.py
 !/tools/validate_variant.py
 !/tools/xiaobai_branch_trial.py
@@ -94,6 +99,9 @@
 !/xiaobai/playback_profile.json
 !/xiaobai/playback_profile_raw_trace.json
 !/xiaobai/playback_profile_0001_observation.json
+!/mojia/
+/mojia/*
+!/mojia/墨甲9.23.json
 !/tests/
 /tests/*
 !/tests/fixtures/

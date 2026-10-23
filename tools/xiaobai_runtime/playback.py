@@ -46,10 +46,11 @@ class AudioClock:
 def check_feedback(sid,state,motor):
     position_error=None
     if not 0<=state['position']<=4095:raise RuntimeError(f'{sid}: invalid single-turn encoder position')
-    if not motor['safe_min']<=state['position']<=motor['safe_max']:
+    low=motor.get('feedback_min',motor['safe_min']);high=motor.get('feedback_max',motor['safe_max'])
+    if not low<=state['position']<=high:
         message=f'{sid}: measured position {state["position"]} outside safe range'
-        delta=max(motor['safe_min']-state['position'],state['position']-motor['safe_max'])
-        tolerance=motor.get('position_feedback_tolerance_counts',0)
+        delta=max(low-state['position'],state['position']-high)
+        tolerance=0 if 'feedback_min' in motor else motor.get('position_feedback_tolerance_counts',0)
         # An opt-in one-count edge sample may trigger hold-and-recheck, never
         # count as healthy feedback or enlarge the allowed command range.
         margin=motor.get('confirm_position_edge_counts',0)
@@ -238,7 +239,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             settled=True
             for sid,target in zip(ids,trajectory[0]):
                 state=feedback_checked(sid)
-                settled &= state is not None and abs(state['position']-target)<=20
+                settled &= state is not None and abs(state['position']-target)<=motors[sid].get('initial_settle_tolerance_counts',20)
             if settled:break
             if time.monotonic()>deadline:raise RuntimeError('Servos did not settle at first frame')
             stop.wait(.05)
