@@ -96,10 +96,10 @@
     "observed_acceleration_raw": 64,
     "observed_pid_raw": [
       16,
-      36,
+      26,
       0
     ],
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-23 visual-error neck assistance without fixed delay; accepted eye parameters unchanged; ID32 hardware acceleration64 deadband5/5, software acceleration64, speed900, PID16/36/0"
+  "parameter_revision_source": "2026-10-23 visual-error neck assistance without fixed delay; accepted eye parameters unchanged; ID32 hardware acceleration64 deadband5/5, software acceleration64, speed900, PID16/26/0"
 }
