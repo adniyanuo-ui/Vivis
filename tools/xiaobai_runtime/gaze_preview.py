@@ -6,13 +6,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PAGE = '''<!doctype html><html lang="zh"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>小白 · 人脸跟随验证</title><style>
+<title>机器人 · 人脸跟随验证</title><style>
 body{font:17px system-ui;background:#141b24;color:#e4edf7;max-width:980px;margin:30px auto;padding:15px}
 img{max-width:100%;border-radius:12px;background:#253142}small{color:#aac0d8}
 .eye{display:inline-block;position:relative;width:100px;height:60px;border-radius:50%;background:white;margin:14px}
 .pupil{position:absolute;width:24px;height:24px;border-radius:50%;background:#145177;left:38px;top:18px}
 pre{white-space:pre-wrap;background:#202c3b;padding:16px;border-radius:10px}</style>
-<h1>小白 · 人脸跟随验证</h1><p>绿色框：面积最大的人脸；绿色十字：注视点；蓝色十字：画面中心。</p>
+<h1>机器人 · 人脸跟随验证</h1><p>绿色框：面积最大的人脸；绿色十字：注视点；蓝色十字：画面中心。</p>
 <img id="camera" alt="等待 USB 摄像头画面"><p><small id="camera-status">正在连接画面…</small></p>
 <div><span class="eye"><i class="pupil"></i></span><span class="eye"><i class="pupil"></i></span></div>
 <small>仅左右跟随。下方眼球是方向模拟，不代表舵机实测位置。此视觉服务不驱动机器人。</small>

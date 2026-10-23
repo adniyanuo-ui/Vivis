@@ -21,9 +21,9 @@
     "max_age_s": 0.3
   },
   "control": {
-    "camera_mount": "unconfirmed",
+    "camera_mount": "eye",
     "camera_eye": "right",
-    "mount_confirmed": false,
+    "mount_confirmed": true,
     "calibration_confirmed": false,
     "direction_confirmation_source": "Pending Mojia small-range onsite verification",
     "deadband": 0.035,
@@ -51,7 +51,8 @@
         "neutral": 2047,
         "positive": 2087
       }
-    ]
+    ],
+    "mount_confirmation_source": "2026-10-23 user confirmed connected camera is inside right eye and rotates with ID23"
   },
   "calibration_sha256": "8264e3370aae554bc116749378c2cd5fc7a865af959ab800f7331d6f60a70fbe",
   "neck": {

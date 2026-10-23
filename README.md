@@ -108,7 +108,7 @@ python3 tools/xiaobai_switch_usb_driver.py status
 
 ## 墨甲右眼相机跟踪（方向待现场验证）
 
-配置为 `mojia/person_gaze.json`，标定哈希绑定墨甲，使用独立UDP端口14787。当前只有一台HHWei USB Camera，video0为已验证图像接口；video1不能直接当作另一只眼。相机物理归属、是否随眼球转动仍待确认，配置保留 `mount_confirmed=false`，运动入口会拒绝启动。固定头部相机使用位置型图像误差控制，随右眼转动的相机使用图像误差积分追踪，不能直接沿用小白固定相机配置。
+配置为 `mojia/person_gaze.json`，标定哈希绑定墨甲，使用独立UDP端口14787。当前只有一台HHWei USB Camera，video0为已验证图像接口；video1不能直接当作另一只眼。用户已确认当前接入右眼相机，随ID23眼球转动；配置为 `camera_mount=eye`、`camera_eye=right`、`mount_confirmed=true`。眼球及颈轴实际方向仍须独立现场验证。固定头部相机使用位置型图像误差控制，随右眼转动的相机使用图像误差积分追踪，不能直接沿用小白固定相机配置。
 
 ```bash
 # 摄像头服务：只采图、检测和预览，不打开舵机串口。
