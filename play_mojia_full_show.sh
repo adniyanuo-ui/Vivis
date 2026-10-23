@@ -6,7 +6,7 @@ COMMON=(--config mojia/person_gaze.json
         --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json
         --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json
         --audio exmple/0001.wav --authorized-tongue-observation
-        --usb-volume-times-three --repeat 3)
+        --usb-volume-times-three --hold-vertical-eyes --repeat 3)
 for arg in "$@"; do
     if [[ "$arg" == --check ]]; then
         exec "$PYTHON" tools/mojia_performance.py "${COMMON[@]}" --output /tmp/vivis-show-offline "$@"
@@ -33,6 +33,6 @@ if ! curl --silent --fail --max-time 2 http://127.0.0.1:8765/state >/dev/null; t
         exit 1
     fi
 fi
-printf '完整歌曲三遍＋实时颈眼跟踪；音量为原始基准的3倍幅度。\n监控：http://127.0.0.1:8765/\n日志：%s/performance\nCtrl+C 可停止，停止后保持颈部扭矩。\n' "$RUN_DIR"
+printf '完整歌曲＋横向眼球/颈部跟踪；ID7/22保持原位；音量为原始基准的3倍幅度。\n监控：http://127.0.0.1:8765/\n日志：%s/performance\nCtrl+C 可停止，停止后保持颈部扭矩。\n' "$RUN_DIR"
 printf '%s\n' "$RUN_DIR" > outputs/mojia/latest_full_show.txt
 exec "$PYTHON" -u tools/mojia_performance.py "${COMMON[@]}" --output "$RUN_DIR/performance" "$@"

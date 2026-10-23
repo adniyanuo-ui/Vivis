@@ -290,6 +290,19 @@ class MojiaGazeTests(unittest.TestCase):
 
 
 class MojiaPerformanceTests(unittest.TestCase):
+    def test_disabled_vertical_axes_are_not_owned_by_song_or_tracking(self):
+        from xiaobai_runtime.mojia_performance import tracking_profile,MojiaPlaybackGaze
+        c,p,ids,r=self.setup_performance()
+        c['control']['vertical_enabled']=False
+        c['control']['axes']=[a for a in c['control']['axes'] if a['id'] not in (7,22)]
+        c['control']['held_eye_ids']=[7,22]
+        p=tracking_profile(c,p,ids)
+        self.assertTrue({7,22}.isdisjoint(p['diagnostic_command_ids']))
+        self.assertTrue({7,22}<=set(ids))
+        a=MojiaPlaybackGaze(c,p,ids,r)
+        self.assertEqual(a.owned,[8,23,32])
+        self.assertTrue({7,22}.isdisjoint(a.command_ids))
+
     def test_slow_preview_disk_does_not_block_control_and_final_state_wins(self):
         import tempfile,time,threading
         from pathlib import Path

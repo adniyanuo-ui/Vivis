@@ -99,10 +99,15 @@ def main():
     parser.add_argument('--repeat',type=int,default=3)
     parser.add_argument('--authorized-tongue-observation',action='store_true')
     parser.add_argument('--usb-volume-times-three',action='store_true',help='Use the saved original USB volume reference, never cumulative gain')
+    parser.add_argument('--hold-vertical-eyes',action='store_true',help='Hold ID7/22: neither song nor tracking may send them position commands')
     parser.add_argument('--check',action='store_true')
     args=parser.parse_args()
     if not 1<=args.repeat<=10:parser.error('Repeat must be 1..10')
     config,original=read_json(args.config),read_json(args.profile)
+    if args.hold_vertical_eyes:
+        config['control']['vertical_enabled']=False
+        config['control']['axes']=[a for a in config['control']['axes'] if a['id'] not in (7,22)]
+        config['control']['held_eye_ids']=[7,22]
     ids,positions,fps=load_targets(args.targets,original,args.audio,ROOT/'mojia/墨甲9.23.json')
     profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation)
     if args.check:

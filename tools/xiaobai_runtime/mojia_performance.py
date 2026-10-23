@@ -50,7 +50,10 @@ def tracking_profile(config, profile, ids):
                               max_speed_counts_s=a.get('speed_counts_s',config['control']['speed_counts_s']))
     n=config['neck']
     motors[32].update(safe_min=2047-n['offset_counts'],safe_max=2047+n['offset_counts'],max_speed_counts_s=n['speed_counts_s'])
-    p['diagnostic_command_ids']=sorted(set(profile['diagnostic_command_ids'])|{32})
+    held=set(config['control'].get('held_eye_ids',[]))
+    if not held<={7,22} or held&set(owned):raise ValueError('Invalid held eye ownership')
+    p['diagnostic_command_ids']=sorted((set(profile['diagnostic_command_ids'])|{32})-held)
+    p['held_eye_ids']=sorted(held)
     p['held_neck_ids']=[33,34]
     p['gaze_owner_ids']=owned
     return p
