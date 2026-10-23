@@ -114,8 +114,12 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             len(set(command_ids))!=len(command_ids)):
         raise ValueError('Diagnostic command IDs must be a nonempty unique subset of monitored IDs')
     command_ids=set(command_ids)
+    mojia_gaze=False
     if gaze_override is not None and profile.get('schema_version') == 'mojia-playback-0.1':
-        raise ValueError('Mojia tracking requires its own reviewed calibration')
+        from .mojia_performance import MojiaPlaybackGaze
+        if not isinstance(gaze_override,MojiaPlaybackGaze):
+            raise ValueError('Mojia tracking requires its own reviewed calibration')
+        mojia_gaze=True
     if gaze_override is not None and not {a['id'] for a in gaze_override.axes} <= command_ids:
         raise ValueError('Tracked eye axes must be among commanded IDs')
     feedback_age_limit=profile.get('feedback_max_age_s')
@@ -174,6 +178,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 'safe_max':motors[sid]['safe_max'],
                 'tolerance_counts':motors[sid].get('position_feedback_tolerance_counts',0)})
         result['last_feedback']={'id':sid,**state}
+        if mojia_gaze:gaze_override.observe(sid,state,time.monotonic())
         return state
     try:
         if should_stop():raise RuntimeError('Stop file exists')
@@ -217,6 +222,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         last=np.clip(np.array(positions,dtype=float),
                      np.array([motors[sid]['safe_min'] for sid in ids]),
                      np.array([motors[sid]['safe_max'] for sid in ids]))
+        if mojia_gaze:
+            trajectory=gaze_override.prepare(trajectory,last,result['preflight_snapshots'],time.monotonic())
         last_sent=None;poll=0
         if len(command_ids)!=len(ids):
             # Diagnostic selection changes only commanded axes. Keep preflight,
@@ -269,6 +276,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 if stale:raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
             target=trajectory[index]
             if gaze_override is not None:
+                if mojia_gaze:gaze_override.set_audio_time(t,run_duration)
                 target=gaze_override.apply(target,last,max(dt,1e-6),now)
                 # Validate dynamic targets independently of the vision worker;
                 # feedback policy never widens command limits.
@@ -291,6 +299,9 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             for _ in range(polls_per_frame):
                 clocks=last_feedback_attempt if record_only else last_good_feedback
                 sid=min(ids,key=lambda axis:clocks[axis])
+                # Keep the eye movement evidence fresh with the same number of
+                # serial reads. Remaining axes retain oldest-first polling.
+                if mojia_gaze and now-clocks[23]>=.1:sid=23
                 try:
                     state=feedback_checked(sid)
                 except (CorruptResponse,ReadTimeout) as exc:
@@ -332,4 +343,5 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         for sig,handler in previous_handlers.items():signal.signal(sig,handler)
         result['events']=events;result['sent_frames']=len(events)
         Path(log_path).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+        if mojia_gaze:gaze_override.finish(result['completed'],result.get('error'))
     return result

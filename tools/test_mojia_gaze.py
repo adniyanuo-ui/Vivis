@@ -289,4 +289,81 @@ class MojiaGazeTests(unittest.TestCase):
         self.assertEqual(new.shape,(2,))
 
 
+class MojiaPerformanceTests(unittest.TestCase):
+    def setup_performance(self):
+        from xiaobai_runtime.mojia_performance import tracking_profile
+        from unittest.mock import Mock
+        c=json.loads((ROOT/'mojia/person_gaze.json').read_text());p=profile()
+        ids=[m['id'] for m in p['motors']]
+        p=tracking_profile(c,p,ids)
+        receiver=Mock();receiver.poll.side_effect=lambda now:packet(now,.3)
+        return c,p,ids,receiver
+
+    def test_tracking_changes_only_owned_columns_and_preserves_song(self):
+        from xiaobai_runtime.mojia_performance import MojiaPlaybackGaze
+        c,p,ids,receiver=self.setup_performance()
+        a=MojiaPlaybackGaze(c,p,ids,receiver)
+        base=np.full(len(ids),2047.);base[ids.index(31)]=1800.;base[ids.index(29)]=1900.
+        initial=np.full(len(ids),2047.);initial[ids.index(32)]=2100.
+        ramp=a.prepare(np.array([base]),initial,[],10.)
+        self.assertEqual(ramp[0,ids.index(32)],2100.)
+        a.set_audio_time(0,113)
+        for i in range(120):
+            result=a.apply(base,initial,1/60,10+(i+1)/60)
+            for j,sid in enumerate(ids):
+                if sid not in a.owned:self.assertEqual(result[j],base[j])
+            self.assertTrue(1967<=result[ids.index(32)]<=2127)
+            initial=result
+
+    def test_wrong_tracking_speed_or_changed_pid_rejected(self):
+        from xiaobai_runtime.mojia_performance import MojiaPlaybackGaze
+        c,p,ids,r=self.setup_performance();bad=copy.deepcopy(p)
+        next(m for m in bad['motors'] if m['id']==22)['max_speed_counts_s']=300
+        with self.assertRaisesRegex(ValueError,'preset'):MojiaPlaybackGaze(c,bad,ids,r)
+        a=MojiaPlaybackGaze(c,p,ids,r);raw=bytearray(40);raw[18]=4;ram=bytearray(31)
+        with self.assertRaisesRegex(RuntimeError,'hardware preset'):
+            a.prepare(np.full((3,len(ids)),2047.),np.full(len(ids),2047.),
+                [dict(id=32,config_0_39_hex=raw.hex(),state_40_70_hex=ram.hex())],10.)
+
+    def test_audio_loop_keeps_jaw_and_prioritizes_eye_feedback(self):
+        import tempfile,time
+        from pathlib import Path
+        from unittest.mock import patch
+        from test_xiaobai import PlaybackTests
+        from xiaobai_runtime.mojia_performance import MojiaPlaybackGaze
+        from xiaobai_runtime.playback import play
+        c,p,ids,r=self.setup_performance();fixture,bus,clock=PlaybackTests().fixture()
+        for key in ['audio_device','hardware_stop_description','physical_audio_output_confirmed','actuator_latency_ms','stop_method']:
+            p[key]=fixture[key]
+        p.pop('serial_backend',None);p['changed_goals_only']=False;clock.duration=.3
+        positions={sid:2047 for sid in ids};reads=[];motors={m['id']:m for m in p['motors']}
+        def snapshot(sid):
+            raw=bytearray(40);raw[18]=4;raw[21:24]=bytes(c['neck']['observed_pid_raw']);raw[26:28]=bytes(c['neck']['observed_deadband_counts'])
+            ram=bytearray(31);ram[1]=c['neck']['observed_acceleration_raw']
+            return dict(id=sid,model_raw=motors[sid]['model_raw_expected'],mode=0,torque_enable=1,
+                configured_min=0,configured_max=4095,position_raw=2047,temperature_c=25,load_raw=0,status_register=0,
+                voltage_raw=120 if sid in [31,32,33,34,35] else 60,
+                config_0_39_hex=raw.hex(),state_40_70_hex=ram.hex())
+        bus.snapshot.side_effect=snapshot
+        bus.goals.side_effect=lambda goals,speeds:positions.update(goals)
+        def feedback(sid):
+            reads.append((sid,time.monotonic()))
+            return dict(position=positions[sid],temperature_c=25,load_raw=0,status_register=0,
+                        voltage_raw=120 if sid in [31,32,33,34,35] else 60)
+        bus.feedback.side_effect=feedback
+        a=MojiaPlaybackGaze(c,p,ids,r)
+        trajectory=np.full((18,len(ids)),2047.)
+        trajectory[:,ids.index(31)]=2047-np.arange(18)
+        with tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.playback.Bus',return_value=bus),patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
+            result=play(p,ids,trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP',gaze_override=a)
+        self.assertTrue(result['completed'])
+        for event in result['events']:
+            self.assertEqual(event['goals'][31],trajectory[event['frame'],ids.index(31)])
+            self.assertNotIn(33,event['goals']);self.assertNotIn(34,event['goals'])
+            self.assertEqual(event['person_gaze']['eye_motion_source'],'encoder')
+        stamps=[t for sid,t in reads if sid==23]
+        self.assertGreaterEqual(len(stamps),3)
+        self.assertLess(max(np.diff(stamps)),.16)
+
+
 if __name__=='__main__':unittest.main()

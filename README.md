@@ -148,3 +148,20 @@ bash tools/build_a2f.sh
 当前眼球横向300/±60、纵向100/±20已获现场认可；后续颈部调试保留这些参数。最新协调算法和ID32参数以上文为准，现场自然度及抖动效果仍需观察。
 
 最新ID32死区对照：按现场授权写入26/27各2、46=900、41=0并读回；neck.adaptive_speed=false使速度保持900。微步合并和软件加减速200不变，眼球参数固定。锁55仍1，掉电后必须复核这些实际读数；当前试验尚待现场验收。
+
+
+## 墨甲完整歌曲与实时颈眼协同
+
+当前已保存的协同配置为`mojia/person_gaze.json`，硬件参数快照为`mojia/accepted_tracking_preset.json`；快照包含配置哈希及35轴寄存器读回，不是批量使能或写EEPROM的指令。配置调整后需重新核验并更新快照。
+
+`tools/mojia_performance.py`统一拥有串口，将完整音频/表情与实时眼头协调合并：相机接管8/23/7/22/32，嘴部、眉毛及眼睑等保留歌曲目标；33/34保持已有姿态，9/24无墨甲动作映射且未使能，不发送虚构动作。旧小白跟踪器仍被禁止用于墨甲；仅经过墨甲校验的适配器可接入共享音频播放器。ID23至多约100ms优先轮询一次，替换常规轮询槽位，其余轴按最旧反馈优先，保留1秒新鲜度检查。实际间隔仍受控制周期和串口耗时影响。
+
+先运行视觉服务，确保没有其它运动进程占用串口，然后执行：
+
+```bash
+.venv/bin/python tools/mojia_performance.py --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json --authorized-tongue-observation --repeat 3 --output outputs/mojia/完整演示_新编号
+```
+
+加`--check`只验证离线配置，不打开设备。`--authorized-tongue-observation`对应本次已有的ID29观察授权：仅该轴软件负载阈值1023、温度上限80℃、首帧容差32计数，保留硬件报警；如果该轴未使能，沿用已验证的2047目标、速度900启动流程，10秒内必须进入32计数走廊，最终仍按设备范围检查。全部演示结束或中止后单独卸载ID29，颈部保持使能。其余轴没有该例外。
+
+每遍最后5秒仅让跟踪轴平滑回中，音乐和其余表情完整播放；下一遍从实测眼头姿态接续。初始过渡不以900速度强制颈部归中。每遍生成独立`playback_log.json`，总结果在`summary.json`；预览保持`http://127.0.0.1:8765/`。

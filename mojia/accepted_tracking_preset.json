@@ -1,0 +1,925 @@
+{
+  "schema_version": "mojia-accepted-tracking-preset-1.0",
+  "date": "2026-10-23",
+  "config_path": "mojia/person_gaze.json",
+  "config_sha256": "69fb41e09cb1e4c017bcee8819c6b116b9d6488288c2ab2fb759bc5b27f6b065",
+  "basis": "User requested saving the current parameters and visual-error eye/neck coordination before full performance",
+  "hardware_registers": [
+    {
+      "id": 2,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        9
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1700,
+        2300
+      ]
+    },
+    {
+      "id": 3,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1900,
+        2100
+      ]
+    },
+    {
+      "id": 4,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        9
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1954,
+        2168
+      ]
+    },
+    {
+      "id": 5,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1850,
+        2320
+      ]
+    },
+    {
+      "id": 6,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1947,
+        2150
+      ]
+    },
+    {
+      "id": 7,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 100,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1880,
+        2250
+      ]
+    },
+    {
+      "id": 8,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1900,
+        2147
+      ]
+    },
+    {
+      "id": 9,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        7
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 0,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 0,
+      "device_limits": [
+        1900,
+        2050
+      ]
+    },
+    {
+      "id": 10,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1894,
+        2547
+      ]
+    },
+    {
+      "id": 11,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1747,
+        2184
+      ]
+    },
+    {
+      "id": 12,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 900,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1547,
+        2347
+      ]
+    },
+    {
+      "id": 13,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 900,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1700,
+        2600
+      ]
+    },
+    {
+      "id": 14,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1780,
+        2120
+      ]
+    },
+    {
+      "id": 15,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1447,
+        2500
+      ]
+    },
+    {
+      "id": 16,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        9
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1980,
+        2347
+      ]
+    },
+    {
+      "id": 17,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        7
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1794,
+        2394
+      ]
+    },
+    {
+      "id": 18,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1994,
+        2180
+      ]
+    },
+    {
+      "id": 19,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        7
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1888,
+        2140
+      ]
+    },
+    {
+      "id": 20,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1803,
+        2200
+      ]
+    },
+    {
+      "id": 21,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1943,
+        2100
+      ]
+    },
+    {
+      "id": 22,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 100,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1860,
+        2214
+      ]
+    },
+    {
+      "id": 23,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1947,
+        2200
+      ]
+    },
+    {
+      "id": 24,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 0,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 0,
+      "device_limits": [
+        1900,
+        2047
+      ]
+    },
+    {
+      "id": 25,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1547,
+        2200
+      ]
+    },
+    {
+      "id": 26,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1947,
+        2287
+      ]
+    },
+    {
+      "id": 27,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 900,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1747,
+        2547
+      ]
+    },
+    {
+      "id": 28,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 900,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1580,
+        2500
+      ]
+    },
+    {
+      "id": 29,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 900,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 0,
+      "device_limits": [
+        1447,
+        2147
+      ]
+    },
+    {
+      "id": 30,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        10
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1847,
+        2250
+      ]
+    },
+    {
+      "id": 31,
+      "model_raw": 10760,
+      "firmware": [
+        2,
+        53
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 900,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1380,
+        2050
+      ]
+    },
+    {
+      "id": 32,
+      "model_raw": 10760,
+      "firmware": [
+        2,
+        54
+      ],
+      "pid_raw": [
+        16,
+        26,
+        0
+      ],
+      "deadband_raw": [
+        5,
+        5
+      ],
+      "acceleration_raw": 64,
+      "speed_raw": 900,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1600,
+        2600
+      ]
+    },
+    {
+      "id": 33,
+      "model_raw": 10760,
+      "firmware": [
+        2,
+        54
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 10,
+      "speed_raw": 60,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1447,
+        2647
+      ]
+    },
+    {
+      "id": 34,
+      "model_raw": 10760,
+      "firmware": [
+        2,
+        54
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 10,
+      "speed_raw": 60,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1647,
+        2647
+      ]
+    },
+    {
+      "id": 35,
+      "model_raw": 10760,
+      "firmware": [
+        2,
+        54
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 10,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        2040,
+        2247
+      ]
+    },
+    {
+      "id": 36,
+      "model_raw": 521,
+      "firmware": [
+        3,
+        7
+      ],
+      "pid_raw": [
+        32,
+        32,
+        0
+      ],
+      "deadband_raw": [
+        0,
+        0
+      ],
+      "acceleration_raw": 0,
+      "speed_raw": 300,
+      "max_torque_raw": 1000,
+      "torque_limit_raw": 1000,
+      "torque_enabled_at_capture": 1,
+      "device_limits": [
+        1850,
+        2089
+      ]
+    }
+  ],
+  "notes": [
+    "Captured hardware readback; not an automatic bulk-write or torque-enable instruction",
+    "IDs9/24 have no Mojia calibration action mapping",
+    "ID29 is enabled only for the authorized performance and unloaded afterwards",
+    "EEPROM power-cycle persistence has not been verified"
+  ]
+}
