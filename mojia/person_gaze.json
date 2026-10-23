@@ -94,7 +94,7 @@
       2,
       2
     ],
-    "observed_acceleration_raw": 0
+    "observed_acceleration_raw": 128
   },
   "parameter_revision_source": "2026-10-23 user requested eyes +/-60 at 300; neck +/-80 at 900, software acceleration 200; neck gain remains 120"
 }

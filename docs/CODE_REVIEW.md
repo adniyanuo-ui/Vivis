@@ -293,3 +293,12 @@ ID29以900向2047启动，位置2220→2079→2077，进入32计数准备范围�
 本机已启动180秒五轴眼头联动，HTTP确认active、ID集合8/23/7/22/32、neck_speed_command=900。证据由 `outputs/mojia/right_camera_tracking/latest_neck_deadband_trial.txt` 指向，`register_changes.json` 保存前后原始快照及逐项写入读回，现场运动和停住抖动效果及整轮结果待确认。监控继续运行，功能分支未合入main或推送。
 
 参考：[官方SMS内存表](https://ftservo.github.io/ftservo-wiki/reference/parameter/memory-sms/)。
+
+
+## 2026-10-23 ID32硬件加速度128单变量对照
+
+用户反馈死区2/2及硬件加速度0时颈部仍明显抖动，明确要求仅将ID32硬件加速度41改为128，其余不变。确认原控制停止后，单独写ID32地址41=128并读回一致，通信/状态均0、无写入重试。写前后配置0–39字节完全相同；速度46仍900、死区26/27仍2/2，温度43℃。原始前后快照保存于运行目录 `register_change.json`。
+
+运行配置只更新observed_acceleration_raw元数据为128，逐项与上一提交比对确认其它配置完全相同。新进程通过初始快照读取128，官方SDK在后续同步写中保留该值；固定速度900、软件加减速200、颈部±80、微步合并及全部眼球参数保留。此值为寄存器原始值，不宣称它必然比0特殊模式更慢或更平顺；实际效果待现场观察。本次无运行逻辑变更，不重复软件测试，Git空白检查通过。
+
+开启新的180秒眼头联动，HTTP核验active及neck_speed_command=900，预览继续运行。日志、PID和寄存器读回由本机 `outputs/mojia/right_camera_tracking/latest_neck_acc128.txt` 指向。尚未确认本轮整体效果、完成状态或停住后的抖动结果，保留功能分支。
