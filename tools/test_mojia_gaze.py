@@ -9,6 +9,7 @@ from xiaobai_runtime.mojia_gaze import validate_mojia, MojiaPursuit
 from xiaobai_runtime.person_gaze import VERSION, validate_config
 from prepare_mojia import proposal, hardware_profile
 from xiaobai_runtime.mapping import inputs
+from mojia_track_person import tracking_start_position
 
 
 def config():
@@ -36,6 +37,14 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_eye_only_resume_does_not_require_or_recenter_held_neck(self):
+        held=dict(id=32,position_raw=2095,goal_position_raw=2095,configured_min=1600,configured_max=2600)
+        self.assertIsNone(tracking_start_position(held))
+        eye=dict(id=23,position_raw=2106,goal_position_raw=2106)
+        self.assertEqual(tracking_start_position(eye,dict(safe_min=1987,safe_max=2107)),2106.)
+        with self.assertRaises(RuntimeError):tracking_start_position({**eye,'goal_position_raw':2200},dict(safe_min=1987,safe_max=2107))
+        with self.assertRaises(RuntimeError):tracking_start_position(held,dict(safe_min=1967,safe_max=2127))
+
     def test_requested_900_stage_bounds_loss_and_return(self):
         c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
         validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',True,True)

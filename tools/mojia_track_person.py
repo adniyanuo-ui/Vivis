@@ -13,6 +13,23 @@ from xiaobai_runtime.person_gaze import TargetReceiver
 from xiaobai_runtime.playback import check_feedback
 
 
+def tracking_start_position(state, motor=None):
+    """Resume eyes from measured position; never recenter uncommanded neck axes."""
+    sid=state['id']
+    position,goal=state['position_raw'],state['goal_position_raw']
+    if motor is None:
+        if not state['configured_min']<=position<=state['configured_max'] or not state['configured_min']<=goal<=state['configured_max']:
+            raise RuntimeError(f'ID{sid}: held neck outside device limits')
+        return None
+    if sid in (8,23):
+        if not motor['safe_min']<=position<=motor['safe_max'] or not motor['safe_min']<=goal<=motor['safe_max']:
+            raise RuntimeError(f'ID{sid}: resume position/goal exceeds eye command limits')
+        return float(position)
+    if abs(position-2047)>10 or goal!=2047:
+        raise RuntimeError(f'ID{sid}: commanded neck must start from neutral')
+    return float(position)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=ROOT/'mojia/person_gaze.json')
@@ -74,14 +91,14 @@ def main():
         bus = OfficialSDKBus(args.port, profile['baud'], feedback_mode='short_registers',
                              changed_goals_only=True, transaction_timeout_ms=20,
                              trace_path=args.output/'serial_trace.json')
-        # Check every selected axis and the two uncommanded neck axes before writes.
+        initial_positions={}
+        # Read held neck state, but never move it to satisfy eye-only preflight.
         for sid in sorted(set(ids)|{32,33,34}):
             s = bus.snapshot(sid);result['snapshots'].append(s)
             expected = 521 if sid in (8,23) else 10760
             if s['model_raw'] != expected or s['mode'] != 0 or s['torque_enable'] != 1:
                 raise RuntimeError(f'ID{sid}: wrong hardware/mode or disabled torque')
-            if abs(s['position_raw']-2047)>10 or s['goal_position_raw']!=2047:
-                raise RuntimeError(f'ID{sid}: start from measured neutral and neutral goal')
+            initial_positions[sid]=tracking_start_position(s,motors.get(sid))
             if sid in motors:
                 m = motors[sid]
                 if (s['configured_min'],s['configured_max']) != (m['device_min'],m['device_max']):
@@ -93,7 +110,7 @@ def main():
                 check_feedback(sid,dict(position=s['position_raw'],**{k:s[k] for k in ['load_raw','temperature_c','voltage_raw','status_register']}),m)
         speeds = {sid:int(motors[sid]['max_speed_counts_s']) for sid in ids}
         controller = MojiaPursuit(config, ids, [speeds[sid] for sid in ids], args.neck)
-        previous = np.full(len(ids),2047.)
+        previous = np.array([initial_positions[sid] for sid in ids],dtype=float)
         start = last = time.monotonic();next_tick = start+1/60;poll = 0
         while time.monotonic()-start < args.seconds:
             if stopped or stop_file.exists():
