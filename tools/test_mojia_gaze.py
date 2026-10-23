@@ -38,6 +38,14 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_neck_fixed_speed_900_does_not_get_overwritten_by_coalescing(self):
+        scheduler=NeckCommandScheduler(2047,10,900,adaptive_speed=False)
+        for i in range(120):
+            now=10+(i+1)/60
+            goal,speed=scheduler.step(2047+20*(now-10),now)
+            self.assertEqual(speed,900)
+        self.assertLessEqual(abs(goal-2087),1)
+
     def test_neck_scheduler_suppresses_one_count_hunting_without_losing_home(self):
         scheduler=NeckCommandScheduler(2095,10,900)
         for i in range(120):

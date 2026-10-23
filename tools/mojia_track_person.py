@@ -112,7 +112,8 @@ def main():
         controller = MojiaPursuit(config, ids, [speeds[sid] for sid in ids], args.neck)
         previous = np.array([initial_positions[sid] for sid in ids],dtype=float)
         start = last = time.monotonic();next_tick = start+1/60;poll = 0
-        neck_scheduler=NeckCommandScheduler(initial_positions[32],start,speeds[32]) if args.neck else None
+        neck_scheduler=NeckCommandScheduler(initial_positions[32],start,speeds[32],
+                                            adaptive_speed=config['neck'].get('adaptive_speed',True)) if args.neck else None
         while time.monotonic()-start < args.seconds:
             if stopped or stop_file.exists():
                 raise RuntimeError('Operator stop')
@@ -136,6 +137,7 @@ def main():
             if poll%12==0:
                 publish(dict(active=True,state=diagnostic['state'],command_ids=ids,goals=goals,
                              feedback=dict(id=sid,**feedback),
+                             neck_speed_command=speeds.get(32),
                              remaining_seconds=max(0,args.seconds-(now-start))))
             last = now;next_tick=max(next_tick+1/60,now+1/60)
         for sid in ids:

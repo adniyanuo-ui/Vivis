@@ -54,6 +54,8 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         if trial and max(abs(v-2047) for v in values) > cap:
             raise ValueError('Eye trial exceeds coordinate-specific limits')
     n = config['neck']
+    if type(n.get('adaptive_speed',True)) is not bool:
+        raise ValueError('Invalid neck adaptive speed flag')
     if (n['id'] != 32 or n['sign'] not in (-1, 1) or type(n['sign']) is not int
             or not finite(n['offset_counts']) or not 1 <= n['offset_counts'] <= (80 if trial else 160)
             or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 900
@@ -134,11 +136,12 @@ class NeckCommandScheduler:
     This only shapes ID32 transport; the continuous eye/head planner and eye
     limits are unchanged. Speed remains bounded by the configured ceiling.
     """
-    def __init__(self, position, now, maximum_speed):
+    def __init__(self, position, now, maximum_speed, adaptive_speed=True):
         self.goal=int(round(position))
         self.sent_at=now
         self.maximum_speed=int(maximum_speed)
-        self.speed=min(50,self.maximum_speed)
+        self.adaptive_speed=adaptive_speed
+        self.speed=min(50,self.maximum_speed) if adaptive_speed else self.maximum_speed
 
     def step(self, planned, now, returning=False):
         goal=int(round(planned))
@@ -150,6 +153,6 @@ class NeckCommandScheduler:
         if delta and dt>=.04 and (delta>=2 or final_home):
             # SMS fine speed units retain approximately 50-count/s precision.
             speed=math.ceil((delta/dt)/50)*50
-            self.speed=min(self.maximum_speed,max(1,speed))
+            self.speed=min(self.maximum_speed,max(1,speed)) if self.adaptive_speed else self.maximum_speed
             self.goal,self.sent_at=goal,now
         return self.goal,self.speed
