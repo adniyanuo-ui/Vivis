@@ -68,11 +68,16 @@
 !/tools/xiaobai_branch_trial.py
 !/tools/xiaobai_env.sh
 !/tools/xiaobai_neck_home.py
+!/tools/xiaobai_neck_sweep.py
 !/tools/xiaobai_observation_player.py
 !/tools/xiaobai_player.py
 !/tools/xiaobai_rearm_ttl.py
 !/tools/xiaobai_sdk_read_check.cpp
 !/tools/xiaobai_switch_usb_driver.py
+!/tools/xiaobai_track_person.py
+!/tools/test_person_gaze.py
+!/tools/download_yunet.py
+!/tools/requirements-vision.txt
 !/tools/requirements-env.txt
 !/tools/requirements-xiaobai.txt
 !/tools/external-sources.json
@@ -92,6 +97,7 @@
 !/tools/model-manifests/claire-v2.3.1.json
 !/tools/model-manifests/whisper-base.json
 !/tools/model-manifests/whisper-large-v3-turbo.json
+!/tools/model-manifests/yunet.json
 !/xiaobai/
 /xiaobai/*
 !/xiaobai/xiaobai标定文件.json
@@ -102,6 +108,7 @@
 !/mojia/
 /mojia/*
 !/mojia/墨甲9.23.json
+!/xiaobai/person_gaze.json
 !/tests/
 /tests/*
 !/tests/fixtures/
@@ -111,7 +118,10 @@
 !/docs/
 /docs/*
 !/docs/CODE_REVIEW.md
+!/docs/PERSON_GAZE_V1.0.md
 !/play_0001_xiaobai.sh
+!/play_0001_xiaobai_tracking.sh
+!/track_person_xiaobai.sh
 
 # Always exclude credentials, local overrides and Python caches.
 **/__pycache__/

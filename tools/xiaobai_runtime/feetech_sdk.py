@@ -15,7 +15,11 @@ from scservo_sdk import PortHandler, sms_sts, GroupSyncWrite, COMM_SUCCESS, COMM
 
 
 class OfficialSDKBus(Bus):
-    def __init__(self, port, baud=1000000, feedback_mode='block',write_mode='position_speed',changed_goals_only=False,trace_path=None,post_goal_quiet_ms=0,sync_group_size=30,sync_group_gap_ms=0,transaction_timeout_ms=None):
+    def __init__(self, port, baud=1000000, feedback_mode='block',write_mode='position_speed',changed_goals_only=False,trace_path=None,post_goal_quiet_ms=0,sync_group_size=30,sync_group_gap_ms=0,transaction_timeout_ms=None,servo_status_policy='raise'):
+        if servo_status_policy not in ('raise','record_only'):
+            raise ValueError('Unknown servo status policy')
+        self.servo_status_policy=servo_status_policy
+        self.servo_status_notifications=[]
         if transaction_timeout_ms is not None:
             if type(transaction_timeout_ms) not in (int,float) or not 2<=transaction_timeout_ms<=50:
                 raise ValueError('Transaction timeout must be 2..50 ms')
@@ -75,10 +79,16 @@ class OfficialSDKBus(Bus):
             raise CorruptResponse(f'Official SDK ID {sid}: corrupt response')
         if result != COMM_SUCCESS:
             raise ProtocolError(f'Official SDK ID {sid}: {self.sdk.getTxRxResult(result)}')
-        if error:
-            raise ServoStatusError(sid,error)
         if len(data) != count:
             raise CorruptResponse(f'Official SDK ID {sid}: unexpected payload length')
+        if error:
+            if getattr(self,'servo_status_policy','raise')!='record_only':
+                raise ServoStatusError(sid,error)
+            # The SDK has verified checksum/ID/length and COMM_SUCCESS above.
+            # An explicit observation policy records alarm bits without throwing
+            # away that valid payload. Damaged or missing packets still fail.
+            self.servo_status_notifications.append({**self.last_sdk_response,
+                                                    'monotonic':time.monotonic()})
         return bytes(data)
 
     def snapshot(self, sid):

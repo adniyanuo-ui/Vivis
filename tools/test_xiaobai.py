@@ -321,7 +321,59 @@ class FinalCalibrationTests(unittest.TestCase):
         profile=copy.deepcopy(profile);profile['power_checked']=False
         with self.assertRaisesRegex(ValueError,'power_checked'):live_preflight(profile,ids)
 
+class AudioClockTests(unittest.TestCase):
+    def test_buffered_output_keeps_dac_clock_and_reports_underflow(self):
+        import sys
+        import wave
+        from types import SimpleNamespace
+        from unittest.mock import Mock,patch
+        from xiaobai_runtime.playback import AudioClock
+        sd=Mock();sd.query_devices.return_value={'default_samplerate':48000}
+        sd.CallbackStop=type('CallbackStop',(Exception,),{})
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'audio.wav'
+            with wave.open(str(path),'wb') as wav:
+                wav.setparams((1,2,48000,0,'NONE','not compressed'))
+                wav.writeframes(np.zeros(48000,dtype='<i2').tobytes())
+            with patch.dict(sys.modules,{'sounddevice':sd}):
+                clock=AudioClock(path,'pulse',latency=.2)
+                self.assertEqual(sd.OutputStream.call_args.kwargs['latency'],.2)
+                clock.callback(np.empty((480,1),np.float32),480,
+                               SimpleNamespace(outputBufferDacTime=10.2),False)
+                clock.stream.time=10.1
+                self.assertAlmostEqual(clock.time(),-.1)
+                clock.stream.time=10.5
+                self.assertAlmostEqual(clock.time(),.3)
+                clock.callback(np.empty((480,1),np.float32),480,
+                               SimpleNamespace(outputBufferDacTime=10.21),'output underflow')
+                self.assertEqual(clock.fault,'output underflow')
+                self.assertAlmostEqual(clock.first_dac,10.2)
+                clock.close()
+
 class PlaybackTests(unittest.TestCase):
+    def test_mojia_rejects_xiaobai_gaze_before_opening_devices(self):
+        from unittest.mock import Mock,patch
+        from xiaobai_runtime.playback import play
+        profile,_,_=self.fixture();profile['schema_version']='mojia-playback-0.1'
+        with patch('xiaobai_runtime.playback.AudioClock') as audio,patch('xiaobai_runtime.playback.Bus') as bus:
+            with self.assertRaisesRegex(ValueError,'Mojia'):
+                play(profile,[2],np.full((3,1),2047.),60,'unused','unused','unused',gaze_override=Mock())
+            audio.assert_not_called();bus.assert_not_called()
+
+    def test_merged_audio_latency_fields_and_cli_precedence(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.playback import play
+        cases=[({},'low'),({'audio_latency_s':.2},.2),
+               ({'audio_latency_seconds':.3},.3),
+               ({'audio_latency_s':.2,'audio_latency_seconds':.3},.2)]
+        for settings,expected in cases:
+            profile,bus,clock=self.fixture();profile.update(settings)
+            with self.subTest(settings=settings),tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.playback.Bus',return_value=bus),patch('xiaobai_runtime.playback.AudioClock',return_value=clock) as audio:
+                result=play(profile,[2],np.full((3,1),2047.),60,'fake.wav',Path(directory)/'log.json',Path(directory)/'STOP')
+                self.assertTrue(result['completed'])
+                self.assertEqual(audio.call_args.kwargs['latency'],expected)
+                self.assertEqual(result['audio_requested_latency'],expected)
+
     def test_invalid_trajectory_is_rejected_before_opening_devices_in_both_policies(self):
         from unittest.mock import patch
         from xiaobai_runtime.playback import play
@@ -587,7 +639,9 @@ class BranchIsolationTests(unittest.TestCase):
                 bus.goals.side_effect=prime
                 bus.sdk.write1ByteTxRx.side_effect=enable
                 bus.feedback.return_value=dict(position=2047,temperature_c=40,load_raw=0,status_register=0,voltage_raw=70)
-                with patch('sys.argv',['rearm','--apply','--output',str(Path(temp)/'run')]),patch('xiaobai_branch_trial.probe_branch'),patch('xiaobai_runtime.feetech_sdk.OfficialSDKBus',return_value=bus),patch('xiaobai_rearm_ttl.signal.signal'):
+                # Keep a real operator STOP in the workspace independent of this mock-device test.
+                with patch('xiaobai_rearm_ttl.ROOT',Path(temp)),patch('xiaobai_rearm_ttl.read_json',return_value=profile), \
+                        patch('sys.argv',['rearm','--apply','--output',str(Path(temp)/'run')]),patch('xiaobai_branch_trial.probe_branch'),patch('xiaobai_runtime.feetech_sdk.OfficialSDKBus',return_value=bus),patch('xiaobai_rearm_ttl.signal.signal'):
                     if verified:xiaobai_rearm_ttl.main()
                     else:
                         with self.assertRaisesRegex(RuntimeError,'priming verification failed'):xiaobai_rearm_ttl.main()

@@ -1,0 +1,4 @@
+# CPU-only vision; match playback NumPy on Ubuntu and Jetson.
+numpy==1.23.5; python_version < '3.12'
+numpy==1.26.4; python_version >= '3.12' and python_version < '3.13'
+opencv-python-headless==4.10.0.84

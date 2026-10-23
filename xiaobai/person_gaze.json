@@ -1,0 +1,69 @@
+{
+  "schema_version": "xiaobai-person-gaze-1.0",
+  "camera": {
+    "device": "/dev/v4l/by-id/usb-RXSX_Technology_Co.__Ltd._USB_Camera_4K_RXSX001-video-index0",
+    "width": 640,
+    "height": 480,
+    "fps": 30,
+    "rotation_deg": 0,
+    "mirror_x": false,
+    "autofocus": true,
+    "backlight": 6,
+    "brightness": 12,
+    "gain": 16
+  },
+  "detector": {
+    "model": "assets/models/yunet/face_detection_yunet_2023mar.onnx",
+    "score_threshold": 0.8,
+    "min_face_area_ratio": 0.002,
+    "max_width": 640,
+    "hz": 20
+  },
+  "transport": {
+    "host": "127.0.0.1",
+    "port": 14786,
+    "max_age_s": 0.3
+  },
+  "neck_observations": {
+    "source": "2026-10-19 现场确认：ID34是脖子侧弯；ID32独立±80测试已看到头部左右转动，但幅度小，要求改为±160",
+    "horizontal_id": 32,
+    "horizontal_motion_confirmed": true,
+    "horizontal_direction_confirmed": false,
+    "latest_full_song_feedback": "2026-10-19 现场认可眼头舒适区接力及三倍转头速度；换USB口恢复视觉后完整播放三遍通过。眼球8/23、颈轴32，±160计数，75计数/秒，软件加速度70计数/秒²；精确注视角度及机械双侧一致性仍未标定",
+    "lateral_tilt_id": 34,
+    "lateral_tilt_excluded_from_horizontal_tracking": true
+  },
+  "control": {
+    "camera_mount": "fixed",
+    "camera_eye": null,
+    "mount_confirmed": true,
+    "calibration_confirmed": true,
+    "direction_confirmation_source": "2026-10-19 现场反馈：双眼跟随方向正确；注视角度和增益仍需观察调优",
+    "deadband": 0.035,
+    "filter_tau_s": 0.06,
+    "fixed_gain": 1.0,
+    "eye_velocity_gain": 0.8,
+    "max_axis_speed": 2.5,
+    "acquire_s": 0.12,
+    "lost_hold_s": 0.4,
+    "release_s": 0.8,
+    "axes": [
+      {
+        "name": "left_yaw",
+        "coordinate": "x",
+        "id": 8,
+        "negative": 1818,
+        "neutral": 2047,
+        "positive": 2332
+      },
+      {
+        "name": "right_yaw",
+        "coordinate": "x",
+        "id": 23,
+        "negative": 1804,
+        "neutral": 2047,
+        "positive": 2358
+      }
+    ]
+  }
+}
