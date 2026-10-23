@@ -55,17 +55,19 @@
         "name": "left_pitch",
         "coordinate": "y",
         "id": 7,
-        "negative": 2077,
+        "negative": 2067,
         "neutral": 2047,
-        "positive": 2017
+        "positive": 2027,
+        "speed_counts_s": 100
       },
       {
         "name": "right_pitch",
         "coordinate": "y",
         "id": 22,
-        "negative": 2017,
+        "negative": 2027,
         "neutral": 2047,
-        "positive": 2077
+        "positive": 2067,
+        "speed_counts_s": 100
       }
     ],
     "mount_confirmation_source": "2026-10-23 user confirmed connected camera is inside right eye and rotates with ID23",

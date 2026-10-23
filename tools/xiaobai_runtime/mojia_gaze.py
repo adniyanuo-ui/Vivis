@@ -40,6 +40,9 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Mojia eye axes must match IDs8/23 and optional7/22')
     motors = {m['id']: m for m in profile['motors']}
     for a in axes:
+        axis_speed=a.get('speed_counts_s',eye_speed)
+        if not finite(axis_speed) or not 0 < axis_speed <= 300:
+            raise ValueError('Invalid per-axis eye speed')
         values = [a[k] for k in ('negative', 'neutral', 'positive')]
         m = motors[a['id']]
         if (any(not finite(v) for v in values) or values[1] != 2047

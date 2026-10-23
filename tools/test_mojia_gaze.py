@@ -38,6 +38,21 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_independent_vertical_speed_and_bad_axis_limit(self):
+        c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
+        validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',False,True)
+        for value in [True,0,-1,301,float('nan')]:
+            invalid=copy.deepcopy(c);invalid['control']['axes'][-1]['speed_counts_s']=value
+            with self.assertRaises(ValueError):validate_mojia(invalid,profile(),ROOT/'mojia/墨甲9.23.json',False,True)
+        controller=MojiaPursuit(c,[8,23,7,22],[300,300,100,100])
+        previous=np.full(4,2047.)
+        for i in range(600):
+            now=10+(i+1)/60;p=packet(now,1.);p['target']['y']=1. if i<300 else -1.
+            new,_=controller.step(p,previous,1/60,now)
+            self.assertTrue(np.all(abs(new[2:]-2047)<=20))
+            self.assertTrue(np.all(abs(new-previous)<=np.array([300,300,100,100])/60+1e-8))
+            previous=new
+
     def test_vertical_pair_opposite_encoders_and_horizontal_independence(self):
         c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
         validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',False,True)

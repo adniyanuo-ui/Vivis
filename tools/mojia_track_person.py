@@ -51,7 +51,7 @@ def main():
         m = motors[axis['id']]
         m.update(safe_min=min(axis['negative'], axis['positive']),
                  safe_max=max(axis['negative'], axis['positive']),
-                 max_speed_counts_s=config['control'].get('speed_counts_s',60))
+                 max_speed_counts_s=axis.get('speed_counts_s',config['control'].get('speed_counts_s',60)))
     if args.neck:
         n = config['neck']
         motors[32].update(safe_min=2047-n['offset_counts'], safe_max=2047+n['offset_counts'],
