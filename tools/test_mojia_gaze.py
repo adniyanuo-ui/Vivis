@@ -34,6 +34,21 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_xiaobai_speed_stage_requires_neck_confirmation(self):
+        c,p=config(),profile()
+        c['control'].update(calibration_confirmed=True,speed_counts_s=300)
+        c['neck'].update(speed_counts_s=75,acceleration_counts_s2=70,offset_counts=160,
+                         gain_counts_s=180,eye_lead_s=.08,deadband=.14,stop_deadband=.07,filter_tau_s=.12)
+        with self.assertRaises(ValueError):validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,False)
+        c['neck']['direction_confirmed']=True
+        validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,False)
+        with self.assertRaises(ValueError):validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,True)
+        controller=MojiaPursuit(c,[8,23,32],[300,300,75],True)
+        old=np.array([2047.,2047.,2207.])
+        for i in range(300):
+            old,_=controller.step(None,old,1/60,10+(i+1)/60,returning=True)
+        np.testing.assert_allclose(old,[2047]*3,atol=.25)
+
     def test_calibration_and_commissioning_confirmations(self):
         c,p=config(),profile()
         validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',neck=True,trial=True)

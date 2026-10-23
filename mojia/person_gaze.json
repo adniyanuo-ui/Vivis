@@ -29,7 +29,7 @@
     "deadband": 0.035,
     "filter_tau_s": 0.06,
     "fixed_gain": 1.0,
-    "eye_velocity_gain": 2.4,
+    "eye_velocity_gain": 3.2,
     "max_axis_speed": 2.5,
     "acquire_s": 0.12,
     "lost_hold_s": 0.4,
@@ -52,15 +52,21 @@
         "positive": 2087
       }
     ],
-    "mount_confirmation_source": "2026-10-23 user confirmed connected camera is inside right eye and rotates with ID23"
+    "mount_confirmation_source": "2026-10-23 user confirmed connected camera is inside right eye and rotates with ID23",
+    "speed_counts_s": 120
   },
   "calibration_sha256": "8264e3370aae554bc116749378c2cd5fc7a865af959ab800f7331d6f60a70fbe",
   "neck": {
     "id": 32,
     "sign": 1,
     "offset_counts": 20,
-    "speed_counts_s": 25,
-    "acceleration_counts_s2": 35,
-    "direction_confirmed": false
+    "speed_counts_s": 50,
+    "acceleration_counts_s2": 70,
+    "direction_confirmed": false,
+    "gain_counts_s": 120,
+    "eye_lead_s": 0.08,
+    "deadband": 0.14,
+    "stop_deadband": 0.07,
+    "filter_tau_s": 0.12
   }
 }

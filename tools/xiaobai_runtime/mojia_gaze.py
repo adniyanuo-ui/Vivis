@@ -19,6 +19,9 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
     if config.get('calibration_sha256') != digest or profile.get('calibration_sha256') != digest:
         raise ValueError('Mojia calibration changed')
     c = config['control']
+    eye_speed=c.get('speed_counts_s',60)
+    if not finite(eye_speed) or not 0 < eye_speed <= 300:
+        raise ValueError('Invalid eye speed for commissioning stage')
     if not c.get('mount_confirmed') or c['camera_mount'] not in ('fixed', 'eye'):
         raise ValueError('Confirm camera mounting before motion')
     if c['camera_mount'] == 'eye' and c.get('camera_eye') != 'right':
@@ -44,11 +47,19 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
     n = config['neck']
     if (n['id'] != 32 or n['sign'] not in (-1, 1) or type(n['sign']) is not int
             or not finite(n['offset_counts']) or not 1 <= n['offset_counts'] <= (20 if trial else 160)
-            or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 25
-            or not finite(n['acceleration_counts_s2']) or not 0 < n['acceleration_counts_s2'] <= 35
+            or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 75
+            or not finite(n['acceleration_counts_s2']) or not 0 < n['acceleration_counts_s2'] <= 70
             or motors[32]['model_raw_expected'] != 10760
             or not motors[32]['device_min'] <= 2047-n['offset_counts'] < 2047+n['offset_counts'] <= motors[32]['device_max']):
         raise ValueError('Invalid bounded Mojia neck setup')
+    for key,default,low,high in [('gain_counts_s',n['speed_counts_s'],1,180),
+                                ('eye_lead_s',.15,.05,.5),('deadband',.18,.05,.5),
+                                ('stop_deadband',.08,0,.3),('filter_tau_s',.12,.01,1)]:
+        value=n.get(key,default)
+        if not finite(value) or not low <= value <= high:
+            raise ValueError('Invalid neck coordination parameter: '+key)
+    if n.get('stop_deadband',.08)>=n.get('deadband',.18):
+        raise ValueError('Neck hysteresis thresholds must be ordered')
 
 
 class MojiaPursuit:
@@ -58,6 +69,7 @@ class MojiaPursuit:
         self.velocity = 0.
         self.direction = 0
         self.pending = None
+        self.filtered_eye = 0.
 
     def step(self, packet, previous, dt, now, returning=False):
         c, n = self.config['control'], self.config['neck']
@@ -76,13 +88,19 @@ class MojiaPursuit:
                 desired = math.copysign(min(n['speed_counts_s'], abs(delta)*2,
                                            math.sqrt(2*n['acceleration_counts_s2']*abs(delta))), delta)
             elif state == 'tracking' and weight >= .95:
-                direction = int(np.sign(eye)) if abs(eye) >= .18 else self.direction if abs(eye) > .08 else 0
+                self.filtered_eye += -math.expm1(-dt/n.get('filter_tau_s',.12))*(eye-self.filtered_eye)
+                stop_band=n.get('stop_deadband',.08)
+                direction = int(np.sign(eye)) if abs(eye) >= n.get('deadband',.18) else self.direction if abs(eye) > stop_band else 0
+                if self.direction and eye*self.direction<0:
+                    direction=0
                 if direction != self.direction:
                     self.direction, self.pending = direction, now if direction else None
-                if direction and self.pending is not None and now-self.pending >= .15:
-                    desired = n['sign']*n['speed_counts_s']*max(-1., min(1., eye))
+                if direction and self.pending is not None and now-self.pending >= n.get('eye_lead_s',.15):
+                    error=direction*max(0.,direction*self.filtered_eye-stop_band)
+                    desired = n['sign']*n.get('gain_counts_s',n['speed_counts_s'])*error
             else:
                 self.direction, self.pending = 0, None
+                self.filtered_eye=0.
             low, high = 2047-n['offset_counts'], 2047+n['offset_counts']
             distance = high-position if desired >= 0 else position-low
             cap = min(n['speed_counts_s'], math.sqrt(2*n['acceleration_counts_s2']*max(0., distance)))

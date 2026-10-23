@@ -33,7 +33,8 @@ def main():
     for axis in config['control']['axes']:
         m = motors[axis['id']]
         m.update(safe_min=min(axis['negative'], axis['positive']),
-                 safe_max=max(axis['negative'], axis['positive']), max_speed_counts_s=60)
+                 safe_max=max(axis['negative'], axis['positive']),
+                 max_speed_counts_s=config['control'].get('speed_counts_s',60))
     if args.neck:
         n = config['neck']
         motors[32].update(safe_min=2047-n['offset_counts'], safe_max=2047+n['offset_counts'],
@@ -111,7 +112,9 @@ def main():
             feedback = bus.feedback(sid);check_feedback(sid,feedback,motors[sid])
             result['events'].append(dict(seconds=now-start,goals=goals,feedback=dict(id=sid,**feedback),**diagnostic))
             if poll%12==0:
-                publish(dict(active=True,state=diagnostic['state'],command_ids=ids,goals=goals,remaining_seconds=max(0,args.seconds-(now-start))))
+                publish(dict(active=True,state=diagnostic['state'],command_ids=ids,goals=goals,
+                             feedback=dict(id=sid,**feedback),
+                             remaining_seconds=max(0,args.seconds-(now-start))))
             last = now;next_tick=max(next_tick+1/60,now+1/60)
         for sid in ids:
             measured=bus.feedback(sid);check_feedback(sid,measured,motors[sid])
