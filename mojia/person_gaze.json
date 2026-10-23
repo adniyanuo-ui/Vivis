@@ -94,7 +94,7 @@
       2,
       2
     ],
-    "observed_acceleration_raw": 64,
+    "observed_acceleration_raw": 128,
     "observed_pid_raw": [
       16,
       32,
