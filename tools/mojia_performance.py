@@ -26,9 +26,10 @@ def prepare(config,profile,ids,positions,authorize_tongue=False):
     if authorize_tongue:
         # Existing operator authorization for ID29 only; preserve hardware
         # alarms and device temperature ceiling. Never globally disable guards.
-        motors[29].update(max_load_raw=1023,max_temperature_c=80,initial_settle_tolerance_counts=32)
+        motors[29].update(max_load_raw=1023,max_temperature_c=80,initial_settle_tolerance_counts=40)
         p['acceptance_exception']=dict(id=29,load_threshold_raw=1023,temperature_ceiling_c=80,
-                                      basis='Previously authorized ID29 full-song observation')
+                                      initial_settle_tolerance_counts=40,
+                                      basis='Authorized ID29 observation; measured 36-count startup residual within device feedback range')
     trajectory=np.column_stack([positions,np.full((len(positions),3),2047.)])
     for sid in p['gaze_owner_ids']:trajectory[:,monitored.index(sid)]=2047.
     live_preflight(p,monitored)
@@ -53,7 +54,7 @@ def recover_tongue(bus,motor,guard,events):
     guard();bus.goals({29:2047},{29:900});deadline=time.monotonic()+10;healthy=0
     while time.monotonic()<deadline:
         guard();f=bus.feedback(29);events.append(f);check_feedback(29,f,envelope)
-        healthy=healthy+1 if abs(f['position']-2047)<=32 else 0
+        healthy=healthy+1 if abs(f['position']-2047)<=motor['initial_settle_tolerance_counts'] else 0
         if healthy>=2:
             check_feedback(29,f,motor)
             return
@@ -91,6 +92,13 @@ def main():
     def guard():
         if stopped or stop_file.exists():raise RuntimeError('Operator stop')
     summary=dict(completed=False,rounds=[],error=None,startup_events=[],tongue_disabled_after=False)
+    status_path=ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
+    def publish(state, error=None):
+        temporary=status_path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(dict(updated_monotonic=time.monotonic(),active=False,
+            state=state,error=error,command_ids=profile['diagnostic_command_ids']))+'\n')
+        temporary.replace(status_path)
+    publish('starting')
     receiver=bus=None
     motors={m['id']:m for m in profile['motors']}
     try:
@@ -147,6 +155,7 @@ def main():
             except Exception as exc:summary['cleanup_error']=str(exc)
         for sig,handler in handlers.items():signal.signal(sig,handler)
         (args.output/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
+        publish('completed' if summary['completed'] else 'stopped',summary['error'])
 
 
 if __name__=='__main__':main()

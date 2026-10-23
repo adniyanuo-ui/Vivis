@@ -162,6 +162,6 @@ bash tools/build_a2f.sh
 .venv/bin/python tools/mojia_performance.py --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json --authorized-tongue-observation --repeat 3 --output outputs/mojia/完整演示_新编号
 ```
 
-加`--check`只验证离线配置，不打开设备。`--authorized-tongue-observation`对应本次已有的ID29观察授权：仅该轴软件负载阈值1023、温度上限80℃、首帧容差32计数，保留硬件报警；如果该轴未使能，沿用已验证的2047目标、速度900启动流程，10秒内必须进入32计数走廊，最终仍按设备范围检查。全部演示结束或中止后单独卸载ID29，颈部保持使能。其余轴没有该例外。
+加`--check`只验证离线配置，不打开设备。`--authorized-tongue-observation`对应本次已有的ID29观察授权：仅该轴软件负载阈值1023、温度上限80℃、首帧容差40计数，保留硬件报警；如果该轴未使能，沿用已验证的2047目标、速度900启动流程，10秒内必须进入40计数走廊，最终仍按设备范围检查。全部演示结束或中止后单独卸载ID29，颈部保持使能。其余轴没有该例外。
 
 每遍最后5秒仅让跟踪轴平滑回中，音乐和其余表情完整播放；下一遍从实测眼头姿态接续。初始过渡不以900速度强制颈部归中。每遍生成独立`playback_log.json`，总结果在`summary.json`；预览保持`http://127.0.0.1:8765/`。

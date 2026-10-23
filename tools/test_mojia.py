@@ -69,6 +69,22 @@ class MojiaMappingTests(unittest.TestCase):
 
 
 class MojiaStartupTests(unittest.TestCase):
+    def test_performance_tongue_residual_36_uses_only_startup_tolerance(self):
+        from mojia_performance import recover_tongue
+        from unittest.mock import patch
+        motor={**self.motors[29],'initial_settle_tolerance_counts':40,
+               'feedback_min':0,'feedback_max':4095}
+        bus=Mock();bus.snapshot.return_value={**self.states[29],'position_raw':2207}
+        bus.read.return_value=b'\x01'
+        bus.feedback.return_value=dict(position=2083,temperature_c=44,voltage_raw=60,load_raw=320,status_register=0)
+        events=[]
+        with patch('mojia_performance.time.sleep'):
+            recover_tongue(bus,motor,lambda:None,events)
+        self.assertEqual(len(events),2)
+        for call in bus.goals.call_args_list:self.assertEqual(call.args,({29:2047},{29:900}))
+        bus.feedback.return_value={**bus.feedback.return_value,'position':4096}
+        with self.assertRaises(RuntimeError):recover_tongue(bus,motor,lambda:None,[])
+
     def setUp(self):
         *_,shapes=inputs(ROOT/'tests/fixtures/blendshapes61.json',ROOT/'mojia/墨甲9.23.json',
                         ROOT/'xiaobai/blendshape_channels_61.csv',allowed_motor_ids=MOJIA_IDS)
