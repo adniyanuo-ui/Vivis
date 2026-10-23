@@ -24,8 +24,8 @@ def main():
     parser.add_argument('--check', action='store_true', help='Offline configuration validation; no hardware opened')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    if not np.isfinite(args.seconds) or not 10 <= args.seconds <= 60:
-        parser.error('Commissioning duration must be 10..60 seconds')
+    if not np.isfinite(args.seconds) or not 10 <= args.seconds <= 600:
+        parser.error('Commissioning duration must be 10..600 seconds')
     config, profile = read_json(args.config), read_json(args.profile)
     validate_mojia(config, profile, ROOT/'mojia/墨甲9.23.json', args.neck, args.direction_trial)
     ids = [8, 23]+([32] if args.neck else [])
@@ -57,6 +57,13 @@ def main():
         stopped = True
     handlers = {sig: signal.signal(sig,stop) for sig in (signal.SIGINT,signal.SIGTERM)}
     receiver = bus = None
+    live_status = ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
+    live_status.parent.mkdir(parents=True,exist_ok=True)
+    def publish(data):
+        temporary=live_status.with_suffix('.tmp')
+        temporary.write_text(json.dumps(dict(updated_monotonic=time.monotonic(),**data))+'\n')
+        temporary.replace(live_status)
+    publish(dict(active=False,state='starting',command_ids=ids))
     result = dict(completed=False, command_ids=ids, events=[], snapshots=[], error=None,
                   stop_policy='Stop sending; preserve bounded goals and neck torque')
     try:
@@ -103,6 +110,8 @@ def main():
             sid = ids[poll%len(ids)];poll+=1
             feedback = bus.feedback(sid);check_feedback(sid,feedback,motors[sid])
             result['events'].append(dict(seconds=now-start,goals=goals,feedback=dict(id=sid,**feedback),**diagnostic))
+            if poll%12==0:
+                publish(dict(active=True,state=diagnostic['state'],command_ids=ids,goals=goals,remaining_seconds=max(0,args.seconds-(now-start))))
             last = now;next_tick=max(next_tick+1/60,now+1/60)
         for sid in ids:
             measured=bus.feedback(sid);check_feedback(sid,measured,motors[sid])
@@ -113,6 +122,7 @@ def main():
         result['error']=str(exc)
         raise
     finally:
+        publish(dict(active=False,state='completed' if result['completed'] else 'stopped',error=result['error'],command_ids=ids))
         if bus is not None:
             bus.close()
         if receiver is not None:

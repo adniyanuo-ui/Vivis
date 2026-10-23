@@ -122,6 +122,17 @@ def main():
                            'simulated_xy': (xy * weight).tolist(), 'tracking_weight': weight,
                            'actuators_opened': False,
                            'mount': config['control']['camera_mount']}
+                if config.get('schema_version')=='mojia-person-gaze-1.0':
+                    # The camera service has no actuator feedback; show image direction,
+                    # not an integrator pretending the eye moved with its commands.
+                    current['simulated_xy']=[packet['target']['x'],0.] if fresh and packet['target'] else [0.,0.]
+                    status_path=ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
+                    try:
+                        control=json.loads(status_path.read_text())
+                        control['active']=control.get('active',False) and now-control['updated_monotonic']<1
+                    except (OSError,ValueError,KeyError):
+                        control={'active':False,'state':'not_running'}
+                    current['robot_control']=control
                 preview.update(current, jpeg)
                 records.write(json.dumps({**packet, 'metrics': metrics, 'frame_age_ms': age * 1000}) + '\n')
                 if now - printed >= 1:

@@ -16,6 +16,7 @@ pre{white-space:pre-wrap;background:#202c3b;padding:16px;border-radius:10px}</st
 <img id="camera" alt="等待 USB 摄像头画面"><p><small id="camera-status">正在连接画面…</small></p>
 <div><span class="eye"><i class="pupil"></i></span><span class="eye"><i class="pupil"></i></span></div>
 <small>仅左右跟随。下方眼球是方向模拟，不代表舵机实测位置。此视觉服务不驱动机器人。</small>
+<p id="robot-control">视觉服务只检测人脸，真机控制状态等待更新。</p>
 <pre id="state">等待检测…</pre><script>
 const camera=document.querySelector('#camera'),cameraStatus=document.querySelector('#camera-status');
 let displayedImage=null;
@@ -38,6 +39,7 @@ finally{clearTimeout(deadline);if(pendingImage)URL.revokeObjectURL(pendingImage)
 async function refreshState(){const controller=new AbortController(),deadline=setTimeout(()=>controller.abort(),2000);
 try{let r=await fetch('/state',{cache:'no-store',signal:controller.signal});if(!r.ok)throw new Error('State unavailable');let s=await r.json();
 document.querySelector('#state').textContent=JSON.stringify(s,null,2);
+let control=s.robot_control;document.querySelector('#robot-control').textContent=control?(control.active?'真机跟踪正在运行，剩余约 '+Math.ceil(control.remaining_seconds||0)+' 秒':'真机跟踪未运行；画面仍在检测人脸'):'视觉服务不驱动机器人';
 let xy=s.simulated_xy||[0,0];document.querySelectorAll('.pupil').forEach(p=>p.style.transform=`translate(${xy[0]*29}px,${xy[1]*14}px)`);
 }catch(e){document.querySelector('#state').textContent='视觉服务未连接，正在自动重试…';}
 finally{clearTimeout(deadline);setTimeout(refreshState,250);}}
