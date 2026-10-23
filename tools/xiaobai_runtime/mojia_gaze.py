@@ -42,13 +42,13 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
                 or min(values) < m['safe_min'] or max(values) > m['safe_max']
                 or m['model_raw_expected'] != 521):
             raise ValueError('Eye endpoints exceed reviewed Mojia limits')
-        if trial and max(abs(v-2047) for v in values) > 40:
-            raise ValueError('First eye trial is limited to +/-40 counts')
+        if trial and max(abs(v-2047) for v in values) > 60:
+            raise ValueError('First eye trial is limited to +/-60 counts')
     n = config['neck']
     if (n['id'] != 32 or n['sign'] not in (-1, 1) or type(n['sign']) is not int
-            or not finite(n['offset_counts']) or not 1 <= n['offset_counts'] <= (20 if trial else 160)
-            or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 75
-            or not finite(n['acceleration_counts_s2']) or not 0 < n['acceleration_counts_s2'] <= 70
+            or not finite(n['offset_counts']) or not 1 <= n['offset_counts'] <= (80 if trial else 160)
+            or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 900
+            or not finite(n['acceleration_counts_s2']) or not 0 < n['acceleration_counts_s2'] <= 200
             or motors[32]['model_raw_expected'] != 10760
             or not motors[32]['device_min'] <= 2047-n['offset_counts'] < 2047+n['offset_counts'] <= motors[32]['device_max']):
         raise ValueError('Invalid bounded Mojia neck setup')

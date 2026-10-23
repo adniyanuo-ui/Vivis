@@ -14,6 +14,8 @@ from xiaobai_runtime.mapping import inputs
 def config():
     c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
     c['control'].update(camera_mount='eye',camera_eye='right',mount_confirmed=True)
+    for a in c['control']['axes']:a.update(negative=2007,positive=2087)
+    c['neck']['offset_counts']=20
     return c
 
 
@@ -34,6 +36,22 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_requested_900_stage_bounds_loss_and_return(self):
+        c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
+        validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',True,True)
+        controller=MojiaPursuit(c,[8,23,32],[300,300,900],True)
+        old=np.full(3,2047.)
+        for i in range(2400):
+            now=10+(i+1)/60
+            x=.8 if i<900 else -.8 if i<1800 else None
+            new,_=controller.step(packet(now,x),old,1/60,now,returning=i>=2100)
+            self.assertTrue(np.isfinite(new).all())
+            self.assertTrue(np.all(abs(new[:2]-2047)<=60))
+            self.assertLessEqual(abs(new[2]-2047),80)
+            self.assertTrue(np.all(abs(new-old)<=np.array([300,300,900])/60+1e-8))
+            old=new
+        np.testing.assert_allclose(old,[2047]*3,atol=.25)
+
     def test_xiaobai_speed_stage_requires_neck_confirmation(self):
         c,p=config(),profile()
         c['control'].update(calibration_confirmed=True,speed_counts_s=300)
@@ -63,8 +81,8 @@ class MojiaGazeTests(unittest.TestCase):
 
     def test_trial_caps_and_endpoint_directions(self):
         c,p=config(),profile()
-        for mutate in [lambda a:a['neck'].update(offset_counts=21),
-                       lambda a:a['control']['axes'][0].update(positive=2100),
+        for mutate in [lambda a:a['neck'].update(offset_counts=81),
+                       lambda a:a['control']['axes'][0].update(positive=2110),
                        lambda a:a['control']['axes'][1].update(id=8),
                        lambda a:a['neck'].update(sign=True)]:
             a=copy.deepcopy(c);mutate(a)
