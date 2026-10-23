@@ -290,6 +290,44 @@ class MojiaGazeTests(unittest.TestCase):
 
 
 class MojiaPerformanceTests(unittest.TestCase):
+    def test_slow_preview_disk_does_not_block_control_and_final_state_wins(self):
+        import tempfile,time,threading
+        from pathlib import Path
+        from unittest.mock import patch
+        from xiaobai_runtime.mojia_performance import PreviewPublisher
+        started=threading.Event();release=threading.Event();original=Path.write_text
+        def delayed(path,data,*args,**kwargs):
+            started.set();release.wait(timeout=2)
+            return original(path,data,*args,**kwargs)
+        with tempfile.TemporaryDirectory() as directory,patch.object(Path,'write_text',delayed):
+            path=Path(directory)/'status.json';publisher=PreviewPublisher(path)
+            try:
+                publisher.submit(dict(active=True,frame=0))
+                self.assertTrue(started.wait(timeout=1))
+                begin=time.perf_counter()
+                for i in range(100):publisher.submit(dict(active=True,frame=i))
+                self.assertLess(time.perf_counter()-begin,.05)
+            finally:
+                release.set();error=publisher.finish(dict(active=False,state='completed'))
+            self.assertIsNone(error)
+            self.assertEqual(json.loads(path.read_text()),dict(active=False,state='completed'))
+
+    def test_usb_volume_three_times_is_fixed_reference_and_not_cumulative(self):
+        import sys
+        from types import SimpleNamespace
+        from unittest.mock import Mock,patch
+        from mojia_performance import configure_show_volume
+        sd=Mock();sd.query_devices.return_value={'name':'USB Audio Device: - (hw:0,0)'}
+        before='Limits: Playback 0 - 30'
+        after='Front Left: Playback 23 [77%] [-10.50dB] [on]\\nFront Right: Playback 23 [77%] [-10.50dB] [on]'
+        with patch.dict(sys.modules,{'sounddevice':sd}),patch('mojia_performance.subprocess.run') as run:
+            run.side_effect=[SimpleNamespace(stdout=x) for x in [before,after,before,after]]
+            gain,record=configure_show_volume('USB Audio Device')
+            again,_=configure_show_volume('USB Audio Device')
+        self.assertAlmostEqual(gain*10**(12/20),3.)
+        self.assertEqual(gain,again);self.assertLess(gain,1.)
+        self.assertEqual(run.call_args_list[1].args[0],run.call_args_list[3].args[0])
+
     def setup_performance(self):
         from xiaobai_runtime.mojia_performance import tracking_profile
         from unittest.mock import Mock

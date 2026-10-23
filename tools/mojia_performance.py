@@ -4,6 +4,8 @@ import argparse
 import json
 import signal
 import time
+import subprocess
+import re
 from pathlib import Path
 import numpy as np
 
@@ -12,6 +14,31 @@ from xiaobai_runtime.mapping import ROOT, read_json, live_preflight
 from xiaobai_runtime.playback import play, check_feedback
 from xiaobai_runtime.person_gaze import TargetReceiver
 from xiaobai_runtime.mojia_performance import tracking_profile, MojiaPlaybackGaze
+
+
+def configure_show_volume(device):
+    """Three times the recorded original output amplitude, without PCM clipping.
+
+    Fixed reference: USB Speaker step15=-22.5dB. Step23=-10.5dB gives +12dB;
+    a 0.7536 digital trim makes the net amplitude factor exactly 3. Repeated
+    invocations set the same value rather than multiplying the current volume.
+    """
+    import sounddevice as sd
+    info=sd.query_devices(device,'output')
+    match=re.search(r'\(hw:(\d+),\d+\)',info['name'])
+    if 'USB Audio Device' not in info['name'] or match is None:
+        raise RuntimeError('Expected the reviewed USB Audio Device ALSA output')
+    card=match.group(1)
+    before=subprocess.run(['amixer','-c',card,'sget','Speaker'],check=True,capture_output=True,text=True).stdout
+    if 'Limits: Playback 0 - 30' not in before:
+        raise RuntimeError('USB speaker scale changed; review volume before playback')
+    after=subprocess.run(['amixer','-c',card,'sset','Speaker','23','unmute'],check=True,capture_output=True,text=True).stdout
+    levels=re.findall(r'Playback 23 \[\d+%\] \[(-?[\d.]+)dB\] \[on\]',after)
+    if len(levels)!=2 or any(abs(float(v)+10.5)>.01 for v in levels):
+        raise RuntimeError('USB speaker volume readback does not match -10.5dB')
+    gain=3./10**(12/20)
+    return gain,dict(reference_step=15,reference_db=-22.5,speaker_step=23,speaker_db=-10.5,
+                     digital_trim=gain,output_amplitude_factor=3.,before=before,after=after)
 
 
 def prepare(config,profile,ids,positions,authorize_tongue=False):
@@ -71,6 +98,7 @@ def main():
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--repeat',type=int,default=3)
     parser.add_argument('--authorized-tongue-observation',action='store_true')
+    parser.add_argument('--usb-volume-times-three',action='store_true',help='Use the saved original USB volume reference, never cumulative gain')
     parser.add_argument('--check',action='store_true')
     args=parser.parse_args()
     if not 1<=args.repeat<=10:parser.error('Repeat must be 1..10')
@@ -79,7 +107,8 @@ def main():
     profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation)
     if args.check:
         print(json.dumps(dict(offline_valid=True,monitored=ids,commanded=profile['diagnostic_command_ids'],
-                             gaze_owner_ids=profile['gaze_owner_ids'],fps=fps,repeat=args.repeat)))
+                             gaze_owner_ids=profile['gaze_owner_ids'],fps=fps,repeat=args.repeat,
+                             volume_times_three=args.usb_volume_times_three)))
         return
     args.output.mkdir(parents=True,exist_ok=False)
     for name,data in [('config',config),('profile',profile)]:
@@ -102,6 +131,10 @@ def main():
     receiver=bus=None
     motors={m['id']:m for m in profile['motors']}
     try:
+        guard()
+        if args.usb_volume_times_three:
+            profile['audio_gain'],summary['audio_volume']=configure_show_volume(profile['audio_device'])
+            (args.output/'profile.json').write_text(json.dumps(profile,ensure_ascii=False,indent=2)+'\n')
         guard();receiver=TargetReceiver(config);receiver.wait_ready()
         from xiaobai_runtime.feetech_sdk import OfficialSDKBus
         bus=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20)

@@ -15,10 +15,12 @@ class SensorReadingError(RuntimeError):pass
 class PositionEdgeReadingError(RuntimeError):pass
 
 class AudioClock:
-    def __init__(self,path,device,latency='low'):
+    def __init__(self,path,device,latency='low',gain=1.):
         if not (isinstance(latency,str) and latency in ('low','high') or
                 type(latency) in (int,float) and math.isfinite(latency) and .01<=latency<=1):
             raise ValueError('Audio latency must be low/high or 0.01..1 seconds')
+        if type(gain) not in (int,float) or not math.isfinite(gain) or not .01<=gain<=1:
+            raise ValueError('Digital audio trim must be 0.01..1 to avoid clipping')
         import sounddevice as sd
         from scipy.signal import resample_poly
         self.sd=sd;self.first_dac=None;self.fault=None;self.cursor=0
@@ -29,7 +31,7 @@ class AudioClock:
         info=sd.query_devices(device,'output')
         self.rate=int(info['default_samplerate'])
         common=math.gcd(self.rate,original_rate)
-        self.data=resample_poly(data,self.rate//common,original_rate//common,axis=0).astype(np.float32)
+        self.data=resample_poly(data,self.rate//common,original_rate//common,axis=0).astype(np.float32)*gain
         self.duration=len(data)/original_rate
         self.stream=sd.OutputStream(device=device,samplerate=self.rate,channels=self.data.shape[1],
             dtype='float32',blocksize=0,latency=latency,callback=self.callback)
@@ -185,8 +187,10 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         if should_stop():raise RuntimeError('Stop file exists')
         # Verify physical audio output has been configured before opening the bus.
         audio_latency=profile.get('audio_latency_s',profile.get('audio_latency_seconds','low'))
-        clock=AudioClock(audio_path,profile['audio_device'],latency=audio_latency)
+        audio_options={'gain':profile['audio_gain']} if 'audio_gain' in profile else {}
+        clock=AudioClock(audio_path,profile['audio_device'],latency=audio_latency,**audio_options)
         result['audio_requested_latency']=audio_latency
+        result['audio_requested_gain']=profile.get('audio_gain',1.)
         if abs(len(trajectory)/fps-clock.duration)>1/fps:raise ValueError('Clip/audio duration mismatch')
         run_duration=min(clock.duration,max_seconds) if max_seconds is not None else clock.duration
         result.update(requested_duration_seconds=run_duration,full_clip_requested=run_duration==clock.duration)
@@ -283,6 +287,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 stale=[sid for sid in ids if now-last_good_feedback[sid]>feedback_age_limit]
                 if stale:raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
             target=trajectory[index]
+            gaze_started=time.monotonic() if mojia_gaze else None
             if gaze_override is not None:
                 if mojia_gaze:gaze_override.set_audio_time(t,run_duration)
                 target=gaze_override.apply(target,last,max(dt,1e-6),now)
@@ -292,9 +297,11 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                         or any(not motors[sid]['safe_min']<=target[j]<=motors[sid]['safe_max']
                                for j,sid in enumerate(ids))):
                     raise ValueError('Live gaze target exceeds command limits')
+            gaze_done=time.monotonic() if mojia_gaze else None
             last=limit_step(last,target,speed,max(dt,1e-6));last_tick=now
             goals={sid:int(round(v)) for sid,v in zip(ids,last) if sid in command_ids}
             bus.goals(goals,speeds);last_sent=goals
+            command_done=time.monotonic() if mojia_gaze else None
             if previous_index>=0:skipped+=max(0,index-previous_index-1)
             events.append({'audio_seconds':t,'frame':index,'sent_monotonic':now,'goals':goals})
             if gaze_override is not None:
@@ -324,6 +331,9 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                     if state is not None:
                         events[-1]['feedback']={'id':sid,**state}
                         if polls_per_frame>1:events[-1].setdefault('feedback_samples',[]).append(events[-1]['feedback'])
+            if mojia_gaze:
+                events[-1]['stage_ms']=dict(gaze=1000*(gaze_done-gaze_started),
+                    command=1000*(command_done-gaze_done),feedback=1000*(time.monotonic()-command_done))
         result.update(completed=True,skipped_source_frames=skipped,audio_seconds_at_stop=t)
     except Exception as exc:
         result['error']=str(exc)
@@ -351,6 +361,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         if gc_suspended:gc.enable()
         for sig,handler in previous_handlers.items():signal.signal(sig,handler)
         result['events']=events;result['sent_frames']=len(events)
+        if mojia_gaze:
+            preview_error=gaze_override.finish(result['completed'],result.get('error'))
+            if preview_error:result['preview_error']=preview_error
         Path(log_path).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
-        if mojia_gaze:gaze_override.finish(result['completed'],result.get('error'))
     return result

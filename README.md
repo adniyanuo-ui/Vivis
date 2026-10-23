@@ -159,9 +159,22 @@ bash tools/build_a2f.sh
 先运行视觉服务，确保没有其它运动进程占用串口，然后执行：
 
 ```bash
-.venv/bin/python tools/mojia_performance.py --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json --authorized-tongue-observation --repeat 3 --output outputs/mojia/完整演示_新编号
+.venv/bin/python tools/mojia_performance.py --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json --authorized-tongue-observation --usb-volume-times-three --repeat 3 --output outputs/mojia/完整演示_新编号
 ```
 
 加`--check`只验证离线配置，不打开设备。`--authorized-tongue-observation`对应本次已有的ID29观察授权：仅该轴软件负载阈值1023、温度上限80℃、首帧容差40计数，保留硬件报警；如果该轴未使能，沿用已验证的2047目标、速度900启动流程，10秒内必须进入40计数走廊，最终仍按设备范围检查。全部演示结束或中止后单独卸载ID29，颈部保持使能。其余轴没有该例外。
 
 每遍最后5秒仅让跟踪轴平滑回中，音乐和其余表情完整播放；下一遍从实测眼头姿态接续。初始过渡不以900速度强制颈部归中。每遍生成独立`playback_log.json`，总结果在`summary.json`；预览保持`http://127.0.0.1:8765/`。
+
+推荐手动入口（自动复用或启动相机预览）：
+
+```bash
+cd /home/james/project/Vivis
+./play_mojia_full_show.sh
+```
+
+默认完整播放三遍；仅检查用`./play_mojia_full_show.sh --check`，不会启动相机、修改音量或打开舵机串口。前台运行可用Ctrl+C停止。每次生成独立目录，路径记录在`outputs/mojia/latest_full_show.txt`。STOP文件存在时拒绝开始，不会自动清除。
+
+三倍音量按输出信号幅度定义，以此前USB Speaker第15档（−22.5dB）为固定基准：启动时设置第23档（−10.5dB，+12dB），数字衰减系数0.7535659295，总幅度约为原来的3倍。每次设置相同档位，不对当前音量累乘；原始WAV与动作文件不修改。已对实际48kHz重采样音频检查峰值低于1，避免直接数字乘3导致削波。设备型号、档位范围或读回dB不符时停止，不猜测其它设备的音量范围。
+
+实时段的预览状态写盘移至独立线程，仅保留最新状态；写盘阻塞不会等待在主控制线程中。循环垃圾回收移出音频实时段，广播后保留1ms额外静默和UART线时。日志新增每帧视觉计算、指令发送、反馈三个阶段耗时，100ms控制看门狗及其它保护保持。已通过离线回归和人为写盘阻塞测试；修改后的连续三遍真机运行尚待手动验收。

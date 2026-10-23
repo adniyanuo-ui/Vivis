@@ -2,10 +2,40 @@
 import copy
 import json
 import time
+import threading
 import numpy as np
 
 from .mapping import ROOT
 from .mojia_gaze import validate_mojia, MojiaPursuit, NeckCommandScheduler
+
+
+class PreviewPublisher:
+    """Latest-only asynchronous preview: filesystem latency cannot block motion."""
+    def __init__(self,path):
+        self.path=path;self.pending=None;self.closing=False;self.error=None
+        self.wake=threading.Event()
+        self.thread=threading.Thread(target=self.run,daemon=True,name='mojia-preview-status')
+        self.thread.start()
+
+    def submit(self,data):
+        self.pending=data
+        self.wake.set()
+
+    def run(self):
+        while True:
+            self.wake.wait();self.wake.clear()
+            data=self.pending
+            try:
+                temporary=self.path.with_suffix('.tmp')
+                temporary.write_text(json.dumps(data)+'\n')
+                temporary.replace(self.path)
+            except Exception as exc:self.error=str(exc)
+            if self.closing and self.pending is data:return
+
+    def finish(self,data):
+        self.pending=data;self.closing=True;self.wake.set()
+        self.thread.join(timeout=2)
+        return self.error or ('Preview writer did not finish within 2 seconds' if self.thread.is_alive() else None)
 
 
 def tracking_profile(config, profile, ids):
@@ -46,6 +76,7 @@ class MojiaPlaybackGaze:
         self.controller=MojiaPursuit(config,self.owned,self.speeds,True)
         self.previous=None;self.scheduler=None;self.last_diagnostic={}
         self.status_path=status_path;self.last_publish=0.;self.round=round_number;self.repeat=repeat
+        self.publisher=PreviewPublisher(status_path) if status_path is not None else None
         self.audio_seconds=0.;self.duration=0.;self.feedback=None
 
     def prepare(self, trajectory, measured, snapshots, now):
@@ -94,11 +125,11 @@ class MojiaPlaybackGaze:
         return result
 
     def publish(self,data):
-        if self.status_path is None:return
-        temporary=self.status_path.with_suffix('.tmp')
-        temporary.write_text(json.dumps(dict(updated_monotonic=time.monotonic(),**data))+'\n')
-        temporary.replace(self.status_path)
+        if self.publisher is not None:
+            self.publisher.submit(dict(updated_monotonic=time.monotonic(),**data))
 
     def finish(self,completed,error):
-        self.publish(dict(active=False,state='completed' if completed else 'stopped',error=error,
-                          command_ids=self.command_ids,round_number=self.round,repeat=self.repeat))
+        if self.publisher is not None:
+            return self.publisher.finish(dict(updated_monotonic=time.monotonic(),active=False,
+                state='completed' if completed else 'stopped',error=error,command_ids=self.command_ids,
+                round_number=self.round,repeat=self.repeat))

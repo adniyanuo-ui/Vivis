@@ -322,6 +322,24 @@ class FinalCalibrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'power_checked'):live_preflight(profile,ids)
 
 class AudioClockTests(unittest.TestCase):
+    def test_audio_trim_scales_pcm_without_changing_duration(self):
+        import sys,wave
+        from unittest.mock import Mock,patch
+        from xiaobai_runtime.playback import AudioClock
+        sd=Mock();sd.query_devices.return_value={'default_samplerate':48000}
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'audio.wav'
+            with wave.open(str(path),'wb') as wav:
+                wav.setparams((1,2,48000,0,'NONE','not compressed'))
+                wav.writeframes(np.array([-32768,32767]*2400,dtype='<i2').tobytes())
+            with patch.dict(sys.modules,{'sounddevice':sd}):
+                clock=AudioClock(path,'USB Audio Device',gain=.8956)
+                self.assertAlmostEqual(clock.duration,.1)
+                self.assertLessEqual(float(np.max(abs(clock.data))),.895601)
+                clock.close()
+        for gain in [0,True,float('nan'),1.01]:
+            with self.assertRaises(ValueError):AudioClock('unused','unused',gain=gain)
+
     def test_buffered_output_keeps_dac_clock_and_reports_underflow(self):
         import sys
         import wave

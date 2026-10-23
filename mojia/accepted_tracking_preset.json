@@ -921,5 +921,15 @@
     "IDs9/24 have no Mojia calibration action mapping",
     "ID29 is enabled only for the authorized performance and unloaded afterwards",
     "EEPROM power-cycle persistence has not been verified"
-  ]
+  ],
+  "audio_volume_preset": {
+    "reference_speaker_step": 15,
+    "reference_speaker_db": -22.5,
+    "playback_speaker_step": 23,
+    "playback_speaker_db": -10.5,
+    "digital_trim": 0.753565929452874,
+    "net_amplitude_factor": 3.0,
+    "application": "Applied by play_mojia_full_show.sh at manual startup; no cumulative multiplication",
+    "measured_resampled_peak": 0.8896213173866272
+  }
 }
