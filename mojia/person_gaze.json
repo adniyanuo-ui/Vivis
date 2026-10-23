@@ -82,7 +82,7 @@
     "sign": 1,
     "offset_counts": 80,
     "speed_counts_s": 900,
-    "acceleration_counts_s2": 128,
+    "acceleration_counts_s2": 64,
     "direction_confirmed": false,
     "gain_counts_s": 120,
     "eye_lead_s": 0.08,
@@ -94,7 +94,7 @@
       2,
       2
     ],
-    "observed_acceleration_raw": 128
+    "observed_acceleration_raw": 64
   },
   "parameter_revision_source": "2026-10-23 user requested eyes +/-60 at 300; neck +/-80 at 900, software acceleration 200; neck gain remains 120"
 }
