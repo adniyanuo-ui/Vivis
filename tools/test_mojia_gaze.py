@@ -38,6 +38,22 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_half_eye_lead_starts_neck_earlier_without_changing_eyes(self):
+        c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
+        old=copy.deepcopy(c);old['neck']['eye_lead_s']=.08
+        c['neck']['eye_lead_s']=.04
+        validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',True,True)
+        controllers=[MojiaPursuit(a,[8,23,7,22,32],[300,300,100,100,900],True) for a in [old,c]]
+        previous=[np.full(5,2047.),np.full(5,2047.)];starts=[None,None]
+        for i in range(120):
+            now=10+(i+1)/60
+            for j,controller in enumerate(controllers):
+                previous[j],d=controller.step(packet(now,.8),previous[j],1/60,now)
+                if starts[j] is None and abs(d['neck_velocity'])>1e-6:starts[j]=now
+            np.testing.assert_allclose(previous[0][:4],previous[1][:4])
+        self.assertIsNotNone(starts[0]);self.assertIsNotNone(starts[1])
+        self.assertLess(starts[1],starts[0])
+
     def test_neck_fixed_speed_900_does_not_get_overwritten_by_coalescing(self):
         scheduler=NeckCommandScheduler(2047,10,900,adaptive_speed=False)
         for i in range(120):

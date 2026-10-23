@@ -85,7 +85,7 @@
     "acceleration_counts_s2": 64,
     "direction_confirmed": false,
     "gain_counts_s": 120,
-    "eye_lead_s": 0.08,
+    "eye_lead_s": 0.04,
     "deadband": 0.14,
     "stop_deadband": 0.07,
     "filter_tau_s": 0.12,

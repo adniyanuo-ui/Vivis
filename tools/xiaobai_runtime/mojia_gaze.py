@@ -64,7 +64,7 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
             or not motors[32]['device_min'] <= 2047-n['offset_counts'] < 2047+n['offset_counts'] <= motors[32]['device_max']):
         raise ValueError('Invalid bounded Mojia neck setup')
     for key,default,low,high in [('gain_counts_s',n['speed_counts_s'],1,180),
-                                ('eye_lead_s',.15,.05,.5),('deadband',.18,.05,.5),
+                                ('eye_lead_s',.15,.02,.5),('deadband',.18,.05,.5),
                                 ('stop_deadband',.08,0,.3),('filter_tau_s',.12,.01,1)]:
         value=n.get(key,default)
         if not finite(value) or not low <= value <= high:
