@@ -1,4 +1,4 @@
-"""Mojia-only bounded horizontal pursuit, with eye-mounted or head-fixed vision.
+"""Mojia-only bounded eye pursuit, with eye-mounted or head-fixed vision.
 
 No serial I/O. Neck motion is closed through the camera image, never subtracted
 from eye commands as if commanded head rotation were measured rotation.
@@ -31,8 +31,13 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
     if neck and not trial and not config['neck']['direction_confirmed']:
         raise ValueError('Confirm ID32 direction before normal neck following')
     axes = c['axes']
-    if [(a['name'], a['id'], a['coordinate']) for a in axes] != [('left_yaw', 8, 'x'), ('right_yaw', 23, 'x')]:
-        raise ValueError('Mojia horizontal eyes must be IDs8/23')
+    expected=[('left_yaw',8,'x'),('right_yaw',23,'x')]
+    if c.get('vertical_enabled') is True:
+        expected += [('left_pitch',7,'y'),('right_pitch',22,'y')]
+        if not trial and not c.get('vertical_direction_confirmed'):
+            raise ValueError('Confirm vertical eye directions before normal tracking')
+    if [(a['name'], a['id'], a['coordinate']) for a in axes] != expected:
+        raise ValueError('Mojia eye axes must match IDs8/23 and optional7/22')
     motors = {m['id']: m for m in profile['motors']}
     for a in axes:
         values = [a[k] for k in ('negative', 'neutral', 'positive')]
@@ -42,8 +47,9 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
                 or min(values) < m['safe_min'] or max(values) > m['safe_max']
                 or m['model_raw_expected'] != 521):
             raise ValueError('Eye endpoints exceed reviewed Mojia limits')
-        if trial and max(abs(v-2047) for v in values) > 60:
-            raise ValueError('First eye trial is limited to +/-60 counts')
+        cap=30 if a['coordinate']=='y' else 60
+        if trial and max(abs(v-2047) for v in values) > cap:
+            raise ValueError('Eye trial exceeds coordinate-specific limits')
     n = config['neck']
     if (n['id'] != 32 or n['sign'] not in (-1, 1) or type(n['sign']) is not int
             or not finite(n['offset_counts']) or not 1 <= n['offset_counts'] <= (80 if trial else 160)
@@ -74,11 +80,14 @@ class MojiaPursuit:
     def step(self, packet, previous, dt, now, returning=False):
         c, n = self.config['control'], self.config['neck']
         anchor = next(a for a in c['axes'] if a['name'] == 'right_yaw')
-        applied = [axis_normalized(anchor, previous[self.ids.index(23)]), 0.]
+        vertical=next((a for a in c['axes'] if a['name']=='right_pitch'),None)
+        applied = [axis_normalized(anchor, previous[self.ids.index(23)]),
+                   axis_normalized(vertical,previous[self.ids.index(22)]) if vertical else 0.]
         xy, weight, state = self.policy.step(packet, now, dt, applied)
         result = np.full(len(previous), 2047.)
         for a in c['axes']:
-            result[self.ids.index(a['id'])] = 2047. if returning else 2047*(1-weight)+weight*axis_position(a, xy[0])
+            coordinate=0 if a['coordinate']=='x' else 1
+            result[self.ids.index(a['id'])] = 2047. if returning else 2047*(1-weight)+weight*axis_position(a, xy[coordinate])
         if self.neck:
             col = self.ids.index(32);position = previous[col]
             eye = applied[0]

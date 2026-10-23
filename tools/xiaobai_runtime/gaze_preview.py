@@ -15,7 +15,7 @@ pre{white-space:pre-wrap;background:#202c3b;padding:16px;border-radius:10px}</st
 <h1>机器人 · 人脸跟随验证</h1><p>绿色框：面积最大的人脸；绿色十字：注视点；蓝色十字：画面中心。</p>
 <img id="camera" alt="等待 USB 摄像头画面"><p><small id="camera-status">正在连接画面…</small></p>
 <div><span class="eye"><i class="pupil"></i></span><span class="eye"><i class="pupil"></i></span></div>
-<small>仅左右跟随。下方眼球是方向模拟，不代表舵机实测位置。此视觉服务不驱动机器人。</small>
+<small>下方眼球是图像方向模拟，不代表舵机实测位置。此视觉服务不驱动机器人。</small>
 <p id="robot-control">视觉服务只检测人脸，真机控制状态等待更新。</p>
 <pre id="state">等待检测…</pre><script>
 const camera=document.querySelector('#camera'),cameraStatus=document.querySelector('#camera-status');

@@ -125,7 +125,7 @@ def main():
                 if config.get('schema_version')=='mojia-person-gaze-1.0':
                     # The camera service has no actuator feedback; show image direction,
                     # not an integrator pretending the eye moved with its commands.
-                    current['simulated_xy']=[packet['target']['x'],0.] if fresh and packet['target'] else [0.,0.]
+                    current['simulated_xy']=[packet['target']['x'],packet['target']['y'] if config['control'].get('vertical_enabled') else 0.] if fresh and packet['target'] else [0.,0.]
                     status_path=ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
                     try:
                         control=json.loads(status_path.read_text())

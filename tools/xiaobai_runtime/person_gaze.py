@@ -209,6 +209,7 @@ class GazePolicy:
     def __init__(self, config):
         validate_config(config)
         self.control = config['control']
+        self.vertical_enabled=(config.get('schema_version')=='mojia-person-gaze-1.0' and self.control.get('vertical_enabled') is True)
         self.max_age = config['transport']['max_age_s']
         self.xy = np.zeros(2)
         self.error = np.zeros(2)
@@ -227,7 +228,8 @@ class GazePolicy:
             except (ValueError, KeyError, TypeError, AttributeError):
                 pass
         if visible:
-            target = np.array([packet['target']['x'], 0.])  # Horizontal tracking only.
+            vertical = self.vertical_enabled and self.control.get('camera_eye')=='right'
+            target = np.array([packet['target']['x'], packet['target']['y'] if vertical else 0.])
             error = np.sign(target) * np.maximum(0, np.abs(target) - c['deadband'])
             alpha = -math.expm1(-dt / c['filter_tau_s'])
             self.error += alpha * (error - self.error)

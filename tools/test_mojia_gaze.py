@@ -14,7 +14,8 @@ from mojia_track_person import tracking_start_position
 
 def config():
     c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
-    c['control'].update(camera_mount='eye',camera_eye='right',mount_confirmed=True)
+    c['control'].update(camera_mount='eye',camera_eye='right',mount_confirmed=True,vertical_enabled=False)
+    c['control']['axes']=[a for a in c['control']['axes'] if a['coordinate']=='x']
     for a in c['control']['axes']:a.update(negative=2007,positive=2087)
     c['neck']['offset_counts']=20
     return c
@@ -37,6 +38,28 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_vertical_pair_opposite_encoders_and_horizontal_independence(self):
+        c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
+        validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',False,True)
+        horizontal=config()
+        for a in horizontal['control']['axes']:a.update(negative=1987,positive=2107)
+        full=MojiaPursuit(c,[8,23,7,22],[300]*4)
+        flat=MojiaPursuit(horizontal,[8,23],[300]*2)
+        previous=np.full(4,2047.);old_flat=previous[:2].copy()
+        for i in range(600):
+            now=10+(i+1)/60;p=packet(now,.5);p['target']['y']=.6
+            previous,_=full.step(p,previous,1/60,now)
+            old_flat,_=flat.step(p,old_flat,1/60,now)
+            np.testing.assert_allclose(previous[:2],old_flat)
+            self.assertTrue(np.all(abs(previous[2:]-2047)<=30))
+        self.assertLess(previous[2],2047)
+        self.assertGreater(previous[3],2047)
+        for i in range(300):
+            now=20+(i+1)/60
+            previous,_=full.step(None,previous,1/60,now,returning=True)
+        np.testing.assert_allclose(previous,[2047]*4,atol=.25)
+        with self.assertRaises(ValueError):validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',False,False)
+
     def test_eye_only_resume_does_not_require_or_recenter_held_neck(self):
         held=dict(id=32,position_raw=2095,goal_position_raw=2095,configured_min=1600,configured_max=2600)
         self.assertIsNone(tracking_start_position(held))
@@ -46,7 +69,9 @@ class MojiaGazeTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):tracking_start_position(held,dict(safe_min=1967,safe_max=2127))
 
     def test_requested_900_stage_bounds_loss_and_return(self):
-        c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
+        c=config()
+        for a in c['control']['axes']:a.update(negative=1987,positive=2107)
+        c['neck']['offset_counts']=80
         validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',True,True)
         controller=MojiaPursuit(c,[8,23,32],[300,300,900],True)
         old=np.full(3,2047.)

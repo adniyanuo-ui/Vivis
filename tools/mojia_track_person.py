@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Commission Mojia eyes8/23 and optional neck32; never command mouth axes."""
+"""Commission Mojia horizontal eyes8/23, optional vertical7/22 and neck32."""
 import argparse
 import json
 import signal
@@ -21,7 +21,7 @@ def tracking_start_position(state, motor=None):
         if not state['configured_min']<=position<=state['configured_max'] or not state['configured_min']<=goal<=state['configured_max']:
             raise RuntimeError(f'ID{sid}: held neck outside device limits')
         return None
-    if sid in (8,23):
+    if sid in (7,8,22,23):
         if not motor['safe_min']<=position<=motor['safe_max'] or not motor['safe_min']<=goal<=motor['safe_max']:
             raise RuntimeError(f'ID{sid}: resume position/goal exceeds eye command limits')
         return float(position)
@@ -45,7 +45,7 @@ def main():
         parser.error('Commissioning duration must be 10..600 seconds')
     config, profile = read_json(args.config), read_json(args.profile)
     validate_mojia(config, profile, ROOT/'mojia/墨甲9.23.json', args.neck, args.direction_trial)
-    ids = [8, 23]+([32] if args.neck else [])
+    ids = [a['id'] for a in config['control']['axes']]+([32] if args.neck else [])
     motors = {m['id']: dict(m) for m in profile['motors'] if m['id'] in ids}
     for axis in config['control']['axes']:
         m = motors[axis['id']]
@@ -95,7 +95,7 @@ def main():
         # Read held neck state, but never move it to satisfy eye-only preflight.
         for sid in sorted(set(ids)|{32,33,34}):
             s = bus.snapshot(sid);result['snapshots'].append(s)
-            expected = 521 if sid in (8,23) else 10760
+            expected = 521 if sid in (7,8,22,23) else 10760
             if s['model_raw'] != expected or s['mode'] != 0 or s['torque_enable'] != 1:
                 raise RuntimeError(f'ID{sid}: wrong hardware/mode or disabled torque')
             initial_positions[sid]=tracking_start_position(s,motors.get(sid))

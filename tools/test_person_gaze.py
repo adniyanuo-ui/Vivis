@@ -618,7 +618,7 @@ class PreviewTests(unittest.TestCase):
             self.assertEqual(state['status'], 'tracking')
             self.assertIs(state['actuators_opened'], False)
             with urlopen(f'http://127.0.0.1:{port}/', timeout=1) as response:
-                self.assertIn('仅左右跟随', response.read().decode())
+                self.assertIn('不代表舵机实测位置', response.read().decode())
         finally:
             preview.close()
 
