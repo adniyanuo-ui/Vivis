@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from xiaobai_runtime.mapping import ROOT, read_json, live_preflight
-from xiaobai_runtime.mojia_gaze import validate_mojia, MojiaPursuit
+from xiaobai_runtime.mojia_gaze import validate_mojia, MojiaPursuit, NeckCommandScheduler
 from xiaobai_runtime.person_gaze import TargetReceiver
 from xiaobai_runtime.playback import check_feedback
 
@@ -21,9 +21,9 @@ def tracking_start_position(state, motor=None):
         if not state['configured_min']<=position<=state['configured_max'] or not state['configured_min']<=goal<=state['configured_max']:
             raise RuntimeError(f'ID{sid}: held neck outside device limits')
         return None
-    if sid in (7,8,22,23):
+    if sid in (7,8,22,23,32):
         if not motor['safe_min']<=position<=motor['safe_max'] or not motor['safe_min']<=goal<=motor['safe_max']:
-            raise RuntimeError(f'ID{sid}: resume position/goal exceeds eye command limits')
+            raise RuntimeError(f'ID{sid}: resume position/goal exceeds command limits')
         return float(position)
     if abs(position-2047)>10 or goal!=2047:
         raise RuntimeError(f'ID{sid}: commanded neck must start from neutral')
@@ -112,6 +112,7 @@ def main():
         controller = MojiaPursuit(config, ids, [speeds[sid] for sid in ids], args.neck)
         previous = np.array([initial_positions[sid] for sid in ids],dtype=float)
         start = last = time.monotonic();next_tick = start+1/60;poll = 0
+        neck_scheduler=NeckCommandScheduler(initial_positions[32],start,speeds[32]) if args.neck else None
         while time.monotonic()-start < args.seconds:
             if stopped or stop_file.exists():
                 raise RuntimeError('Operator stop')
@@ -124,6 +125,10 @@ def main():
             packet = receiver.poll(now)
             previous, diagnostic = controller.step(packet,previous,dt,now,returning=now-start>=args.seconds-5)
             goals = {sid:int(round(previous[i])) for i,sid in enumerate(ids)}
+            if neck_scheduler is not None:
+                diagnostic['planned_neck_goal']=float(previous[ids.index(32)])
+                goals[32],speeds[32]=neck_scheduler.step(previous[ids.index(32)],now,returning=now-start>=args.seconds-5)
+                diagnostic['neck_speed_command']=speeds[32]
             bus.goals(goals,speeds)
             sid = ids[poll%len(ids)];poll+=1
             feedback = bus.feedback(sid);check_feedback(sid,feedback,motors[sid])

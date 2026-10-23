@@ -5,7 +5,7 @@ import unittest
 import numpy as np
 
 from xiaobai_runtime.mapping import ROOT
-from xiaobai_runtime.mojia_gaze import validate_mojia, MojiaPursuit
+from xiaobai_runtime.mojia_gaze import validate_mojia, MojiaPursuit, NeckCommandScheduler
 from xiaobai_runtime.person_gaze import VERSION, validate_config
 from prepare_mojia import proposal, hardware_profile
 from xiaobai_runtime.mapping import inputs
@@ -38,6 +38,27 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_neck_scheduler_suppresses_one_count_hunting_without_losing_home(self):
+        scheduler=NeckCommandScheduler(2095,10,900)
+        for i in range(120):
+            goal,speed=scheduler.step(2095+(1 if i%2 else -1),10+(i+1)/60)
+            self.assertEqual(goal,2095)
+            self.assertLessEqual(speed,900)
+        home=NeckCommandScheduler(2048,10,900)
+        self.assertEqual(home.step(2047,10.1,returning=True)[0],2047)
+
+    def test_neck_scheduler_matches_slow_trajectory_instead_of_always_using_900(self):
+        scheduler=NeckCommandScheduler(2047,10,900)
+        goals=[];speeds=[]
+        for i in range(120):
+            now=10+(i+1)/60
+            goal,speed=scheduler.step(2047+20*(now-10),now)
+            goals.append(goal);speeds.append(speed)
+        self.assertLessEqual(abs(goals[-1]-2087),1)
+        self.assertLessEqual(max(speeds),100)
+        changes=sum(a!=b for a,b in zip(goals,goals[1:]))
+        self.assertLess(changes,40)
+
     def test_independent_vertical_speed_and_bad_axis_limit(self):
         c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
         validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',False,True)
@@ -73,6 +94,7 @@ class MojiaGazeTests(unittest.TestCase):
             now=20+(i+1)/60
             previous,_=full.step(None,previous,1/60,now,returning=True)
         np.testing.assert_allclose(previous,[2047]*4,atol=.25)
+        c['control']['vertical_direction_confirmed']=False
         with self.assertRaises(ValueError):validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',False,False)
 
     def test_eye_only_resume_does_not_require_or_recenter_held_neck(self):
@@ -81,7 +103,7 @@ class MojiaGazeTests(unittest.TestCase):
         eye=dict(id=23,position_raw=2106,goal_position_raw=2106)
         self.assertEqual(tracking_start_position(eye,dict(safe_min=1987,safe_max=2107)),2106.)
         with self.assertRaises(RuntimeError):tracking_start_position({**eye,'goal_position_raw':2200},dict(safe_min=1987,safe_max=2107))
-        with self.assertRaises(RuntimeError):tracking_start_position(held,dict(safe_min=1967,safe_max=2127))
+        self.assertEqual(tracking_start_position(held,dict(safe_min=1967,safe_max=2127)),2095.)
 
     def test_requested_900_stage_bounds_loss_and_return(self):
         c=config()

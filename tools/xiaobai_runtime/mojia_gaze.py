@@ -126,3 +126,30 @@ class MojiaPursuit:
                 goal, self.velocity = 2047., 0.
             result[col] = goal
         return limit_step(previous, result, self.speeds, dt), dict(state=state, weight=weight, eye_error_x=float(xy[0]), neck_velocity=self.velocity)
+
+
+class NeckCommandScheduler:
+    """Coalesce tiny neck targets and match servo speed to average trajectory rate.
+
+    This only shapes ID32 transport; the continuous eye/head planner and eye
+    limits are unchanged. Speed remains bounded by the configured ceiling.
+    """
+    def __init__(self, position, now, maximum_speed):
+        self.goal=int(round(position))
+        self.sent_at=now
+        self.maximum_speed=int(maximum_speed)
+        self.speed=min(50,self.maximum_speed)
+
+    def step(self, planned, now, returning=False):
+        goal=int(round(planned))
+        dt=now-self.sent_at
+        if dt<=0 or not math.isfinite(planned) or not math.isfinite(now):
+            raise ValueError('Invalid neck scheduler sample')
+        delta=abs(goal-self.goal)
+        final_home=returning and goal==2047
+        if delta and dt>=.04 and (delta>=2 or final_home):
+            # SMS fine speed units retain approximately 50-count/s precision.
+            speed=math.ceil((delta/dt)/50)*50
+            self.speed=min(self.maximum_speed,max(1,speed))
+            self.goal,self.sent_at=goal,now
+        return self.goal,self.speed
