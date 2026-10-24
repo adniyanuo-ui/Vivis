@@ -50,6 +50,7 @@
 !/tools/package_wz2_facemotion.py
 !/tools/prepare_mark_mesh.py
 !/tools/prepare_mojia.py
+!/tools/prepare_mojia_work.py
 !/tools/adjust_mojia_blinks.py
 !/tools/mojia_player.py
 !/tools/mojia_track_person.py
@@ -117,6 +118,10 @@
 !/mojia/person_gaze.json
 !/mojia/homing_axes.json
 !/mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json
+!/mojia/wz2_MOJIA_MOTOR_TARGETS_60fps_PROFILE.json
+!/mojia/wz2_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json
+!/mojia/wz2_expression15_MOJIA_MOTOR_TARGETS_60fps_PROFILE.json
+!/mojia/wz2_expression15_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json
 !/mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK900_PROFILE.json
 !/mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_CONTEXT_PROFILE.json
 !/mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1800_PROFILE.json
@@ -136,6 +141,7 @@
 !/docs/MOJIA_NECK_FOLLOW_DELAY_REVIEW_2026-10-23.md
 !/play_0001_xiaobai.sh
 !/play_mojia_full_show.sh
+!/play_mojia_wz2.sh
 !/play_0001_xiaobai_tracking.sh
 !/track_person_xiaobai.sh
 

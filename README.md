@@ -225,3 +225,41 @@ cd /home/james/project/Vivis
 实时段的预览状态写盘移至独立线程，仅保留最新状态；写盘阻塞不会等待在主控制线程中。循环垃圾回收移出音频实时段，广播后保留1ms额外静默和UART线时。日志记录每帧视觉计算、指令发送、反馈三个阶段耗时，以及分步读取次数和完整反馈样本。2026-10-24整曲及随后连续两遍完成，现场认可口型和颈部大范围跟随；定时调度并非硬实时保证，动态通信坏包和长期稳定性仍需后续处理。
 
 2026-10-23最新演示设置：手动入口默认追加`--hold-vertical-eyes`，ID7/22保持当前位置，不接收歌曲或相机的位置指令，仍保留扭矩和反馈检查；横向8/23及颈部32继续跟踪。已认可的纵向100/±20参数仍保存在原始跟踪配置中，未删除。两遍演示可运行`./play_mojia_full_show.sh --repeat 2`。
+
+### 墨甲第二作品 wz2
+
+两个作品分别使用独立资源和入口，共用已验收的控制流程：
+
+| 作品 | 播放命令 | 默认遍数 |
+|---|---|---|
+| 0001 | `./play_mojia_full_show.sh --repeat 1` | 未指定时3遍 |
+| wz2 | `./play_mojia_wz2.sh` | 1遍，可加`--repeat 2` |
+
+第二作品源文件实际位于exmple目录：wz2_BLENDSHAPES_61_30fps.json（823帧、30FPS）与wz2_CLAIRE_VISIBLE_BROWS_v3.0-Claire.mp4。视频AAC音轨解码为16kHz双声道PCM16，核对GStreamer首缓冲PTS与播放段起点均为64ms、段映射time=0，音频从媒体时间0开始。保留全部解码PCM，仅尾部补661采样（41.3125ms）静音以对齐动画，准备后音频约27.433秒。30FPS原样本逐帧保持两个60Hz周期，生成1646帧，不改变作品节奏。源视频和JSON保留原样。
+
+沿用墨甲标定、35轴60计数/秒前置回中、眼睑1200、嘴部900、口型增益1.5、右眼相机/横向双眼及颈部跟踪，ID7/22回中后保持，ID32负载阈值350。当前眨眼规则从新作品原9次选保留6次，按新作品音频及表情安排。wz2使用独立媒体、目标JSON和profile，不覆盖0001文件。两入口均支持--check，只做离线核对。当前入口选用wz2_expression15版本：仅眉毛2/3/4/17/18/19和鼻翼14/16的合成后中位位移放大1.5倍，按原标定/设备范围截断；嘴部、眼睑、眼球、颈部目标及音频保持不变。原增益1.0版文件保留作对照。
+
+重新准备资源（以下输出已存在时会拒绝覆盖，需另选前缀）：
+
+```bash
+gst-launch-1.0 -q filesrc location=exmple/wz2_CLAIRE_VISIBLE_BROWS_v3.0-Claire.mp4 \
+  '!' qtdemux name=demux demux.audio_0 '!' queue '!' decodebin \
+  '!' audioconvert '!' audio/x-raw,format=S16LE,layout=interleaved \
+  '!' wavenc '!' filesink location=mojia/wz2_AUDIO_FROM_MP4_RAW.wav
+.venv/bin/python tools/prepare_mojia_work.py \
+  --clip exmple/wz2_BLENDSHAPES_61_30fps.json \
+  --decoded-audio mojia/wz2_AUDIO_FROM_MP4_RAW.wav \
+  --video exmple/wz2_CLAIRE_VISIBLE_BROWS_v3.0-Claire.mp4 \
+  --reference-profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json \
+  --expression-gain 1.5 --prefix mojia/wz2_expression15
+.venv/bin/python tools/adjust_mojia_blinks.py \
+  --targets mojia/wz2_expression15_MOJIA_MOTOR_TARGETS_60fps.json \
+  --profile mojia/wz2_expression15_MOJIA_MOTOR_TARGETS_60fps_PROFILE.json \
+  --clip mojia/wz2_expression15_BLENDSHAPES_61_60fps_HOLD.json --audio mojia/wz2_expression15.wav \
+  --speed 1200 --keep-fraction .7 \
+  --output mojia/wz2_expression15_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200.json
+```
+
+新工具仅为已核对时间原点的PCM16解码音频补不超过100ms尾部静音，音频更长需裁剪或差异更大时会拒绝，避免悄悄裁剪内容。原媒体及大型生成目标仍按既有策略留在本机，启动脚本、生成工具和profile纳入代码管理。
+
+脸颊标定缺项：当前墨甲CheekPuff.positions为空，CheekSquint只映射下眼睑6/21，ID9/24未被任何表情引用。源JSON的CheekPuff虽有非零权重，也无法经空映射生成独立脸颊动作。需要现场确认实际脸颊ID及动作端点后补标定，不能用其它机构映射代替；本轮未给9/24增加动作，也未扩大硬件限位。

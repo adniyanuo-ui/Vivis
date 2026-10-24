@@ -68,6 +68,96 @@ class MojiaMappingTests(unittest.TestCase):
         self.assertEqual(len(diff['jaw31_shapes']),7)
 
 
+class MojiaWorkTests(unittest.TestCase):
+    def test_expression_gain_scales_only_brows_and_nose_with_existing_limits(self):
+        import json
+        from prepare_mojia_work import scale_expression_targets
+        profile=json.loads((ROOT/'mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json').read_text())
+        *_,shapes=inputs(ROOT/'tests/fixtures/blendshapes61.json',ROOT/'mojia/墨甲9.23.json',
+                       ROOT/'xiaobai/blendshape_channels_61.csv',allowed_motor_ids=MOJIA_IDS)
+        ids=[m['id'] for m in profile['motors']];motors={m['id']:m for m in profile['motors']}
+        selected={2,3,4,14,16,17,18,19};positions=np.full((3,len(ids)),2047.)
+        for sid in selected:
+            positions[1,ids.index(sid)]+=20 if motors[sid]['safe_max']>=2067 else -20
+        positions[2,ids.index(2)]=motors[2]['safe_max']
+        positions[:,ids.index(12)]=1900.;positions[:,ids.index(5)]=2100.;before=positions.copy()
+        result,report=scale_expression_targets(ids,positions,profile,shapes,1.5)
+        self.assertEqual({a['id'] for a in report['axes']},selected)
+        for j,sid in enumerate(ids):
+            if sid in selected:
+                self.assertEqual(result[1,j],2047+1.5*(positions[1,j]-2047))
+                self.assertTrue(motors[sid]['safe_min']<=result[:,j].min()<=result[:,j].max()<=motors[sid]['safe_max'])
+            else:np.testing.assert_array_equal(result[:,j],positions[:,j])
+        self.assertEqual(result[2,ids.index(2)],motors[2]['safe_max'])
+        np.testing.assert_array_equal(positions,before)
+        self.assertIn('CheekPuff',report['unmapped_cheek_shapes'])
+
+    def test_expression_gain_rejects_invalid_gain_and_shared_motor_roles(self):
+        from prepare_mojia_work import scale_expression_targets
+        ids=[2];positions=np.array([[2047.]])
+        profile=dict(motors=[dict(id=2,neutral=2047,safe_min=1900,safe_max=2300,device_min=1800,device_max=2400)])
+        shapes=dict(BrowDownLeft={2:2300})
+        for gain in (0,-1,True,float('inf'),float('nan')):
+            with self.assertRaises(ValueError):scale_expression_targets(ids,positions,profile,shapes,gain)
+        shapes['MouthSmileLeft']={2:2100}
+        with self.assertRaisesRegex(ValueError,'shared'):
+            scale_expression_targets(ids,positions,profile,shapes,1.5)
+
+    def test_native_30_fps_times_preserved_at_60_hz(self):
+        from prepare_mojia_work import hold_at_60
+        values=np.zeros((3,61));values[:,17]=[0.,.2,.4]
+        held=hold_at_60(values,30)
+        self.assertEqual(held.shape,(6,61))
+        for i in range(3):
+            np.testing.assert_array_equal(held[i*2],values[i])
+            np.testing.assert_array_equal(held[i*2+1],values[i])
+        np.testing.assert_array_equal(hold_at_60(values,60),values)
+        with self.assertRaises(ValueError):hold_at_60(values,25)
+
+    def test_audio_alignment_preserves_pcm_and_refuses_trim_or_large_padding(self):
+        import wave
+        from prepare_mojia_work import align_audio
+        with tempfile.TemporaryDirectory() as directory:
+            source=Path(directory)/'decoded.wav';out=Path(directory)/'aligned.wav'
+            pcm=np.arange(1000,dtype='<i2').tobytes()
+            with wave.open(str(source),'wb') as wav:
+                wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(16000);wav.writeframes(pcm)
+            report=align_audio(source,out,4)
+            with wave.open(str(out)) as wav:result=wav.readframes(wav.getnframes())
+            self.assertEqual(result[:len(pcm)],pcm)
+            self.assertFalse(any(result[len(pcm):]))
+            self.assertAlmostEqual(report['duration_seconds'],4/60,delta=1/16000)
+            with self.assertRaises(ValueError):align_audio(source,Path(directory)/'short.wav',1)
+            with self.assertRaises(ValueError):align_audio(source,Path(directory)/'long.wav',60)
+
+    def test_work_export_binds_its_own_media_and_keeps_reference_profile(self):
+        import io,json,sys,wave
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        from prepare_mojia_work import main
+        from mojia_player import load_targets
+        reference=ROOT/'mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json'
+        before=reference.read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);source=root/'source.json';video=root/'video.mp4';audio=root/'decoded.wav';prefix=root/'second'
+            rows=np.zeros((2,61));rows[1,17]=.3
+            source.write_text(json.dumps(dict(blendShapes=rows.tolist(),fps=dict(num=30,den=1),name='test')))
+            video.write_bytes(b'fixture-provenance')
+            with wave.open(str(audio),'wb') as wav:
+                wav.setnchannels(1);wav.setsampwidth(2);wav.setframerate(16000);wav.writeframes(bytes(1000*2))
+            argv=['prepare_mojia_work','--clip',str(source),'--video',str(video),'--decoded-audio',str(audio),'--reference-profile',str(reference),'--prefix',str(prefix)]
+            with patch.object(sys,'argv',argv),redirect_stdout(io.StringIO()):main()
+            p=json.loads((root/'second_MOJIA_MOTOR_TARGETS_60fps_PROFILE.json').read_text())
+            ids,positions,fps=load_targets(root/'second_MOJIA_MOTOR_TARGETS_60fps.json',p,root/'second.wav',ROOT/'mojia/墨甲9.23.json')
+            self.assertEqual(fps,60)
+            self.assertEqual(len(positions),4)
+            np.testing.assert_array_equal(positions[0],positions[1])
+            np.testing.assert_array_equal(positions[2],positions[3])
+            self.assertNotIn('blink_trial',p)
+            self.assertEqual(p['work_provenance']['original_frames'],2)
+            self.assertEqual(reference.read_bytes(),before)
+
+
 class MojiaBlinkTests(unittest.TestCase):
     def fixture(self):
         ids = [5, 6, 20, 21, 8, 31]

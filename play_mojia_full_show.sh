@@ -50,7 +50,7 @@ fi
 if [[ "$home_only" == 1 ]]; then
     printf '仅执行35轴缓慢回中，不启动相机或音频。\n日志：%s/performance\n' "$RUN_DIR"
 else
-    printf '先35轴缓慢回中，再完整歌曲＋横向眼球/颈部跟踪；60 Hz定时控制、分步反馈。\n回中后ID7/22保持原位；音量为原始基准的3倍幅度。\n监控：http://127.0.0.1:8765/\n日志：%s/performance\nCtrl+C 可停止，停止后保持颈部扭矩。\n' "$RUN_DIR"
+    printf '先35轴缓慢回中，再完整音频与表情＋横向眼球/颈部跟踪；60 Hz定时控制、分步反馈。\n回中后ID7/22保持原位；音量为原始基准的3倍幅度。\n监控：http://127.0.0.1:8765/\n日志：%s/performance\nCtrl+C 可停止，停止后保持颈部扭矩。\n' "$RUN_DIR"
 fi
 printf '%s\n' "$RUN_DIR" > outputs/mojia/latest_full_show.txt
 exec "$PYTHON" -u tools/mojia_performance.py "${COMMON[@]}" --output "$RUN_DIR/performance" "$@"
