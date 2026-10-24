@@ -744,8 +744,7 @@
       "feedback_max": 2050,
       "initial_settle_tolerance_counts": 32,
       "initial_settle_basis": "Mojia startup observation: approximately 26 counts position error at a bounded goal; target/device/load guards remain active",
-      "speed_trial_note": "User requested ID31 600 counts/s comparison against the completed 300 counts/s playback",
-      "max_acceleration_counts_s2": 128
+      "speed_trial_note": "User requested ID31 600 counts/s comparison against the completed 300 counts/s playback"
     },
     {
       "id": 35,
@@ -771,8 +770,7 @@
       "register_write_verification": "Pending bounded RAM write/readback during explicit arm",
       "position_feedback_tolerance_counts": 5,
       "feedback_min": 2040,
-      "feedback_max": 2247,
-      "max_acceleration_counts_s2": 128
+      "feedback_max": 2247
     },
     {
       "id": 36,
@@ -1146,13 +1144,18 @@
   },
   "software_acceleration_revision": {
     "limits_counts_s2": {
-      "31": 128,
       "32": 64,
       "33": 64,
-      "34": 64,
-      "35": 128
+      "34": 64
     },
-    "source": "2026-10-24 user requested five-axis software acceleration, hardware acceleration unchanged",
-    "acceptance": "offline validation passed; physical playback pending"
+    "removed_ids": [
+      31,
+      35,
+      36
+    ],
+    "source": "2026-10-24 user removed mouth software acceleration limits; neck64 and all other settings unchanged",
+    "acceptance": "user accepted this wz2 replay",
+    "acceptance_run": "outputs/mojia/manual_show_20261024_193813_305843/performance",
+    "user_feedback": "效果不错，保存"
   }
 }

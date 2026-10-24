@@ -90,7 +90,7 @@ class MojiaGazeTests(unittest.TestCase):
         self.assertTrue(all('speed_counts_s' not in a for a in c['control']['axes']))
         runtime=tracking_profile(c,p,[m['id'] for m in p['motors']])
         self.assertEqual({m['id']:m['max_acceleration_counts_s2'] for m in runtime['motors']
-                          if 'max_acceleration_counts_s2' in m},{31:128,32:64,33:64,34:64,35:128})
+                          if 'max_acceleration_counts_s2' in m},{32:64,33:64,34:64})
         for m in runtime['motors']:
             self.assertNotIn(m['id'],(9,24))
             self.assertEqual(m['max_speed_counts_s'],1200 if m['id'] in (5,6,20,21) else 900)

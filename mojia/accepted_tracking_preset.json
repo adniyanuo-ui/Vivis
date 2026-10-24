@@ -2,7 +2,7 @@
   "schema_version": "mojia-accepted-tracking-preset-1.0",
   "date": "2026-10-24",
   "config_path": "mojia/person_gaze.json",
-  "config_sha256": "6fa10f8976ade83e9a4cf3186abb28479537ce9237312fd5acadf0b8f1a3af77",
+  "config_sha256": "f2901d7799df25d247cb0aacc32a4e86bfa2fbd8ea56101d9c111ddb11cac7dc",
   "basis": "Previously accepted natural1200 performance; subsequent speed unification and all-axis raw acceleration0 verified by register readback only, playback observation pending",
   "hardware_registers": [
     {
@@ -954,11 +954,9 @@
     "default_mapped_speed_counts_s": 900,
     "eye_speed_counts_s": 900,
     "software_acceleration_counts_s2": {
-      "31": 128,
       "32": 64,
       "33": 64,
-      "34": 64,
-      "35": 128
+      "34": 64
     }
   },
   "acceptance_evidence": {
@@ -995,6 +993,24 @@
       "hardware_readback": "outputs/mojia/accepted_natural1200_readback_20261024_160045.json",
       "software_neck_load_threshold": 350,
       "playback_profile_sha256": "c30201b59bc0350a1117e52f831ddf89dd39c44d15bf71ca556f60006b3f88ab"
+    },
+    "mouth_software_limit_removal": {
+      "directory": "outputs/mojia/manual_show_20261024_193813_305843/performance",
+      "completed": true,
+      "audio_seconds": 27.434022929704952,
+      "control_ticks": 1646,
+      "read_requests": 10065,
+      "read_failures": 52,
+      "user_feedback": "效果不错，保存",
+      "hardware_parameters_changed": false,
+      "followup_issue": {
+        "directory": "outputs/mojia/manual_show_20261024_194040_307555/performance",
+        "stopped_at_audio_s": 22.84917792970373,
+        "error": "Servo30 status0x20, simultaneous position field53487 outside single-turn range",
+        "post_stop_readback": "outputs/mojia/id30_alarm_readback_20261024_194301.json",
+        "operator_observation": "没有明显卡滞、拉扯或异响",
+        "investigation_pending": true
+      }
     }
   },
   "speed_unification": {
@@ -1051,25 +1067,33 @@
     "semantics": "Raw0 requested by operator; effective physical acceleration for this SM45BL firmware remains unconfirmed"
   },
   "software_motion_revision": {
-    "baseline_commit": "f13d381",
+    "baseline_commit": "7075574",
     "date": "2026-10-24",
     "limits_counts_s2": {
-      "31": 128,
       "32": 64,
       "33": 64,
-      "34": 64,
-      "35": 128
+      "34": 64
     },
     "neck_shaped_once": true,
     "lost_face": "Existing hold and release, then smooth active eye/neck return to2047; reacquisition resumes following",
     "hardware_writes": false,
-    "playback_acceptance_pending": true,
+    "playback_acceptance_pending": false,
     "full_show_held_ids": [
       7,
       22,
       33,
       34
     ],
-    "playback_profile_sha256": "b35c974c20a7586242c7ddb1074334790b4a92dc8ef9b4d554467d0dfa70c472"
+    "playback_profile_sha256": "70ecd554d04a116b66df09ed055b59198baa5280fc920c2b65c63d891e5074a6",
+    "mouth_limits_removed_ids": [
+      31,
+      35,
+      36
+    ],
+    "accepted_work": "wz2_expression15",
+    "accepted_run": "outputs/mojia/manual_show_20261024_193813_305843/performance",
+    "user_feedback": "效果不错，保存",
+    "other_work_replay_pending": true,
+    "accepted_wz2_profile_sha256": "234736a5cd571cb9d7cc542be89e6f9910cfb73daef048c5581475247ae870bb"
   }
 }
