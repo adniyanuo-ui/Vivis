@@ -270,10 +270,12 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             bus=Bus(profile['port'],profile['baud'])
         result['serial_backend']=profile.get('serial_backend','local')
         result['sdk_transaction_timeout_ms']=profile.get('sdk_transaction_timeout_ms')
-        positions=[]
+        positions=[];snapshot_deadline=time.monotonic()+10
         for sid in ids:
             if should_stop():raise RuntimeError('Stopped during preflight')
-            state=bus.snapshot(sid);motor=motors[sid]
+            state=(startup_feedback(bus.snapshot,sid,snapshot_deadline,result['startup_communication_recoveries'],
+                                    should_stop,stop.wait) if scheduled_feedback else bus.snapshot(sid))
+            motor=motors[sid]
             result['preflight_snapshots'].append(state)
             if state['model_raw']!=motor['model_raw_expected']:raise RuntimeError(f'{sid}: model mismatch')
             if state['mode']!=0 or state['torque_enable']!=1:raise RuntimeError(f'{sid}: requires existing position mode and enabled torque')
@@ -345,9 +347,10 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             # Startup checks use the original timeout/retry. Playback reads are
             # individually bounded and retried by scheduling a fresh sample.
             bus.set_read_policy(3,retry=False)
-            feedback_scheduler=BudgetedFeedback(bus,ids)
+            camera_eye_id=gaze_override.camera_eye_id
+            feedback_scheduler=BudgetedFeedback(bus,ids,priority_ids=(camera_eye_id,32))
             result['runtime_feedback_schedule']=dict(timeout_ms=3,budget_ms=7,max_requests_per_tick=8,
-                priority_ids=[23,32],priority_period_s=.08,inline_retry=False)
+                priority_ids=[camera_eye_id,32],priority_period_s=.08,inline_retry=False)
         next_command_at=None
         result['phase']='playing'
         clock.start();last_tick=time.monotonic();previous_index=-1;skipped=0;started=time.monotonic()
@@ -416,7 +419,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 sid=min(ids,key=lambda axis:clocks[axis])
                 # Keep the eye movement evidence fresh with the same number of
                 # serial reads. Remaining axes retain oldest-first polling.
-                if mojia_gaze and now-clocks[23]>=.1:sid=23
+                if mojia_gaze and now-clocks[gaze_override.camera_eye_id]>=.1:sid=gaze_override.camera_eye_id
                 try:
                     state=feedback_checked(sid)
                 except (CorruptResponse,ReadTimeout) as exc:

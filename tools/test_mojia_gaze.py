@@ -12,8 +12,14 @@ from xiaobai_runtime.mapping import inputs
 from mojia_track_person import tracking_start_position
 
 
-def config():
+def baseline_config():
     c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
+    c['neck'].update(range_mode='offset',offset_counts=80)
+    return c
+
+
+def config():
+    c=baseline_config()
     c['control'].update(camera_mount='eye',camera_eye='right',mount_confirmed=True,vertical_enabled=False)
     c['control']['axes']=[a for a in c['control']['axes'] if a['coordinate']=='x']
     for a in c['control']['axes']:a.update(negative=2007,positive=2087)
@@ -38,8 +44,54 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_device_range_uses_both_asymmetric_hardware_endpoints(self):
+        from xiaobai_runtime.mojia_gaze import neck_command_limits
+        from xiaobai_runtime.mojia_performance import tracking_profile
+        c=config();c['neck'].update(range_mode='device');c['neck'].pop('offset_counts')
+        p=profile();motor=next(m for m in p['motors'] if m['id']==32)
+        motor.update(device_min=1600,device_max=2600)
+        validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,True)
+        self.assertEqual(neck_command_limits(c,p),(1600,2600))
+        runtime=tracking_profile(c,p,[m['id'] for m in p['motors']])
+        neck=next(m for m in runtime['motors'] if m['id']==32)
+        self.assertEqual((neck['safe_min'],neck['safe_max']),(1600,2600))
+        for direction,initial,endpoint in [(1,2599.5,2600),(-1,1600.5,1600)]:
+            controller=MojiaPursuit(c,[8,23,32],[300,300,900],True,neck_bounds=(1600,2600))
+            eye=2087 if direction>0 else 2007
+            old=np.array([eye,eye,initial],dtype=float)
+            for i in range(120):
+                now=10+(i+1)/60
+                old,_=controller.step(packet(now,float(direction)),old,1/60,now)
+                self.assertTrue(1600<=old[-1]<=2600)
+            self.assertEqual(old[-1],endpoint)
+        with self.assertRaisesRegex(ValueError,'requires the hardware profile'):
+            MojiaPursuit(c,[8,23,32],[300,300,900],True)
+
+    def test_final_count_at_device_limit_is_sent_and_return_window_scales(self):
+        scheduler=NeckCommandScheduler(1601,10,900,False,endpoints=(1600,2600))
+        self.assertEqual(scheduler.step(1600,10.05),(1600,900))
+        c=config();c['neck'].update(range_mode='device');c['neck'].pop('offset_counts')
+        controller=MojiaPursuit(c,[8,23,32],[300,300,900],True,neck_bounds=(1600,2600))
+        window=controller.return_window(2600)
+        self.assertGreater(window,5.)
+        old=np.array([2047.,2047.,2600.])
+        for i in range(int(np.ceil(window*60))):
+            now=10+(i+1)/60
+            old,_=controller.step(packet(now,None),old,1/60,now,returning=True)
+        self.assertLess(abs(old[-1]-2047),1.)
+
+    def test_left_camera_uses_left_yaw_and_pitch_as_its_motion_reference(self):
+        c=baseline_config();c['control']['camera_eye']='left'
+        controller=MojiaPursuit(c,[8,23,7,22,32],[300,300,100,100,900],True)
+        controller.policy.weight=1.
+        old=np.array([2055.,2037.,2057.,2057.,2047.])
+        controller.step(packet(10.,0.),old,1/60,10.)
+        self.assertEqual(controller.camera_eye_id,8)
+        self.assertGreater(controller.policy.xy[0],0.)
+        self.assertLess(controller.policy.xy[1],0.)
+
     def test_growing_error_recruits_neck_after_eyes_and_preserves_eye_outputs(self):
-        c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
+        c=baseline_config()
         coupled=MojiaPursuit(c,[8,23,7,22,32],[300,300,100,100,900],True)
         eyes=MojiaPursuit(c,[8,23,7,22],[300,300,100,100])
         previous=np.full(5,2047.);flat=previous[:4].copy();eye_start=neck_start=None
@@ -149,7 +201,7 @@ class MojiaGazeTests(unittest.TestCase):
         self.assertLess(changes,40)
 
     def test_independent_vertical_speed_and_bad_axis_limit(self):
-        c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
+        c=baseline_config()
         validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',False,True)
         for value in [True,0,-1,301,float('nan')]:
             invalid=copy.deepcopy(c);invalid['control']['axes'][-1]['speed_counts_s']=value
@@ -164,7 +216,7 @@ class MojiaGazeTests(unittest.TestCase):
             previous=new
 
     def test_vertical_pair_opposite_encoders_and_horizontal_independence(self):
-        c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
+        c=baseline_config()
         validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',False,True)
         horizontal=config()
         for a in horizontal['control']['axes']:a.update(negative=1987,positive=2107)
@@ -344,11 +396,24 @@ class MojiaPerformanceTests(unittest.TestCase):
     def setup_performance(self):
         from xiaobai_runtime.mojia_performance import tracking_profile
         from unittest.mock import Mock
-        c=json.loads((ROOT/'mojia/person_gaze.json').read_text());p=profile()
+        c=baseline_config();c['control']['camera_eye']='right';p=profile()
         ids=[m['id'] for m in p['motors']]
         p=tracking_profile(c,p,ids)
         receiver=Mock();receiver.poll.side_effect=lambda now:packet(now,.3)
         return c,p,ids,receiver
+
+    def test_left_camera_adapter_observes_only_its_own_eye_encoder(self):
+        from xiaobai_runtime.mojia_performance import MojiaPlaybackGaze
+        c,p,ids,r=self.setup_performance();c['control']['camera_eye']='left'
+        adapter=MojiaPlaybackGaze(c,p,ids,r)
+        initial=np.full(len(ids),2047.);initial[ids.index(8)]=2050.;initial[ids.index(23)]=2030.
+        adapter.prepare(np.array([initial]),initial,[],10.)
+        self.assertEqual(adapter.controller.eye_observation,2050.)
+        adapter.observe(23,dict(position=2070),10.1)
+        self.assertEqual(adapter.controller.eye_observation,2050.)
+        adapter.observe(8,dict(position=2053),10.2)
+        self.assertEqual(adapter.controller.eye_observation,2053.)
+        self.assertEqual(adapter.controller.eye_motion,1.)
 
     def test_tracking_changes_only_owned_columns_and_preserves_song(self):
         from xiaobai_runtime.mojia_performance import MojiaPlaybackGaze
@@ -430,9 +495,10 @@ class MojiaPerformanceTests(unittest.TestCase):
         from xiaobai_runtime.mojia_performance import MojiaPlaybackGaze
         from xiaobai_runtime.playback import play
         from xiaobai_runtime.protocol import ReadTimeout,CorruptResponse
-        for face_hz in (30,60):
-            with self.subTest(face_hz=face_hz):
+        for face_hz,eye in ((30,'left'),(60,'right')):
+            with self.subTest(face_hz=face_hz,camera_eye=eye):
                 c,p,ids,r=self.setup_performance();fixture,bus,clock=PlaybackTests().fixture()
+                c['control']['camera_eye']=eye
                 for key in ['audio_device','hardware_stop_description','physical_audio_output_confirmed','actuator_latency_ms','stop_method']:
                     p[key]=fixture[key]
                 p.update(serial_backend='feetech_python',feedback_mode='short_registers',
@@ -442,7 +508,11 @@ class MojiaPerformanceTests(unittest.TestCase):
                 def state(sid):
                     return dict(position=positions[sid],temperature_c=25,load_raw=0,status_register=0,
                                 voltage_raw=120 if 31<=sid<=35 else 60)
+                snapshot_loss=[False]
                 def snapshot(sid):
+                    if sid==2 and not snapshot_loss[0]:
+                        snapshot_loss[0]=True
+                        raise CorruptResponse('captured ID2 preflight snapshot failure')
                     raw=bytearray(40);raw[18]=4;raw[21:24]=bytes(c['neck']['observed_pid_raw'])
                     raw[26:28]=bytes(c['neck']['observed_deadband_counts'])
                     ram=bytearray(31);ram[1]=c['neck']['observed_acceleration_raw']
@@ -472,9 +542,10 @@ class MojiaPerformanceTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.feetech_sdk.OfficialSDKBus',return_value=bus),patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
                     result=play(p,ids,trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP',gaze_override=a)
                 self.assertTrue(result['completed'])
+                self.assertEqual(result['runtime_feedback_schedule']['priority_ids'],[a.camera_eye_id,32])
                 self.assertTrue(startup_loss[0])
-                self.assertEqual(len(result['startup_communication_recoveries']),1)
-                self.assertTrue(result['startup_communication_recoveries'][0]['recovered'])
+                self.assertEqual({r['id'] for r in result['startup_communication_recoveries']},{2,4})
+                self.assertTrue(all(r['recovered'] for r in result['startup_communication_recoveries']))
                 bus.set_read_policy.assert_called_once_with(3,retry=False)
                 self.assertEqual(sum(len(e.get('feedback_errors',[])) for e in result['events']),1)
                 for e in result['events']:
@@ -484,7 +555,7 @@ class MojiaPerformanceTests(unittest.TestCase):
                     self.assertEqual(e['goals'][31],trajectory[source,ids.index(31)])
                 self.assertGreaterEqual(len(result['events']),20)
                 samples=[s for e in result['events'] for s in e.get('feedback_samples',[])]
-                for sid in (23,32):self.assertGreaterEqual(sum(s['id']==sid for s in samples),3)
+                for sid in (a.camera_eye_id,32):self.assertGreaterEqual(sum(s['id']==sid for s in samples),3)
 
     def test_audio_loop_keeps_jaw_and_prioritizes_eye_feedback(self):
         import tempfile,time,gc

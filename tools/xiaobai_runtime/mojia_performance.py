@@ -6,7 +6,7 @@ import threading
 import numpy as np
 
 from .mapping import ROOT
-from .mojia_gaze import validate_mojia, MojiaPursuit, NeckCommandScheduler
+from .mojia_gaze import validate_mojia, MojiaPursuit, NeckCommandScheduler,neck_command_limits
 
 
 class PreviewPublisher:
@@ -49,7 +49,8 @@ def tracking_profile(config, profile, ids):
                               safe_max=max(a['negative'],a['positive']),
                               max_speed_counts_s=a.get('speed_counts_s',config['control']['speed_counts_s']))
     n=config['neck']
-    motors[32].update(safe_min=2047-n['offset_counts'],safe_max=2047+n['offset_counts'],max_speed_counts_s=n['speed_counts_s'])
+    low,high=neck_command_limits(config,profile)
+    motors[32].update(safe_min=low,safe_max=high,max_speed_counts_s=n['speed_counts_s'])
     held=set(config['control'].get('held_eye_ids',[]))
     if not held<={7,22} or held&set(owned):raise ValueError('Invalid held eye ownership')
     p['diagnostic_command_ids']=sorted((set(profile['diagnostic_command_ids'])|{32})-held)
@@ -76,11 +77,14 @@ class MojiaPlaybackGaze:
                 if motors[sid][key]!=expected_motors[sid][key]:
                     raise ValueError('Mojia tracking limits/speeds must match the saved preset')
         self.speeds=[motors[sid]['max_speed_counts_s'] for sid in self.owned]
-        self.controller=MojiaPursuit(config,self.owned,self.speeds,True)
+        self.controller=MojiaPursuit(config,self.owned,self.speeds,True,
+                                     neck_bounds=(motors[32]['safe_min'],motors[32]['safe_max']))
+        self.camera_eye_id=self.controller.camera_eye_id
         self.previous=None;self.scheduler=None;self.last_diagnostic={}
         self.status_path=status_path;self.last_publish=0.;self.round=round_number;self.repeat=repeat
         self.publisher=PreviewPublisher(status_path) if status_path is not None else None
         self.audio_seconds=0.;self.duration=0.;self.feedback=None
+        self.returning=False
 
     def prepare(self, trajectory, measured, snapshots, now):
         for s in snapshots:
@@ -93,9 +97,9 @@ class MojiaPlaybackGaze:
                         or ram[1]!=n['observed_acceleration_raw']):
                     raise RuntimeError('ID32 no longer matches saved hardware preset')
         self.previous=np.asarray(measured,dtype=float)[self.columns].copy()
-        self.controller.observe_eye(self.previous[self.owned.index(23)],now)
+        self.controller.observe_eye(self.previous[self.owned.index(self.camera_eye_id)],now)
         self.scheduler=NeckCommandScheduler(self.previous[self.owned.index(32)],now,self.speeds[-1],
-                                           adaptive_speed=self.config['neck']['adaptive_speed'])
+                                           adaptive_speed=self.config['neck']['adaptive_speed'],endpoints=self.controller.neck_bounds)
         # Approach the song's first face pose while holding the tracked axes at
         # their measured starting pose; no fast recenter jump between rounds.
         result=np.array(trajectory,copy=True)
@@ -104,13 +108,14 @@ class MojiaPlaybackGaze:
 
     def observe(self,sid,state,now):
         self.feedback=dict(id=sid,**state)
-        if sid==23:self.controller.observe_eye(state['position'],now)
+        if sid==self.camera_eye_id:self.controller.observe_eye(state['position'],now)
 
     def set_audio_time(self,seconds,duration):
         self.audio_seconds,self.duration=seconds,duration
 
     def apply(self,base,last,dt,now):
-        returning=self.audio_seconds>=max(0.,self.duration-5)
+        self.returning=self.returning or self.audio_seconds>=max(0.,self.duration-self.controller.return_window(self.previous[-1]))
+        returning=self.returning
         self.previous,d=self.controller.step(self.receiver.poll(now),self.previous,dt,now,returning=returning)
         result=np.array(base,copy=True);result[self.columns]=self.previous
         neck_column=self.ids.index(32)

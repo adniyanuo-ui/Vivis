@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from xiaobai_runtime.mapping import ROOT, read_json, live_preflight
-from xiaobai_runtime.mojia_gaze import validate_mojia, MojiaPursuit, NeckCommandScheduler
+from xiaobai_runtime.mojia_gaze import validate_mojia, MojiaPursuit, NeckCommandScheduler,neck_command_limits
 from xiaobai_runtime.person_gaze import TargetReceiver
 from xiaobai_runtime.playback import check_feedback
 
@@ -36,6 +36,7 @@ def main():
     parser.add_argument('--profile', type=Path, required=True)
     parser.add_argument('--port', default='/dev/ttyCH343USB0')
     parser.add_argument('--neck', action='store_true')
+    parser.add_argument('--hold-vertical-eyes',action='store_true',help='Send no vertical eye commands during this trial')
     parser.add_argument('--direction-trial', action='store_true')
     parser.add_argument('--seconds', type=float, default=20)
     parser.add_argument('--check', action='store_true', help='Offline configuration validation; no hardware opened')
@@ -44,6 +45,9 @@ def main():
     if not np.isfinite(args.seconds) or not 10 <= args.seconds <= 600:
         parser.error('Commissioning duration must be 10..600 seconds')
     config, profile = read_json(args.config), read_json(args.profile)
+    if args.hold_vertical_eyes:
+        config['control']['vertical_enabled']=False
+        config['control']['axes']=[a for a in config['control']['axes'] if a['coordinate']!='y']
     validate_mojia(config, profile, ROOT/'mojia/墨甲9.23.json', args.neck, args.direction_trial)
     ids = [a['id'] for a in config['control']['axes']]+([32] if args.neck else [])
     motors = {m['id']: dict(m) for m in profile['motors'] if m['id'] in ids}
@@ -54,7 +58,8 @@ def main():
                  max_speed_counts_s=axis.get('speed_counts_s',config['control'].get('speed_counts_s',60)))
     if args.neck:
         n = config['neck']
-        motors[32].update(safe_min=2047-n['offset_counts'], safe_max=2047+n['offset_counts'],
+        low,high=neck_command_limits(config,profile)
+        motors[32].update(safe_min=low, safe_max=high,
                           max_speed_counts_s=n['speed_counts_s'])
     selected = {**profile, 'port': args.port, 'motors': list(motors.values())}
     live_preflight(selected, ids)
@@ -109,12 +114,14 @@ def main():
                     raise RuntimeError(f'ID{sid}: temperature ceiling exceeds device protection')
                 check_feedback(sid,dict(position=s['position_raw'],**{k:s[k] for k in ['load_raw','temperature_c','voltage_raw','status_register']}),m)
         speeds = {sid:int(motors[sid]['max_speed_counts_s']) for sid in ids}
-        controller = MojiaPursuit(config, ids, [speeds[sid] for sid in ids], args.neck)
+        controller = MojiaPursuit(config, ids, [speeds[sid] for sid in ids], args.neck,
+                                 neck_bounds=neck_command_limits(config,profile) if args.neck else None)
         previous = np.array([initial_positions[sid] for sid in ids],dtype=float)
         start = last = time.monotonic();next_tick = start+1/60;poll = 0
-        controller.observe_eye(initial_positions[23],start)
+        controller.observe_eye(initial_positions[controller.camera_eye_id],start)
         neck_scheduler=NeckCommandScheduler(initial_positions[32],start,speeds[32],
-                                            adaptive_speed=config['neck'].get('adaptive_speed',True)) if args.neck else None
+                                            adaptive_speed=config['neck'].get('adaptive_speed',True),endpoints=controller.neck_bounds) if args.neck else None
+        returning=False
         while time.monotonic()-start < args.seconds:
             if stopped or stop_file.exists():
                 raise RuntimeError('Operator stop')
@@ -125,16 +132,17 @@ def main():
             if dt>.1:
                 raise RuntimeError('Tracking watchdog stalled >100ms')
             packet = receiver.poll(now)
-            previous, diagnostic = controller.step(packet,previous,dt,now,returning=now-start>=args.seconds-5)
+            returning=returning or now-start>=args.seconds-controller.return_window(previous[ids.index(32)] if args.neck else 2047)
+            previous, diagnostic = controller.step(packet,previous,dt,now,returning=returning)
             goals = {sid:int(round(previous[i])) for i,sid in enumerate(ids)}
             if neck_scheduler is not None:
                 diagnostic['planned_neck_goal']=float(previous[ids.index(32)])
-                goals[32],speeds[32]=neck_scheduler.step(previous[ids.index(32)],now,returning=now-start>=args.seconds-5)
+                goals[32],speeds[32]=neck_scheduler.step(previous[ids.index(32)],now,returning=returning)
                 diagnostic['neck_speed_command']=speeds[32]
             bus.goals(goals,speeds)
             sid = ids[poll%len(ids)];poll+=1
             feedback = bus.feedback(sid);check_feedback(sid,feedback,motors[sid])
-            if sid == 23:
+            if sid == controller.camera_eye_id:
                 controller.observe_eye(feedback['position'],time.monotonic())
             result['events'].append(dict(seconds=now-start,goals=goals,feedback=dict(id=sid,**feedback),**diagnostic))
             if poll%12==0:
@@ -143,6 +151,7 @@ def main():
                              neck_speed_command=speeds.get(32),
                              neck_assist_reason=diagnostic['neck_assist_reason'],
                              image_error_x=diagnostic['image_error_x'],
+                             camera_eye=config['control']['camera_eye'],camera_eye_id=controller.camera_eye_id,
                              neck_requested_velocity=diagnostic['neck_requested_velocity'],
                              remaining_seconds=max(0,args.seconds-(now-start))))
             last = now;next_tick=max(next_tick+1/60,now+1/60)

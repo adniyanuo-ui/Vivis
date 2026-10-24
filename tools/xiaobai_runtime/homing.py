@@ -80,7 +80,10 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
     device thresholds, with no new per-axis software tuning.
     """
     from .playback import check_feedback,startup_feedback
-    guard();snapshots=[bus.snapshot(a['id']) for a in axes]
+    recoveries=report.setdefault('communication_recoveries',[])
+    guard();snapshot_deadline=time.monotonic()+10
+    snapshots=[startup_feedback(bus.snapshot,a['id'],snapshot_deadline,recoveries,
+                should_stop=lambda:guard() or False) for a in axes]
     validate_home_axes(axes,snapshots)
     states={s['id']:s for s in snapshots};neutral={a['id']:a['neutral'] for a in axes}
     speed=int(max_speed)
@@ -102,7 +105,7 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
     report.update(completed=False,ids=list(neutral),max_speed_counts_s=speed,
                   planned_duration_s=duration,original_speeds=original,temporary_enable_ids=sorted(temporary),
                   neutral_targets=neutral,initial_positions={s['id']:s['position_raw'] for s in snapshots},
-                  samples=[],communication_recoveries=[],ram_writes=[],restored_speeds=False)
+                  samples=[],communication_recoveries=recoveries,ram_writes=[],restored_speeds=False)
     def check(sid,state):
         tolerance=task_motors.get(sid,{}).get('initial_settle_tolerance_counts',20)
         home_check(state,states[sid],neutral[sid],tolerance)

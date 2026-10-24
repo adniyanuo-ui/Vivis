@@ -228,7 +228,7 @@ class GazePolicy:
             except (ValueError, KeyError, TypeError, AttributeError):
                 pass
         if visible:
-            vertical = self.vertical_enabled and self.control.get('camera_eye')=='right'
+            vertical = self.vertical_enabled and self.control.get('camera_eye') in ('left','right')
             target = np.array([packet['target']['x'], packet['target']['y'] if vertical else 0.])
             error = np.sign(target) * np.maximum(0, np.abs(target) - c['deadband'])
             alpha = -math.expm1(-dt / c['filter_tau_s'])

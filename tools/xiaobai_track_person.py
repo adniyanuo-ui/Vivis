@@ -122,6 +122,7 @@ def main():
                            'simulated_xy': (xy * weight).tolist(), 'tracking_weight': weight,
                            'actuators_opened': False,
                            'mount': config['control']['camera_mount']}
+                current['camera_eye']=config['control'].get('camera_eye')
                 if config.get('schema_version')=='mojia-person-gaze-1.0':
                     # The camera service has no actuator feedback; show image direction,
                     # not an integrator pretending the eye moved with its commands.

@@ -11,6 +11,25 @@ from .person_gaze import GazePolicy, axis_normalized, axis_position, finite, val
 from .mapping import limit_step
 
 
+def camera_axes(config):
+    """Select the moving camera's encoder reference from its physical mount."""
+    c=config['control'];side=c.get('camera_eye') or 'right'
+    if side not in ('left','right'):raise ValueError('Unknown camera eye')
+    axes={a['name']:a for a in c['axes']}
+    if side+'_yaw' not in axes:raise ValueError('Missing camera eye yaw axis')
+    return axes[side+'_yaw'],axes.get(side+'_pitch')
+
+
+def neck_command_limits(config,profile=None):
+    n=config['neck'];mode=n.get('range_mode','offset')
+    if mode=='device':
+        if profile is None:raise ValueError('Device neck range requires the hardware profile')
+        motor=next(m for m in profile['motors'] if m['id']==n['id'])
+        return motor['device_min'],motor['device_max']
+    if mode!='offset':raise ValueError('Unknown neck range mode')
+    return 2047-n['offset_counts'],2047+n['offset_counts']
+
+
 def validate_mojia(config, profile, calibration, neck=False, trial=False):
     validate_config(config)
     if config.get('schema_version') != 'mojia-person-gaze-1.0' or profile.get('schema_version') != 'mojia-playback-0.1':
@@ -24,8 +43,8 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Invalid eye speed for commissioning stage')
     if not c.get('mount_confirmed') or c['camera_mount'] not in ('fixed', 'eye'):
         raise ValueError('Confirm camera mounting before motion')
-    if c['camera_mount'] == 'eye' and c.get('camera_eye') != 'right':
-        raise ValueError('This commissioning configuration uses the right eye camera')
+    if c['camera_mount'] == 'eye' and c.get('camera_eye') not in ('left','right'):
+        raise ValueError('Confirm which eye carries the camera')
     if not trial and not c.get('calibration_confirmed'):
         raise ValueError('Confirm eye direction before normal tracking')
     if neck and not trial and not config['neck']['direction_confirmed']:
@@ -60,12 +79,16 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Need positive camera width for image growth threshold')
     if type(n.get('adaptive_speed',True)) is not bool:
         raise ValueError('Invalid neck adaptive speed flag')
+    low,high=neck_command_limits(config,profile)
+    if n.get('range_mode','offset')=='offset' and (
+            not finite(n['offset_counts']) or not 1<=n['offset_counts']<=(80 if trial else 160)):
+        raise ValueError('Invalid bounded Mojia neck setup')
     if (n['id'] != 32 or n['sign'] not in (-1, 1) or type(n['sign']) is not int
-            or not finite(n['offset_counts']) or not 1 <= n['offset_counts'] <= (80 if trial else 160)
             or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 900
             or not finite(n['acceleration_counts_s2']) or not 0 < n['acceleration_counts_s2'] <= 200
             or motors[32]['model_raw_expected'] != 10760
-            or not motors[32]['device_min'] <= 2047-n['offset_counts'] < 2047+n['offset_counts'] <= motors[32]['device_max']):
+            or not finite(low) or not finite(high)
+            or not motors[32]['device_min']<=low<2047<high<=motors[32]['device_max']):
         raise ValueError('Invalid bounded Mojia neck setup')
     for key,default,low,high in [('gain_counts_s',n['speed_counts_s'],1,180),
                                 ('deadband',.18,.05,.5),
@@ -139,8 +162,13 @@ class VisualNeckAssist:
 
 
 class MojiaPursuit:
-    def __init__(self, config, ids, speeds, neck=False):
+    def __init__(self, config, ids, speeds, neck=False,neck_bounds=None):
         self.config, self.ids, self.speeds, self.neck = config, ids, np.asarray(speeds), neck
+        self.camera_yaw,self.camera_pitch=camera_axes(config)
+        self.camera_eye_id=self.camera_yaw['id']
+        if neck:
+            if neck_bounds is None:neck_bounds=neck_command_limits(config)
+            self.neck_bounds=tuple(neck_bounds)
         self.policy = GazePolicy(config)
         self.velocity = 0.
         self.assist = VisualNeckAssist(config)
@@ -149,8 +177,14 @@ class MojiaPursuit:
         self.eye_motion_at = -math.inf
         self.measured_eye = False
 
+    def return_window(self,position):
+        if not self.neck:return 5.
+        a=self.config['neck']['acceleration_counts_s2'];speed=abs(self.velocity)
+        distance=abs(position-2047)+speed*speed/(2*a)
+        return max(5.,speed/a+2*math.sqrt(distance/a)+1.)
+
     def observe_eye(self, position, now, measured=True):
-        """Record ID23 feedback without adding serial reads to the control loop."""
+        """Record the camera eye's feedback without adding serial reads."""
         if not math.isfinite(position) or not math.isfinite(now):
             raise ValueError('Invalid eye observation')
         if measured and not self.measured_eye:
@@ -166,13 +200,12 @@ class MojiaPursuit:
 
     def step(self, packet, previous, dt, now, returning=False):
         c, n = self.config['control'], self.config['neck']
-        anchor = next(a for a in c['axes'] if a['name'] == 'right_yaw')
-        vertical=next((a for a in c['axes'] if a['name']=='right_pitch'),None)
-        applied = [axis_normalized(anchor, previous[self.ids.index(23)]),
-                   axis_normalized(vertical,previous[self.ids.index(22)]) if vertical else 0.]
+        anchor,vertical=self.camera_yaw,self.camera_pitch
+        applied = [axis_normalized(anchor, previous[self.ids.index(anchor['id'])]),
+                   axis_normalized(vertical,previous[self.ids.index(vertical['id'])]) if vertical else 0.]
         xy, weight, state = self.policy.step(packet, now, dt, applied)
         if not self.measured_eye:
-            self.observe_eye(previous[self.ids.index(23)], now, measured=False)
+            self.observe_eye(previous[self.ids.index(self.camera_eye_id)], now, measured=False)
         eye_motion = self.eye_motion if now-self.eye_motion_at <= self.config['transport']['max_age_s'] else 0.
         if anchor['positive'] < anchor['neutral']:
             eye_motion = -eye_motion
@@ -192,7 +225,7 @@ class MojiaPursuit:
             else:
                 span = abs(anchor['positive' if eye >= 0 else 'negative']-anchor['neutral'])
                 desired = self.assist.step(packet,state,eye,eye_motion,span)
-            low, high = 2047-n['offset_counts'], 2047+n['offset_counts']
+            low, high = self.neck_bounds
             distance = high-position if desired >= 0 else position-low
             cap = min(n['speed_counts_s'], math.sqrt(2*n['acceleration_counts_s2']*max(0., distance)))
             desired = float(np.clip(desired, -cap, cap))
@@ -209,9 +242,10 @@ class MojiaPursuit:
             image_error_x=self.assist.raw, filtered_image_error_x=self.assist.filtered,
             image_error_growth=self.assist.growth, camera_timestamp=self.assist.stamp,
             eye_motion_direction=eye_motion, eye_motion_source='encoder' if self.measured_eye else 'command_simulation',
+            camera_eye=c.get('camera_eye'),camera_eye_id=self.camera_eye_id,
             neck_assist_reason='returning' if returning else self.assist.reason,
             neck_requested_velocity=desired if self.neck else 0.,
-            neck_at_limit=bool(self.neck and abs(result[self.ids.index(32)]-2047)>=self.config['neck']['offset_counts']))
+            neck_at_limit=bool(self.neck and (result[self.ids.index(32)]<=low or result[self.ids.index(32)]>=high)))
 
 
 class NeckCommandScheduler:
@@ -220,11 +254,12 @@ class NeckCommandScheduler:
     This only shapes ID32 transport; the continuous eye/head planner and eye
     limits are unchanged. Speed remains bounded by the configured ceiling.
     """
-    def __init__(self, position, now, maximum_speed, adaptive_speed=True):
+    def __init__(self, position, now, maximum_speed, adaptive_speed=True,endpoints=()):
         self.goal=int(round(position))
         self.sent_at=now
         self.maximum_speed=int(maximum_speed)
         self.adaptive_speed=adaptive_speed
+        self.endpoints=set(endpoints)
         self.speed=min(50,self.maximum_speed) if adaptive_speed else self.maximum_speed
 
     def step(self, planned, now, returning=False):
@@ -234,7 +269,7 @@ class NeckCommandScheduler:
             raise ValueError('Invalid neck scheduler sample')
         delta=abs(goal-self.goal)
         final_home=returning and goal==2047
-        if delta and dt>=.04 and (delta>=2 or final_home):
+        if delta and dt>=.04 and (delta>=2 or final_home or goal in self.endpoints):
             # SMS fine speed units retain approximately 50-count/s precision.
             speed=math.ceil((delta/dt)/50)*50
             self.speed=min(self.maximum_speed,max(1,speed)) if self.adaptive_speed else self.maximum_speed

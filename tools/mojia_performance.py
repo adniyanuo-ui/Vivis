@@ -11,10 +11,37 @@ import numpy as np
 
 from mojia_player import load_targets, startup_target, feedback
 from xiaobai_runtime.mapping import ROOT, read_json, live_preflight
-from xiaobai_runtime.playback import play, check_feedback
+from xiaobai_runtime.playback import play, check_feedback,startup_feedback
 from xiaobai_runtime.person_gaze import TargetReceiver
 from xiaobai_runtime.mojia_performance import tracking_profile, MojiaPlaybackGaze
 from xiaobai_runtime.homing import home_all,validate_home_axes,home_check,homing_feedback_motor,write_ram_verified
+
+MOUTH_IDS=(12,13,27,28,29,31)
+
+
+def mouth_gain_targets(profile,ids,positions,gain):
+    """Scale mouth displacement from each calibrated neutral, retaining limits."""
+    if type(gain) not in (int,float) or not np.isfinite(gain) or gain<=0:
+        raise ValueError('Mouth gain must be finite and positive')
+    result=np.array(positions,dtype=float,copy=True)
+    if result.ndim!=2 or result.shape[1]!=len(ids) or not len(result) or not np.isfinite(result).all():
+        raise ValueError('Invalid mouth target matrix')
+    motors={m['id']:m for m in profile['motors']};report=dict(gain=float(gain),axes=[])
+    for sid in MOUTH_IDS:
+        if sid not in ids:raise ValueError(f'Missing mouth axis ID{sid}')
+        j=ids.index(sid);m=motors[sid];neutral=m['neutral'];before=result[:,j].copy()
+        low=max(m['safe_min'],m['device_min']);high=min(m['safe_max'],m['device_max'])
+        if not low<=neutral<=high:raise ValueError(f'ID{sid}: neutral outside mouth command limits')
+        with np.errstate(over='ignore',invalid='ignore'):
+            scaled=neutral+(before-neutral)*gain
+        if not np.isfinite(scaled).all():raise ValueError('Mouth gain overflow')
+        limited=np.clip(scaled,low,high);result[:,j]=limited
+        report['axes'].append(dict(id=sid,neutral=neutral,limits=[low,high],
+            original_range=[float(before.min()),float(before.max())],
+            requested_range=[float(scaled.min()),float(scaled.max())],
+            output_range=[float(limited.min()),float(limited.max())],
+            clipped_frames=int(np.count_nonzero(scaled!=limited)),total_frames=len(result)))
+    return result,report
 
 
 def configure_show_volume(device):
@@ -42,7 +69,7 @@ def configure_show_volume(device):
                      digital_trim=gain,output_amplitude_factor=3.,before=before,after=after)
 
 
-def prepare(config,profile,ids,positions,authorize_tongue=False):
+def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.):
     monitored=list(ids)+[32,33,34]
     if len(set(monitored))!=len(monitored):raise ValueError('Repeated motor ownership')
     p=tracking_profile(config,profile,monitored)
@@ -51,7 +78,7 @@ def prepare(config,profile,ids,positions,authorize_tongue=False):
     p['post_goal_quiet_ms']=1
     p['scheduled_feedback']=True
     motors={m['id']:m for m in p['motors']}
-    for sid in [12,13,27,28,29,31]:motors[sid]['max_speed_counts_s']=900
+    for sid in MOUTH_IDS:motors[sid]['max_speed_counts_s']=900
     if authorize_tongue:
         # Existing operator authorization for ID29 only; preserve hardware
         # alarms and device temperature ceiling. Never globally disable guards.
@@ -61,6 +88,8 @@ def prepare(config,profile,ids,positions,authorize_tongue=False):
                                       basis='Authorized ID29 observation; measured 36-count startup residual within device feedback range')
     trajectory=np.column_stack([positions,np.full((len(positions),3),2047.)])
     for sid in p['gaze_owner_ids']:trajectory[:,monitored.index(sid)]=2047.
+    trajectory,p['mouth_gain_report']=mouth_gain_targets(p,monitored,trajectory,mouth_gain)
+    p['mouth_motion_gain']=mouth_gain
     live_preflight(p,monitored)
     return p,monitored,trajectory
 
@@ -97,6 +126,7 @@ def main():
     parser.add_argument('--audio',type=Path,default=ROOT/'exmple/0001.wav')
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--repeat',type=int,default=3)
+    parser.add_argument('--mouth-gain',type=float,default=1.,help='Mouth displacement multiplier, clipped to existing command limits')
     parser.add_argument('--home-inventory',type=Path,default=ROOT/'mojia/homing_axes.json')
     parser.add_argument('--home-speed',type=int,default=60,help='Temporary neutral homing speed cap in counts/s')
     parser.add_argument('--home-only',action='store_true',help='Home all inventory axes; no camera, audio or task execution')
@@ -115,7 +145,7 @@ def main():
         config['control']['axes']=[a for a in config['control']['axes'] if a['id'] not in (7,22)]
         config['control']['held_eye_ids']=[7,22]
     ids,positions,fps=load_targets(args.targets,original,args.audio,ROOT/'mojia/墨甲9.23.json')
-    profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation)
+    profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation,args.mouth_gain)
     if fps!=60:parser.error('The reviewed combined controller requires the 60 FPS source')
     profile['face_update_hz']=args.face_fps
     home_axes=read_json(args.home_inventory)['axes'];home_ids=[a['id'] for a in home_axes]
@@ -131,11 +161,13 @@ def main():
                              gaze_owner_ids=profile['gaze_owner_ids'],fps=fps,repeat=args.repeat,
                              face_fps=args.face_fps,scheduled_feedback=profile['scheduled_feedback'],
                              home_ids=home_ids,home_speed=args.home_speed,home_only=args.home_only,
+                             mouth_gain_report=profile['mouth_gain_report'],
                              volume_times_three=args.usb_volume_times_three and not args.home_only)))
         return
     args.output.mkdir(parents=True,exist_ok=False)
     for name,data in [('config',config),('profile',profile),('home_inventory',dict(axes=home_axes))]:
         (args.output/f'{name}.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+    (args.output/'mouth_gain_report.json').write_text(json.dumps(profile['mouth_gain_report'],indent=2)+'\n')
     stop_file=ROOT/'outputs/mojia/STOP';stopped=False
     def stop(*_):
         nonlocal stopped
@@ -143,7 +175,7 @@ def main():
     handlers={sig:signal.signal(sig,stop) for sig in (signal.SIGINT,signal.SIGTERM)}
     def guard():
         if stopped or stop_file.exists():raise RuntimeError('Operator stop')
-    summary=dict(completed=False,rounds=[],error=None,startup_events=[],tongue_disabled_after=False)
+    summary=dict(completed=False,rounds=[],error=None,startup_events=[],tongue_disabled_after=False,mouth_motion_gain=args.mouth_gain)
     summary['homing']={}
     status_path=ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
     status_path.parent.mkdir(parents=True,exist_ok=True)
@@ -163,7 +195,10 @@ def main():
         from xiaobai_runtime.feetech_sdk import OfficialSDKBus
         bus=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20,
                            trace_path=args.output/'homing_serial_trace.json')
-        snapshots=[bus.snapshot(sid) for sid in home_ids]
+        snapshot_deadline=time.monotonic()+10
+        snapshots=[startup_feedback(bus.snapshot,sid,snapshot_deadline,
+                    summary.setdefault('startup_communication_recoveries',[]),should_stop=lambda:guard() or False)
+                   for sid in home_ids]
         validate_home_axes(home_axes,snapshots)
         original_speeds={s['id']:int.from_bytes(bytes.fromhex(s['state_40_70_hex'])[6:8],'little') for s in snapshots}
         summary['startup_snapshots']=snapshots
@@ -183,7 +218,7 @@ def main():
                 # at measured positions before enabling; playback still requires torque.
                 home_check(feedback(s),s,m['neutral'],m.get('initial_settle_tolerance_counts',20))
                 check_feedback(sid,feedback(s),homing_feedback_motor(m,s))
-            if not args.home_only and sid in [12,13,27,28,29,31]:
+            if not args.home_only and sid in MOUTH_IDS:
                 ram=bytes.fromhex(s['state_40_70_hex'])
                 if ram[1]!=0 or int.from_bytes(ram[6:8],'little')!=900:
                     raise RuntimeError(f'ID{sid}: expected saved mouth acceleration0/speed900')

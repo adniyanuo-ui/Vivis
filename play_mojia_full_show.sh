@@ -6,7 +6,7 @@ COMMON=(--config mojia/person_gaze.json
         --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json
         --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json
         --audio exmple/0001.wav --authorized-tongue-observation
-        --usb-volume-times-three --hold-vertical-eyes --face-fps 60 --repeat 3)
+        --usb-volume-times-three --hold-vertical-eyes --face-fps 60 --mouth-gain 1.5 --repeat 3)
 for arg in "$@"; do
     if [[ "$arg" == --check ]]; then
         exec "$PYTHON" tools/mojia_performance.py "${COMMON[@]}" --output /tmp/vivis-show-offline "$@"

@@ -69,6 +69,33 @@ class MojiaMappingTests(unittest.TestCase):
 
 
 class MojiaStartupTests(unittest.TestCase):
+    def test_mouth_gain_scales_only_mouth_displacement_without_mutating_input(self):
+        from mojia_performance import mouth_gain_targets,MOUTH_IDS
+        ids=list(self.motors);positions=np.full((3,len(ids)),2047.)
+        for sid in MOUTH_IDS:positions[:,ids.index(sid)]=[2047,2007,1967]
+        positions[:,ids.index(8)]=[2007,2017,2027];before=positions.copy()
+        amplified,report=mouth_gain_targets(self.profile,ids,positions,1.5)
+        for sid in MOUTH_IDS:np.testing.assert_array_equal(amplified[:,ids.index(sid)],[2047,1987,1927])
+        for j,sid in enumerate(ids):
+            if sid not in MOUTH_IDS:np.testing.assert_array_equal(amplified[:,j],positions[:,j])
+        np.testing.assert_array_equal(positions,before)
+        self.assertEqual(report['gain'],1.5)
+        self.assertTrue(all(a['clipped_frames']==0 for a in report['axes']))
+
+    def test_mouth_gain_clips_at_existing_limits_and_records_saturation(self):
+        from mojia_performance import mouth_gain_targets,MOUTH_IDS
+        ids=list(self.motors);positions=np.full((3,len(ids)),2047.)
+        for sid in MOUTH_IDS:
+            m=self.motors[sid];positions[:,ids.index(sid)]=[m['safe_min'],m['safe_max'],m['neutral']]
+        amplified,report=mouth_gain_targets(self.profile,ids,positions,1.5)
+        for sid in MOUTH_IDS:
+            m=self.motors[sid];np.testing.assert_array_equal(amplified[:,ids.index(sid)],[m['safe_min'],m['safe_max'],m['neutral']])
+        self.assertGreater(sum(a['clipped_frames'] for a in report['axes']),0)
+        for gain in (0,-1,float('nan'),float('inf'),True,'1.5'):
+            with self.assertRaises(ValueError):mouth_gain_targets(self.profile,ids,positions,gain)
+        same,_=mouth_gain_targets(self.profile,ids,positions,1.)
+        np.testing.assert_array_equal(same,positions)
+
     def test_performance_tongue_residual_36_uses_only_startup_tolerance(self):
         from mojia_performance import recover_tongue
         from unittest.mock import patch

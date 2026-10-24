@@ -1,9 +1,9 @@
 {
   "schema_version": "mojia-accepted-tracking-preset-1.0",
-  "date": "2026-10-23",
+  "date": "2026-10-24",
   "config_path": "mojia/person_gaze.json",
-  "config_sha256": "69fb41e09cb1e4c017bcee8819c6b116b9d6488288c2ab2fb759bc5b27f6b065",
-  "basis": "User requested saving the current parameters and visual-error eye/neck coordination before full performance",
+  "config_sha256": "f2c6dc1456064dccbb73d6ceb5fca4a30e03a276a90097c04ecb29d64c39d5ce",
+  "basis": "User accepted the complete right-camera performance: larger neck following range and clearer mouth opening; requested saving current settings and replaying twice",
   "hardware_registers": [
     {
       "id": 2,
@@ -920,7 +920,7 @@
     "Captured hardware readback; not an automatic bulk-write or torque-enable instruction",
     "IDs9/24 have no Mojia calibration action mapping",
     "ID29 is enabled only for the authorized performance and unloaded afterwards",
-    "EEPROM power-cycle persistence has not been verified"
+    "Power cycle resets observed RAM tuning; this snapshot is a saved readback, not an automatic restoration command"
   ],
   "audio_volume_preset": {
     "reference_speaker_step": 15,
@@ -931,5 +931,47 @@
     "net_amplitude_factor": 3.0,
     "application": "Applied by play_mojia_full_show.sh at manual startup; no cumulative multiplication",
     "measured_resampled_peak": 0.8896213173866272
+  },
+  "performance_options": {
+    "launcher": "play_mojia_full_show.sh",
+    "mouth_gain": 1.5,
+    "hold_vertical_eyes": true,
+    "face_fps": 60,
+    "home_speed_counts_s": 60,
+    "usb_volume_times_three": true,
+    "camera_eye": "right",
+    "neck_range_mode": "device",
+    "neck_device_limits": [
+      1600,
+      2600
+    ]
+  },
+  "acceptance_evidence": {
+    "completed_run": "outputs/mojia/manual_show_20261024_134642_61917/performance",
+    "hardware_readback": "outputs/mojia/accepted_readback_20261024_135230.json",
+    "user_feedback": "效果很好，脖子跟随幅度明显变大，口型张开张大也更明显",
+    "dynamic_read_failures": 320,
+    "dynamic_read_requests": 40657,
+    "communication_followup": "Deferred at user request; existing checks retained",
+    "repeat_validation": {
+      "directory": "outputs/mojia/manual_show_20261024_135236_66021/performance",
+      "completed": true,
+      "rounds": [
+        {
+          "round": 1,
+          "completed": true,
+          "audio_seconds": 112.89442792970476,
+          "read_requests": 40797,
+          "read_failures": 447
+        },
+        {
+          "round": 2,
+          "completed": true,
+          "audio_seconds": 112.89443192970612,
+          "read_requests": 40603,
+          "read_failures": 432
+        }
+      ]
+    }
   }
 }
