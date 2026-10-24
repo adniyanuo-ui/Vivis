@@ -640,6 +640,63 @@ class MojiaPerformanceTests(unittest.TestCase):
 
 
 class BudgetedFeedbackTests(unittest.TestCase):
+    def test_failed_normal_or_priority_axis_yields_without_refreshing_validity(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.protocol import CorruptResponse
+        for failed in (19,23):
+            with self.subTest(failed=failed):
+                reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
+                reader.ids=[19,33,34,23,32]
+                clocks.clear();clocks.update({19:.01,33:.02,34:.03,23:.99,32:.99})
+                clocks[failed]=0.
+                original=reader.bus.read.side_effect
+                def read(sid,address,count):
+                    if sid==failed:
+                        now[0]+=.003
+                        raise CorruptResponse('persistent damaged axis')
+                    return original(sid,address,count)
+                reader.bus.read.side_effect=read
+                with patch('xiaobai_runtime.feedback_schedule.time',clock):
+                    for tick in range(20):
+                        now[0]=1.+tick/60
+                        result=reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+                        self.assertLessEqual(result['reads'],8)
+                        if tick==2:self.assertIn(33,[s[0] for s in samples])
+                self.assertEqual(clocks[failed],0.)
+                self.assertTrue({19,33,34,23,32}-{failed} <= {s[0] for s in samples})
+                self.assertGreater(len(errors),1)
+                self.assertLess(len(errors),10)  # Priority axes also join ordinary rounds.
+
+    def test_full_inventory_fairness_does_not_mask_a_disconnected_axis(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.protocol import ReadTimeout
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader(.00065)
+        reader.ids=[sid for sid in range(2,37) if sid not in (9,24)]
+        clocks.clear();clocks.update({sid:1. for sid in reader.ids})
+        original=reader.bus.read.side_effect
+        healthy_gaps=[]
+        def read(sid,address,count):
+            if sid==19:
+                now[0]+=.003
+                raise ReadTimeout('disconnected axis')
+            return original(sid,address,count)
+        reader.bus.read.side_effect=read
+        def checked_sample(sid,state,started):
+            healthy_gaps.append(now[0]-clocks[sid])
+            sample(sid,state,started)
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            for tick in range(300):
+                now[0]=1.+tick/60
+                result=reader.step(now[0]+.007,clocks,checked_sample,lambda *a:errors.append(a))
+                self.assertLessEqual(result['reads'],8)
+        self.assertEqual(clocks[19],1.)
+        self.assertGreater(now[0]-clocks[19],1.)  # The existing watchdog must still stop it.
+        self.assertLess(max(healthy_gaps),1.)
+        self.assertTrue(set(reader.ids)-{19} <= {s[0] for s in samples})
+        for sid in (23,32):
+            starts=[s[2] for s in samples if s[0]==sid]
+            self.assertLess(max(np.diff(starts)),.15)
+
     def setup_reader(self,latency=.0002):
         from types import SimpleNamespace
         from unittest.mock import Mock

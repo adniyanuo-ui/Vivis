@@ -351,7 +351,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             camera_eye_id=gaze_override.camera_eye_id
             feedback_scheduler=BudgetedFeedback(bus,ids,priority_ids=(camera_eye_id,32))
             result['runtime_feedback_schedule']=dict(timeout_ms=3,budget_ms=7,max_requests_per_tick=8,
-                priority_ids=[camera_eye_id,32],priority_period_s=.08,inline_retry=False)
+                priority_ids=[camera_eye_id,32],priority_period_s=.08,inline_retry=False,
+                selection_policy='oldest_attempt_with_eye_neck_priority')
         next_command_at=None
         result['phase']='playing'
         clock.start();last_tick=time.monotonic();previous_index=-1;skipped=0;started=time.monotonic()
@@ -380,7 +381,12 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 raise RuntimeError('Playback watchdog: stalled for >100 ms')
             if feedback_age_limit is not None and not record_only:
                 stale=[sid for sid in ids if now-last_good_feedback[sid]>feedback_age_limit]
-                if stale:raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
+                if stale:
+                    result['feedback_watchdog']=dict(limit_s=feedback_age_limit,
+                        stale_ages_s={sid:now-last_good_feedback[sid] for sid in stale},
+                        partial_id=feedback_scheduler.sid if feedback_scheduler is not None else None,
+                        partial_fields=len(feedback_scheduler.parts) if feedback_scheduler is not None else 0)
+                    raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
             face_index=index
             if face_hz!=fps:
                 sample_time=max(0.,t+profile['actuator_latency_ms']/1000)
