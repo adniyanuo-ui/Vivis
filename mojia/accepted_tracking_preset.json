@@ -2,8 +2,8 @@
   "schema_version": "mojia-accepted-tracking-preset-1.0",
   "date": "2026-10-24",
   "config_path": "mojia/person_gaze.json",
-  "config_sha256": "f2c6dc1456064dccbb73d6ceb5fca4a30e03a276a90097c04ecb29d64c39d5ce",
-  "basis": "User accepted complete natural1200 blink performance and requested local Git save; neck load1023 comparison is a subsequent trial",
+  "config_sha256": "1bfa915cdb11312462059620af3dd0b24af5b5fc4b930701a3639b2b183a4009",
+  "basis": "Previously accepted natural1200 performance; subsequent user-requested speed unification verified by register readback only, playback observation pending",
   "hardware_registers": [
     {
       "id": 2,
@@ -22,7 +22,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -48,7 +48,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -74,7 +74,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -152,7 +152,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 100,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -178,7 +178,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -230,7 +230,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -256,7 +256,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -334,7 +334,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -360,7 +360,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -386,7 +386,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -412,7 +412,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -438,7 +438,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -464,7 +464,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -542,7 +542,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 100,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -568,7 +568,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -620,7 +620,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -646,7 +646,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -750,7 +750,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -828,7 +828,7 @@
         0
       ],
       "acceleration_raw": 10,
-      "speed_raw": 60,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -854,7 +854,7 @@
         0
       ],
       "acceleration_raw": 10,
-      "speed_raw": 60,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -880,7 +880,7 @@
         0
       ],
       "acceleration_raw": 10,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -906,7 +906,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 900,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -950,7 +950,9 @@
     "eyelid_speed_counts_s": 1200,
     "blink_events": 18,
     "ordinary_blink_mean_target_duration_s": 0.31547619047619035,
-    "neck_max_load_raw": 350
+    "neck_max_load_raw": 350,
+    "default_mapped_speed_counts_s": 900,
+    "eye_speed_counts_s": 900
   },
   "acceptance_evidence": {
     "completed_run": "outputs/mojia/manual_show_20261024_134642_61917/performance",
@@ -987,5 +989,34 @@
       "software_neck_load_threshold": 350,
       "playback_profile_sha256": "c30201b59bc0350a1117e52f831ddf89dd39c44d15bf71ca556f60006b3f88ab"
     }
+  },
+  "speed_unification": {
+    "date": "2026-10-24",
+    "baseline_commit": "f14efec",
+    "default_counts_s": 900,
+    "eyelid_ids": [
+      5,
+      6,
+      20,
+      21
+    ],
+    "eyelid_counts_s": 1200,
+    "excluded_ids": [
+      9,
+      24
+    ],
+    "hardware_readback": "outputs/mojia/unified_speed900_registers_20261024_171759.json",
+    "changed_registers": 22,
+    "position_commands_sent": 0,
+    "acceleration_raw_preserved": {
+      "32": 64,
+      "33": 10,
+      "34": 10,
+      "35": 10,
+      "all_other_ids": 0
+    },
+    "acceleration_provenance": "33/34/35 already read as10 in earliest saved tracking preset (5147270); original setter and factory-default status unknown",
+    "verification": "35-axis before/after readback; EEPROM/configuration, torque, acceleration and goal RAM unchanged; no playback performed",
+    "profile_sha256": "1523a8bddf584daca9aefadc18a07d6d7312b0f7777a8bc86f8be3125b8fe1c4"
   }
 }

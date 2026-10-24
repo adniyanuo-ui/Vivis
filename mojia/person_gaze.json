@@ -57,8 +57,7 @@
         "id": 7,
         "negative": 2067,
         "neutral": 2047,
-        "positive": 2027,
-        "speed_counts_s": 100
+        "positive": 2027
       },
       {
         "name": "right_pitch",
@@ -66,12 +65,11 @@
         "id": 22,
         "negative": 2027,
         "neutral": 2047,
-        "positive": 2067,
-        "speed_counts_s": 100
+        "positive": 2067
       }
     ],
     "mount_confirmation_source": "2026-10-24 user switched back to the right-eye camera; moving camera reference is right yaw ID23",
-    "speed_counts_s": 300,
+    "speed_counts_s": 900,
     "vertical_enabled": true,
     "vertical_direction_confirmed": true,
     "validated_source": "2026-10-23 user accepted horizontal and vertical eye parameters; freeze these values during neck tuning"
@@ -101,5 +99,5 @@
     ],
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-24 right-eye camera; user requested full ID32 device range (live limits1600..2600), eye yaw300/+/-60 unchanged; neck hardware acceleration64 deadband5/5, software acceleration64, speed900, PID16/26/0 unchanged"
+  "parameter_revision_source": "2026-10-24 user unified all mapped axes speed900 except eyelids5/6/20/21=1200; IDs9/24 excluded; acceleration/PID/deadband/range/coordination unchanged"
 }

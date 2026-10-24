@@ -15,6 +15,10 @@ from mojia_track_person import tracking_start_position
 def baseline_config():
     c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
     c['neck'].update(range_mode='offset',offset_counts=80)
+    # Retain the previously accepted eye-speed fixtures for legacy regressions.
+    c['control']['speed_counts_s']=300
+    for axis in c['control']['axes']:
+        if axis['coordinate']=='y':axis['speed_counts_s']=100
     return c
 
 
@@ -44,6 +48,18 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_current_unified_speed_policy_keeps_only_eyelid_override(self):
+        from xiaobai_runtime.mojia_performance import tracking_profile
+        c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
+        p=json.loads((ROOT/'mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json').read_text())
+        validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,True)
+        self.assertEqual(c['control']['speed_counts_s'],900)
+        self.assertTrue(all('speed_counts_s' not in a for a in c['control']['axes']))
+        runtime=tracking_profile(c,p,[m['id'] for m in p['motors']])
+        for m in runtime['motors']:
+            self.assertNotIn(m['id'],(9,24))
+            self.assertEqual(m['max_speed_counts_s'],1200 if m['id'] in (5,6,20,21) else 900)
+
     def test_device_range_uses_both_asymmetric_hardware_endpoints(self):
         from xiaobai_runtime.mojia_gaze import neck_command_limits
         from xiaobai_runtime.mojia_performance import tracking_profile
@@ -203,7 +219,7 @@ class MojiaGazeTests(unittest.TestCase):
     def test_independent_vertical_speed_and_bad_axis_limit(self):
         c=baseline_config()
         validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',False,True)
-        for value in [True,0,-1,301,float('nan')]:
+        for value in [True,0,-1,901,float('nan')]:
             invalid=copy.deepcopy(c);invalid['control']['axes'][-1]['speed_counts_s']=value
             with self.assertRaises(ValueError):validate_mojia(invalid,profile(),ROOT/'mojia/墨甲9.23.json',False,True)
         controller=MojiaPursuit(c,[8,23,7,22],[300,300,100,100])

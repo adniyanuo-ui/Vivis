@@ -39,7 +39,7 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Mojia calibration changed')
     c = config['control']
     eye_speed=c.get('speed_counts_s',60)
-    if not finite(eye_speed) or not 0 < eye_speed <= 300:
+    if not finite(eye_speed) or not 0 < eye_speed <= 900:
         raise ValueError('Invalid eye speed for commissioning stage')
     if not c.get('mount_confirmed') or c['camera_mount'] not in ('fixed', 'eye'):
         raise ValueError('Confirm camera mounting before motion')
@@ -60,7 +60,7 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
     motors = {m['id']: m for m in profile['motors']}
     for a in axes:
         axis_speed=a.get('speed_counts_s',eye_speed)
-        if not finite(axis_speed) or not 0 < axis_speed <= 300:
+        if not finite(axis_speed) or not 0 < axis_speed <= 900:
             raise ValueError('Invalid per-axis eye speed')
         values = [a[k] for k in ('negative', 'neutral', 'positive')]
         m = motors[a['id']]
