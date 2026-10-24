@@ -80,7 +80,6 @@
     "sign": 1,
     "range_mode": "device",
     "speed_counts_s": 900,
-    "acceleration_counts_s2": 64,
     "direction_confirmed": false,
     "gain_counts_s": 120,
     "deadband": 0.14,
@@ -99,5 +98,5 @@
     ],
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-24 user set hardware acceleration RAM41 of32/33/34/35 to0, now all35 axes read0; mapped speeds900 except eyelids1200; IDs9/24 excluded from speed change; software neck acceleration64, PID/deadband/range/coordination unchanged"
+  "parameter_revision_source": "2026-10-24 user removed neck software acceleration/deceleration limit; hardware RAM41 all35 axes0; mapped speeds900 except eyelids1200, IDs9/24 excluded; PID/deadband/range/visual coordination unchanged"
 }

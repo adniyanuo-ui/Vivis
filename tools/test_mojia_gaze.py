@@ -48,6 +48,24 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_neck_velocity_changes_without_acceleration_ramp_or_residual_motion(self):
+        from unittest.mock import patch
+        c=config()
+        self.assertNotIn('acceleration_counts_s2',c['neck'])
+        validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',True,True)
+        controller=MojiaPursuit(c,[8,23,32],[300,300,900],True)
+        old=np.full(3,2047.)
+        with patch.object(controller.assist,'step',side_effect=[1800.,-1800.,0.]):
+            for i,expected in enumerate([15.,-15.,0.]):
+                now=10+(i+1)/60
+                new,d=controller.step(packet(now,.8),old,1/60,now)
+                self.assertAlmostEqual(new[-1]-old[-1],expected)
+                self.assertAlmostEqual(d['neck_velocity'],expected*60)
+                old=new
+        stale=copy.deepcopy(c);stale['neck']['acceleration_counts_s2']=64
+        with self.assertRaisesRegex(ValueError,'acceleration limit has been removed'):
+            validate_mojia(stale,profile(),ROOT/'mojia/墨甲9.23.json',True,True)
+
     def test_current_unified_speed_policy_keeps_only_eyelid_override(self):
         from xiaobai_runtime.mojia_performance import tracking_profile
         c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
@@ -283,7 +301,7 @@ class MojiaGazeTests(unittest.TestCase):
     def test_xiaobai_speed_stage_requires_neck_confirmation(self):
         c,p=config(),profile()
         c['control'].update(calibration_confirmed=True,speed_counts_s=300)
-        c['neck'].update(speed_counts_s=75,acceleration_counts_s2=70,offset_counts=160,
+        c['neck'].update(speed_counts_s=75,offset_counts=160,
                          gain_counts_s=180,deadband=.14,stop_deadband=.07,filter_tau_s=.12)
         with self.assertRaises(ValueError):validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,False)
         c['neck']['direction_confirmed']=True

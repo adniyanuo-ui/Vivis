@@ -2,7 +2,7 @@
   "schema_version": "mojia-accepted-tracking-preset-1.0",
   "date": "2026-10-24",
   "config_path": "mojia/person_gaze.json",
-  "config_sha256": "63a8dfe0e0d1e56daaaacdffa018810c71b42941fcbf1fe1b508322cef47cf72",
+  "config_sha256": "986617d7fa1811e42e5c4e2c91c1f9e91f6a1c9fa7fb6947b4ce32c13c24f54c",
   "basis": "Previously accepted natural1200 performance; subsequent speed unification and all-axis raw acceleration0 verified by register readback only, playback observation pending",
   "hardware_registers": [
     {
@@ -1042,5 +1042,15 @@
     "software_neck_acceleration_counts_s2": 64,
     "verification": "Only RAM41 changed; speed, torque, goal, PID, deadband, limits and EEPROM unchanged; playback stopped before writes and not restarted",
     "semantics": "Raw0 requested by operator; effective physical acceleration for this SM45BL firmware remains unconfirmed"
+  },
+  "software_neck_revision": {
+    "date": "2026-10-24",
+    "baseline_commit": "e6c84b2",
+    "acceleration_limit_removed": true,
+    "removed_parameter": "neck.acceleration_counts_s2",
+    "motion": "Visual-assist velocity applied directly, bounded by speed and position limits; no acceleration ramp or acceleration-derived endpoint braking",
+    "return_home": "Existing proportional approach retained; time budget uses distance/speed plus5seconds",
+    "hardware_writes": false,
+    "playback_observation_pending": true
   }
 }
