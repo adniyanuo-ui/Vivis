@@ -2,7 +2,7 @@
   "schema_version": "mojia-accepted-tracking-preset-1.0",
   "date": "2026-10-24",
   "config_path": "mojia/person_gaze.json",
-  "config_sha256": "63a8dfe0e0d1e56daaaacdffa018810c71b42941fcbf1fe1b508322cef47cf72",
+  "config_sha256": "6fa10f8976ade83e9a4cf3186abb28479537ce9237312fd5acadf0b8f1a3af77",
   "basis": "Previously accepted natural1200 performance; subsequent speed unification and all-axis raw acceleration0 verified by register readback only, playback observation pending",
   "hardware_registers": [
     {
@@ -952,7 +952,14 @@
     "ordinary_blink_mean_target_duration_s": 0.31547619047619035,
     "neck_max_load_raw": 350,
     "default_mapped_speed_counts_s": 900,
-    "eye_speed_counts_s": 900
+    "eye_speed_counts_s": 900,
+    "software_acceleration_counts_s2": {
+      "31": 128,
+      "32": 64,
+      "33": 64,
+      "34": 64,
+      "35": 128
+    }
   },
   "acceptance_evidence": {
     "completed_run": "outputs/mojia/manual_show_20261024_134642_61917/performance",
@@ -1042,5 +1049,27 @@
     "software_neck_acceleration_counts_s2": 64,
     "verification": "Only RAM41 changed; speed, torque, goal, PID, deadband, limits and EEPROM unchanged; playback stopped before writes and not restarted",
     "semantics": "Raw0 requested by operator; effective physical acceleration for this SM45BL firmware remains unconfirmed"
+  },
+  "software_motion_revision": {
+    "baseline_commit": "f13d381",
+    "date": "2026-10-24",
+    "limits_counts_s2": {
+      "31": 128,
+      "32": 64,
+      "33": 64,
+      "34": 64,
+      "35": 128
+    },
+    "neck_shaped_once": true,
+    "lost_face": "Existing hold and release, then smooth active eye/neck return to2047; reacquisition resumes following",
+    "hardware_writes": false,
+    "playback_acceptance_pending": true,
+    "full_show_held_ids": [
+      7,
+      22,
+      33,
+      34
+    ],
+    "playback_profile_sha256": "b35c974c20a7586242c7ddb1074334790b4a92dc8ef9b4d554467d0dfa70c472"
   }
 }

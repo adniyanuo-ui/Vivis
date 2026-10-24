@@ -390,6 +390,20 @@ class AudioClockTests(unittest.TestCase):
                 clock.close()
 
 class PlaybackTests(unittest.TestCase):
+    def test_software_acceleration_is_applied_to_final_playback_commands(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.playback import play
+        profile,bus,clock=self.fixture();profile['motors'][0]['max_acceleration_counts_s2']=128
+        trajectory=np.full((24,1),2200.);trajectory[0]=2047.;clock.duration=.4
+        with tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.playback.Bus',return_value=bus),patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
+            result=play(profile,[2],trajectory,60,'fake.wav',Path(directory)/'log.json',Path(directory)/'STOP')
+        self.assertTrue(result['completed'])
+        self.assertEqual(result['software_acceleration_limits'],{2:128})
+        self.assertTrue(all(2 in e['software_motion'] for e in result['events']))
+        self.assertGreater(result['sent_frames'],15)
+        self.assertLessEqual(max(e['goals'][2] for e in result['events']),2059)
+        self.assertGreater(max(e['goals'][2] for e in result['events']),2047)
+
     def test_mojia_rejects_xiaobai_gaze_before_opening_devices(self):
         from unittest.mock import Mock,patch
         from xiaobai_runtime.playback import play

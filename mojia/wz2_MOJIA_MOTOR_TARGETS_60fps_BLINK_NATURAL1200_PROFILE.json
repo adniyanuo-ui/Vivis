@@ -744,7 +744,8 @@
       "feedback_max": 2050,
       "initial_settle_tolerance_counts": 32,
       "initial_settle_basis": "Mojia startup observation: approximately 26 counts position error at a bounded goal; target/device/load guards remain active",
-      "speed_trial_note": "User requested ID31 600 counts/s comparison against the completed 300 counts/s playback"
+      "speed_trial_note": "User requested ID31 600 counts/s comparison against the completed 300 counts/s playback",
+      "max_acceleration_counts_s2": 128
     },
     {
       "id": 35,
@@ -770,7 +771,8 @@
       "register_write_verification": "Pending bounded RAM write/readback during explicit arm",
       "position_feedback_tolerance_counts": 5,
       "feedback_min": 2040,
-      "feedback_max": 2247
+      "feedback_max": 2247,
+      "max_acceleration_counts_s2": 128
     },
     {
       "id": 36,
@@ -820,7 +822,8 @@
       "model_raw_expected": 10760,
       "register_layout_confirmed": true,
       "register_write_verification": "Pending bounded RAM write/readback during explicit arm",
-      "position_feedback_tolerance_counts": 5
+      "position_feedback_tolerance_counts": 5,
+      "max_acceleration_counts_s2": 64
     },
     {
       "id": 33,
@@ -844,7 +847,8 @@
       "model_raw_expected": 10760,
       "register_layout_confirmed": true,
       "register_write_verification": "Pending bounded RAM write/readback during explicit arm",
-      "position_feedback_tolerance_counts": 5
+      "position_feedback_tolerance_counts": 5,
+      "max_acceleration_counts_s2": 64
     },
     {
       "id": 34,
@@ -868,7 +872,8 @@
       "model_raw_expected": 10760,
       "register_layout_confirmed": true,
       "register_write_verification": "Pending bounded RAM write/readback during explicit arm",
-      "position_feedback_tolerance_counts": 5
+      "position_feedback_tolerance_counts": 5,
+      "max_acceleration_counts_s2": 64
     }
   ],
   "schema_version": "mojia-playback-0.1",
@@ -982,5 +987,16 @@
       24
     ],
     "source": "2026-10-24 user requested unified speeds; acceleration unchanged"
+  },
+  "software_acceleration_revision": {
+    "limits_counts_s2": {
+      "31": 128,
+      "32": 64,
+      "33": 64,
+      "34": 64,
+      "35": 128
+    },
+    "source": "2026-10-24 user requested five-axis software acceleration, hardware acceleration unchanged",
+    "acceptance": "offline validation passed; physical playback pending"
   }
 }

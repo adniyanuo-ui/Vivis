@@ -162,6 +162,8 @@ def main():
                              face_fps=args.face_fps,scheduled_feedback=profile['scheduled_feedback'],
                              home_ids=home_ids,home_speed=args.home_speed,home_only=args.home_only,
                              mouth_gain_report=profile['mouth_gain_report'],
+                             software_acceleration_counts_s2={m['id']:m['max_acceleration_counts_s2'] for m in profile['motors']
+                                 if m.get('max_acceleration_counts_s2') is not None},
                              volume_times_three=args.usb_volume_times_three and not args.home_only)))
         return
     args.output.mkdir(parents=True,exist_ok=False)

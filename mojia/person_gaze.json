@@ -99,5 +99,5 @@
     ],
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-24 user set hardware acceleration RAM41 of32/33/34/35 to0, now all35 axes read0; mapped speeds900 except eyelids1200; IDs9/24 excluded from speed change; software neck acceleration64, PID/deadband/range/coordination unchanged"
+  "parameter_revision_source": "2026-10-24 user retained neck software acceleration64, added31/35=128 and33/34=64 in playback profiles; lost face returns active eyes and neck to neutral after existing hold/release; hardware parameters and speed/ranges unchanged"
 }

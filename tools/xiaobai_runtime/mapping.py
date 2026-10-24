@@ -175,6 +175,10 @@ def live_preflight(profile,ids):
                     not 0<=m.get('device_min',-1)<=low<=m['safe_min']<=m['safe_max']<=high<=m.get('device_max',-1)<=4095):
                 missing.append(f'{sid}:feedback_limits')
         if m['max_speed_counts_s'] is not None and not 1<=m['max_speed_counts_s']<=32767:missing.append(f'{sid}:speed')
+        acceleration=m.get('max_acceleration_counts_s2')
+        if acceleration is not None and (type(acceleration) not in (int,float)
+                or not math.isfinite(acceleration) or acceleration<=0):
+            missing.append(f'{sid}:software_acceleration')
         temperature_ceiling=m.get('device_max_temperature_c',60)
         if not isinstance(temperature_ceiling,(int,float)) or not 1<=temperature_ceiling<=100:
             missing.append(f'{sid}:device_temperature')

@@ -48,6 +48,39 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_lost_face_returns_eyes_and_neck_with_bounded_motion_and_can_reacquire(self):
+        for stale in (False,True):
+            with self.subTest(stale=stale):
+                c=config();c['neck'].update(range_mode='device');c['neck'].pop('offset_counts')
+                controller=MojiaPursuit(c,[8,23,32],[300,300,900],True,neck_bounds=(1600,2600))
+                old=np.array([2070.,2070.,2150.]);controller.policy.weight=1.
+                controller.policy.xy=np.array([23/40,0.])
+                controller.policy.last_seen=10.;controller.velocity=30.
+                scheduler=NeckCommandScheduler(old[-1],10,900,False,endpoints=(1600,2600))
+                saw_hold=saw_return=False;packet0=packet(10.,.5)
+                for i in range(1200):
+                    now=10+(i+1)/60;before=controller.velocity
+                    target=packet0 if stale else packet(now,None)
+                    new,d=controller.step(target,old,1/60,now)
+                    self.assertTrue(np.all(abs(new-old)<=np.array([300,300,900])/60+1e-8))
+                    self.assertLessEqual(abs(controller.velocity-before),64/60+1e-8)
+                    if d['state']=='holding':saw_hold=True;self.assertFalse(d['returning_to_center'])
+                    if d['state'] in ('releasing','idle'):
+                        saw_return=True;self.assertTrue(d['returning_to_center'])
+                        self.assertEqual(d['neck_assist_reason'],'lost_face_return')
+                    goal,_=scheduler.step(new[-1],now,returning=d['returning_to_center'])
+                    old=new
+                self.assertTrue(saw_hold);self.assertTrue(saw_return)
+                np.testing.assert_allclose(old,[2047]*3,atol=.25);self.assertEqual(goal,2047)
+                new,d=controller.step(packet(now+1/60,.4),old,1/60,now+1/60)
+                self.assertEqual(d['state'],'tracking');self.assertFalse(d['returning_to_center'])
+
+    def test_neck_acceleration_metadata_must_match_controller(self):
+        c,p=config(),profile()
+        next(m for m in p['motors'] if m['id']==32)['max_acceleration_counts_s2']=128
+        with self.assertRaisesRegex(ValueError,'software acceleration differs'):
+            validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,True)
+
     def test_current_unified_speed_policy_keeps_only_eyelid_override(self):
         from xiaobai_runtime.mojia_performance import tracking_profile
         c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
@@ -56,6 +89,8 @@ class MojiaGazeTests(unittest.TestCase):
         self.assertEqual(c['control']['speed_counts_s'],900)
         self.assertTrue(all('speed_counts_s' not in a for a in c['control']['axes']))
         runtime=tracking_profile(c,p,[m['id'] for m in p['motors']])
+        self.assertEqual({m['id']:m['max_acceleration_counts_s2'] for m in runtime['motors']
+                          if 'max_acceleration_counts_s2' in m},{31:128,32:64,33:64,34:64,35:128})
         for m in runtime['motors']:
             self.assertNotIn(m['id'],(9,24))
             self.assertEqual(m['max_speed_counts_s'],1200 if m['id'] in (5,6,20,21) else 900)

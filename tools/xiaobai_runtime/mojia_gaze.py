@@ -73,6 +73,9 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         if trial and max(abs(v-2047) for v in values) > cap:
             raise ValueError('Eye trial exceeds coordinate-specific limits')
     n = config['neck']
+    saved_acceleration=motors[32].get('max_acceleration_counts_s2')
+    if saved_acceleration is not None and saved_acceleration!=n['acceleration_counts_s2']:
+        raise ValueError('Neck software acceleration differs from playback profile')
     if n.get('coordination_mode') != 'visual_error_assist' or 'eye_lead_s' in n:
         raise ValueError('Mojia neck requires visual_error_assist without a fixed eye delay')
     if type(config['camera']['width']) is not int or config['camera']['width'] <= 0:
@@ -204,6 +207,8 @@ class MojiaPursuit:
         applied = [axis_normalized(anchor, previous[self.ids.index(anchor['id'])]),
                    axis_normalized(vertical,previous[self.ids.index(vertical['id'])]) if vertical else 0.]
         xy, weight, state = self.policy.step(packet, now, dt, applied)
+        lost_return=state in ('releasing','idle')
+        return_center=returning or lost_return
         if not self.measured_eye:
             self.observe_eye(previous[self.ids.index(self.camera_eye_id)], now, measured=False)
         eye_motion = self.eye_motion if now-self.eye_motion_at <= self.config['transport']['max_age_s'] else 0.
@@ -217,7 +222,7 @@ class MojiaPursuit:
             col = self.ids.index(32);position = previous[col]
             eye = applied[0]
             desired = 0.
-            if returning:
+            if return_center:
                 self.assist.reset()
                 delta = 2047-position
                 desired = math.copysign(min(n['speed_counts_s'], abs(delta)*2,
@@ -234,7 +239,7 @@ class MojiaPursuit:
             goal = float(np.clip(position+(old+self.velocity)*dt/2, low, high))
             if goal in (low, high):
                 self.velocity = 0.
-            if returning and abs(position-2047) < .25 and abs(self.velocity) <= n['acceleration_counts_s2']*dt:
+            if return_center and abs(position-2047) < .25 and abs(self.velocity) <= n['acceleration_counts_s2']*dt:
                 goal, self.velocity = 2047., 0.
             result[col] = goal
         return limit_step(previous, result, self.speeds, dt), dict(
@@ -243,7 +248,8 @@ class MojiaPursuit:
             image_error_growth=self.assist.growth, camera_timestamp=self.assist.stamp,
             eye_motion_direction=eye_motion, eye_motion_source='encoder' if self.measured_eye else 'command_simulation',
             camera_eye=c.get('camera_eye'),camera_eye_id=self.camera_eye_id,
-            neck_assist_reason='returning' if returning else self.assist.reason,
+            returning_to_center=return_center,
+            neck_assist_reason='returning' if returning else 'lost_face_return' if lost_return else self.assist.reason,
             neck_requested_velocity=desired if self.neck else 0.,
             neck_at_limit=bool(self.neck and (result[self.ids.index(32)]<=low or result[self.ids.index(32)]>=high)))
 

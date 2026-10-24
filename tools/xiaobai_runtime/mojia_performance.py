@@ -79,6 +79,7 @@ class MojiaPlaybackGaze:
         self.speeds=[motors[sid]['max_speed_counts_s'] for sid in self.owned]
         self.controller=MojiaPursuit(config,self.owned,self.speeds,True,
                                      neck_bounds=(motors[32]['safe_min'],motors[32]['safe_max']))
+        self.acceleration_limited_ids={config['neck']['id']}
         self.camera_eye_id=self.controller.camera_eye_id
         self.previous=None;self.scheduler=None;self.last_diagnostic={}
         self.status_path=status_path;self.last_publish=0.;self.round=round_number;self.repeat=repeat
@@ -120,7 +121,7 @@ class MojiaPlaybackGaze:
         result=np.array(base,copy=True);result[self.columns]=self.previous
         neck_column=self.ids.index(32)
         d['planned_neck_goal']=float(self.previous[-1])
-        goal,speed=self.scheduler.step(self.previous[-1],now,returning=returning)
+        goal,speed=self.scheduler.step(self.previous[-1],now,returning=d['returning_to_center'])
         result[neck_column]=goal
         d['neck_speed_command']=speed
         self.last_diagnostic=d

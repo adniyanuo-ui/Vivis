@@ -137,7 +137,7 @@ def main():
             goals = {sid:int(round(previous[i])) for i,sid in enumerate(ids)}
             if neck_scheduler is not None:
                 diagnostic['planned_neck_goal']=float(previous[ids.index(32)])
-                goals[32],speeds[32]=neck_scheduler.step(previous[ids.index(32)],now,returning=returning)
+                goals[32],speeds[32]=neck_scheduler.step(previous[ids.index(32)],now,returning=diagnostic['returning_to_center'])
                 diagnostic['neck_speed_command']=speeds[32]
             bus.goals(goals,speeds)
             sid = ids[poll%len(ids)];poll+=1

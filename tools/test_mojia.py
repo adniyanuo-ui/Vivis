@@ -433,4 +433,63 @@ class DynamicsRegisterTests(unittest.TestCase):
         self.assertEqual(row['goal_speed_limit_counts_s_nominal'],0)
 
 
+class SoftwareAccelerationTests(unittest.TestCase):
+    def test_neutral_homing_curve_uses_the_same_acceleration_limits(self):
+        from xiaobai_runtime.homing import smooth_home_targets
+        start={31:2027.,32:2067.,33:2032.,34:2058.,35:2052.};neutral={sid:2047. for sid in start}
+        caps={31:128,32:64,33:64,34:64,35:128}
+        duration,at=smooth_home_targets(start,neutral,60,caps)
+        self.assertGreater(duration,1.)
+        times=np.linspace(0,duration,2001);dt=times[1]-times[0]
+        positions=np.array([[at(t)[sid] for sid in start] for t in times])
+        velocities=np.diff(positions,axis=0)/dt
+        accelerations=np.diff(velocities,axis=0)/dt
+        self.assertLessEqual(abs(velocities).max(),60+1e-6)
+        self.assertTrue(np.all(abs(accelerations).max(axis=0)<=np.array(list(caps.values()))+1e-3))
+        np.testing.assert_allclose(positions[-1],[2047]*5)
+
+    def test_changes_of_target_and_tick_preserve_speed_acceleration_and_bounds(self):
+        from xiaobai_runtime.motion_limits import AccelerationLimiter
+        motors=[dict(id=sid,neutral=2047,safe_min=low,safe_max=high,
+                     max_speed_counts_s=900,max_acceleration_counts_s2=a)
+                for sid,low,high,a in [(31,1380,2047,128),(32,1600,2600,64),
+                                      (33,1447,2647,64),(34,1647,2647,64),(35,2047,2247,128)]]
+        ids=[m['id'] for m in motors];limiter=AccelerationLimiter({'motors':motors},ids)
+        old=np.full(5,2047.);old_velocity=np.zeros(5)
+        for i in range(3000):
+            dt=(.008,.025,.017)[i%3]
+            target=np.array([m['safe_min'] if (i//120)%2==0 else m['safe_max'] for m in motors])
+            new=limiter.step(old,target,dt)
+            velocity=(new-old)/dt
+            caps=np.array([m['max_acceleration_counts_s2'] for m in motors])
+            self.assertTrue(np.all(abs(velocity-old_velocity)<=caps*dt+1e-7))
+            self.assertTrue(np.all(abs(velocity)<=900+1e-7))
+            for j,m in enumerate(motors):self.assertTrue(m['safe_min']-1e-7<=new[j]<=m['safe_max']+1e-7)
+            old,old_velocity=new,velocity
+        for i in range(1200):old=limiter.step(old,target,1/60)
+        np.testing.assert_allclose(old,target,atol=1e-6)
+        self.assertTrue(limiter.at_rest())
+
+    def test_neck_is_not_shaped_twice_and_held_axes_remain_uncommanded(self):
+        from xiaobai_runtime.motion_limits import AccelerationLimiter
+        from xiaobai_runtime.mapping import limit_step
+        motors=[dict(id=sid,safe_min=1000,safe_max=3000,max_speed_counts_s=900,
+                     max_acceleration_counts_s2=128 if sid in (31,35) else 64) for sid in range(31,36)]
+        limiter=AccelerationLimiter({'motors':motors},list(range(31,36)),[31,32,35],[32])
+        self.assertEqual(set(limiter.velocity),{31,35})
+        old=np.full(5,2047.);target=np.full(5,2100.)
+        result=limiter.step(old,target,1/60)
+        self.assertEqual(result[1],limit_step(old,target,np.full(5,900.),1/60)[1])
+        self.assertLess(result[0]-old[0],.04)
+
+    def test_invalid_acceleration_is_rejected_and_absence_preserves_speed_limiter(self):
+        from xiaobai_runtime.motion_limits import AccelerationLimiter
+        motor=dict(id=31,safe_min=1380,safe_max=2047,max_speed_counts_s=900)
+        for bad in [0,-1,True,float('nan'),float('inf'),'128']:
+            with self.subTest(value=bad),self.assertRaises(ValueError):
+                AccelerationLimiter({'motors':[{**motor,'max_acceleration_counts_s2':bad}]},[31])
+        limiter=AccelerationLimiter({'motors':[motor]},[31])
+        np.testing.assert_array_equal(limiter.step(np.array([2047.]),np.array([1900.]),1/60),[2032.])
+
+
 if __name__=='__main__':unittest.main()

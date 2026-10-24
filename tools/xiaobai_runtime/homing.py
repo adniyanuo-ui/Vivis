@@ -60,12 +60,17 @@ def homing_feedback_motor(motor,snapshot):
             'feedback_max':min(4095,max(snapshot['configured_max'],neutral+tolerance))}
 
 
-def smooth_home_targets(start,neutral,speed):
+def smooth_home_targets(start,neutral,speed,accelerations=None):
     if type(speed) not in (int,float) or not math.isfinite(speed) or not 1<=speed<=32767:
         raise ValueError('Home speed must be finite and within 1..32767')
     # Quintic smoothstep has peak derivative 1.875 and zero endpoint velocity
     # and acceleration. Use a common duration so every configured axis arrives together.
     duration=max(1.,1.875*max(abs(neutral[sid]-p) for sid,p in start.items())/speed)
+    for sid,a in (accelerations or {}).items():
+        if sid not in start or type(a) not in (int,float) or not math.isfinite(a) or a<=0:
+            raise ValueError('Invalid home software acceleration')
+        # Quintic smoothstep's peak second derivative is10/sqrt(3).
+        duration=max(duration,math.sqrt(10/math.sqrt(3)*abs(neutral[sid]-start[sid])/a))
     def at(elapsed):
         u=max(0.,min(1.,elapsed/duration));blend=u*u*u*(10+u*(-15+6*u))
         return {sid:p+(neutral[sid]-p)*blend for sid,p in start.items()}
@@ -93,7 +98,9 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
         if sid in start:
             if not motor['safe_min']<=neutral[sid]<=motor['safe_max']:
                 raise RuntimeError(f'ID{sid}: home neutral outside task command limits')
-    duration,trajectory=smooth_home_targets(start,neutral,speed)
+    accelerations={sid:m['max_acceleration_counts_s2'] for sid,m in task_motors.items()
+                   if sid in start and m.get('max_acceleration_counts_s2') is not None}
+    duration,trajectory=smooth_home_targets(start,neutral,speed,accelerations)
     original={s['id']:int.from_bytes(bytes.fromhex(s['state_40_70_hex'])[6:8],'little') for s in snapshots}
     if restore_speeds is not None:
         if set(restore_speeds)!=set(original):raise ValueError('Home speed restore inventory differs')
@@ -103,6 +110,7 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
     disabled={s['id'] for s in snapshots if not s['torque_enable']}
     temporary=disabled-set(keep_enabled)
     report.update(completed=False,ids=list(neutral),max_speed_counts_s=speed,
+                  software_acceleration_counts_s2=accelerations,
                   planned_duration_s=duration,original_speeds=original,temporary_enable_ids=sorted(temporary),
                   neutral_targets=neutral,initial_positions={s['id']:s['position_raw'] for s in snapshots},
                   samples=[],communication_recoveries=recoveries,ram_writes=[],restored_speeds=False)
