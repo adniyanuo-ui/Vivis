@@ -176,7 +176,19 @@ bash tools/build_a2f.sh
 
 推荐手动入口（自动复用或启动相机预览）：
 
-启动前确认没有系统服务抢占设备：`ies.service`中的`face_track`会占用USB相机，`dms.service`中的头/身体节点会占用串口并可能重写舵机参数。此前停止服务不代表重启后仍停止；需要本次移交给Vivis时先执行`sudo systemctl stop ies.service dms.service`。手动入口检测到它们仍活动会明确退出，不自动关闭系统服务。串口重新插拔后如提示权限不足，可执行`sudo setfacl -m u:$(id -un):rw /dev/ttyCH343USB0`；不要用root运行整个播放器。仅停止DMS不会恢复已被它覆盖的舵机设置，仍需核对已确认的硬件参数。
+启动前确认没有系统服务抢占设备：`ies.service`中的`face_track`会占用USB相机，`dms.service`中的头/身体节点会占用串口并可能重写舵机参数。此前停止服务不代表重启后仍停止；需要本次移交给Vivis时先执行`sudo systemctl stop ies.service dms.service`。手动入口检测到它们仍活动会明确退出，不自动关闭系统服务。本机已部署`tools/99-vivis-servo-access.rules`，仅为用户james和序列号5B79076878的转接器自动恢复ACL，USB重新枚举后无需重复手动授权。临时恢复仍可执行`sudo setfacl -m u:$(id -un):rw /dev/ttyCH343USB0`；不要用root运行整个播放器。仅停止DMS不会恢复已被它覆盖的舵机设置，仍需核对已确认的硬件参数。
+
+迁移到另一台机器时，先核对规则中的用户名和转接器序列号，再安装；规则不改变其它串口或系统用户组：
+
+```bash
+sudo install -o root -g root -m 0644 tools/99-vivis-servo-access.rules /etc/udev/rules.d/99-vivis-servo-access.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger --action=change --subsystem-match=tty --sysname-match=ttyCH343USB0
+sudo udevadm settle --timeout=5
+```
+
+该规则只处理设备访问权限。头部断电会丢失速度、颈部PID/死区等运行设置，仍需按已保存配置核对恢复；相机重新枚举后，旧视觉进程也可能需要正常退出并重新打开设备。
+
 
 ```bash
 cd /home/james/project/Vivis

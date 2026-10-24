@@ -95,6 +95,7 @@
 !/tools/xiaobai_runtime/
 /tools/xiaobai_runtime/*
 !/tools/xiaobai_runtime/*.py
+!/tools/99-vivis-servo-access.rules
 !/tools/a2f-build/
 /tools/a2f-build/*
 !/tools/a2f-build/CMakeLists.txt
