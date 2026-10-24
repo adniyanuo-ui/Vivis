@@ -15,7 +15,6 @@ from xiaobai_runtime.playback import play, check_feedback,startup_feedback
 from xiaobai_runtime.person_gaze import TargetReceiver
 from xiaobai_runtime.mojia_performance import tracking_profile, MojiaPlaybackGaze
 from xiaobai_runtime.homing import home_all,validate_home_axes,home_check,homing_feedback_motor,write_ram_verified
-from xiaobai_runtime.cancellation import OperatorStop
 
 MOUTH_IDS=(12,13,27,28,29,31)
 
@@ -95,12 +94,8 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.):
     return p,monitored,trajectory
 
 
-def recover_tongue(bus,motor,guard,events,speed=900,recoveries=None):
-    deadline=time.monotonic()+10
-    if recoveries is None:recoveries=[]
-    def read(reader):
-        return startup_feedback(reader,29,deadline,recoveries,should_stop=lambda:guard() or False)
-    s=read(bus.snapshot)
+def recover_tongue(bus,motor,guard,events,speed=900):
+    s=bus.snapshot(29)
     if s['torque_enable']==1:return
     if s['model_raw']!=521 or s['mode']!=0 or not 0<=s['position_raw']<=4095:
         raise RuntimeError('ID29 startup hardware mismatch')
@@ -110,15 +105,11 @@ def recover_tongue(bus,motor,guard,events,speed=900,recoveries=None):
               'feedback_max':max(s['position_raw'],motor['device_max'])}
     check_feedback(29,feedback(s),envelope)
     guard();bus.goals({29:2047},{29:speed})
-    if read(lambda sid:bus.read(sid,40,1))==b'\x00':
+    if bus.read(29,40,1)==b'\x00':
         events.append(dict(kind='enable',**write_ram_verified(bus,29,40,1)))
-    guard();bus.goals({29:2047},{29:speed});healthy=0
-    def checked(sid):
-        state=bus.feedback(sid)
-        check_feedback(sid,state,envelope)
-        return state
+    guard();bus.goals({29:2047},{29:speed});deadline=time.monotonic()+10;healthy=0
     while time.monotonic()<deadline:
-        guard();f=read(checked);events.append(f)
+        guard();f=bus.feedback(29);events.append(f);check_feedback(29,f,envelope)
         healthy=healthy+1 if abs(f['position']-2047)<=motor['initial_settle_tolerance_counts'] else 0
         if healthy>=2:
             check_feedback(29,f,motor)
@@ -183,7 +174,7 @@ def main():
         stopped=True
     handlers={sig:signal.signal(sig,stop) for sig in (signal.SIGINT,signal.SIGTERM)}
     def guard():
-        if stopped or stop_file.exists():raise OperatorStop('Operator stop')
+        if stopped or stop_file.exists():raise RuntimeError('Operator stop')
     summary=dict(completed=False,rounds=[],error=None,startup_events=[],tongue_disabled_after=False,mouth_motion_gain=args.mouth_gain)
     summary['homing']={}
     status_path=ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
@@ -232,8 +223,7 @@ def main():
                 if ram[1]!=0 or int.from_bytes(ram[6:8],'little')!=900:
                     raise RuntimeError(f'ID{sid}: expected saved mouth acceleration0/speed900')
         if args.authorized_tongue_observation:
-            recover_tongue(bus,motors[29],guard,summary['startup_events'],speed=min(args.home_speed,900),
-                           recoveries=summary.setdefault('startup_communication_recoveries',[]))
+            recover_tongue(bus,motors[29],guard,summary['startup_events'],speed=min(args.home_speed,900))
         publish('homing')
         print(f'HOME {len(home_axes)} AXES START speed_cap={args.home_speed}',flush=True)
         home_all(bus,home_axes,motors,guard,summary['homing'],args.home_speed,original_speeds,keep_enabled=ids)
@@ -256,10 +246,6 @@ def main():
             print(f'ROUND {lap}/{args.repeat} COMPLETE',flush=True)
             del result
         summary['completed']=True
-    except OperatorStop as exc:
-        summary.update(stopped_by_operator=True,stop_reason=str(exc))
-        print('已按请求停止；停止发送位置指令，保持颈部扭矩。',flush=True)
-        return 130
     except BaseException as exc:
         summary['error']=str(exc)
         raise
@@ -276,12 +262,6 @@ def main():
                     result,status=cleanup.sdk.write1ByteTxRx(29,40,0)
                     summary['tongue_disabled_after']=cleanup.read(29,40,1)==b'\x00'
                     summary['tongue_disable_result']=[result,status]
-                    if summary['tongue_disabled_after']:
-                        # Recovery may have stopped with the temporary home speed.
-                        # Restore only after verified unload: never speed up a live goal.
-                        speed=int(motors[29]['max_speed_counts_s'])
-                        if int.from_bytes(cleanup.read(29,46,2),'little')!=speed:
-                            summary['tongue_speed_restore']=write_ram_verified(cleanup,29,46,speed,2)
                 finally:cleanup.close()
             except Exception as exc:summary['cleanup_error']=str(exc)
         for sig,handler in handlers.items():signal.signal(sig,handler)
@@ -289,4 +269,4 @@ def main():
         publish('completed' if summary['completed'] else 'stopped',summary['error'])
 
 
-if __name__=='__main__':raise SystemExit(main())
+if __name__=='__main__':main()

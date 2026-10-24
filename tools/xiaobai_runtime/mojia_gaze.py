@@ -73,8 +73,6 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         if trial and max(abs(v-2047) for v in values) > cap:
             raise ValueError('Eye trial exceeds coordinate-specific limits')
     n = config['neck']
-    if 'acceleration_counts_s2' in n:
-        raise ValueError('Mojia software neck acceleration limit has been removed')
     if n.get('coordination_mode') != 'visual_error_assist' or 'eye_lead_s' in n:
         raise ValueError('Mojia neck requires visual_error_assist without a fixed eye delay')
     if type(config['camera']['width']) is not int or config['camera']['width'] <= 0:
@@ -87,6 +85,7 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Invalid bounded Mojia neck setup')
     if (n['id'] != 32 or n['sign'] not in (-1, 1) or type(n['sign']) is not int
             or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 900
+            or not finite(n['acceleration_counts_s2']) or not 0 < n['acceleration_counts_s2'] <= 200
             or motors[32]['model_raw_expected'] != 10760
             or not finite(low) or not finite(high)
             or not motors[32]['device_min']<=low<2047<high<=motors[32]['device_max']):
@@ -140,8 +139,8 @@ class VisualNeckAssist:
                 self.filtered += -math.expm1(-frame_dt/n['filter_tau_s'])*(raw-self.filtered)
             self.raw, self.stamp = raw, stamp
             sign = int(np.sign(raw))
-            # A reversal clears the old request before considering assistance.
-            # It never waits for the eye to cross its mechanical centre.
+            # A reversal must first brake the old request. It does not wait for
+            # the eye to cross its mechanical centre, even at a neck endpoint.
             if self.direction and (sign != self.direction or abs(raw) <= n['stop_deadband']):
                 self.direction = 0
                 self.growth = 0.
@@ -180,9 +179,9 @@ class MojiaPursuit:
 
     def return_window(self,position):
         if not self.neck:return 5.
-        speed=min(self.config['neck']['speed_counts_s'],self.speeds[self.ids.index(32)])
-        # Budget full-speed travel plus the existing proportional final approach.
-        return 5.+abs(position-2047)/speed
+        a=self.config['neck']['acceleration_counts_s2'];speed=abs(self.velocity)
+        distance=abs(position-2047)+speed*speed/(2*a)
+        return max(5.,speed/a+2*math.sqrt(distance/a)+1.)
 
     def observe_eye(self, position, now, measured=True):
         """Record the camera eye's feedback without adding serial reads."""
@@ -221,18 +220,21 @@ class MojiaPursuit:
             if returning:
                 self.assist.reset()
                 delta = 2047-position
-                desired = math.copysign(min(n['speed_counts_s'], abs(delta)*2), delta)
+                desired = math.copysign(min(n['speed_counts_s'], abs(delta)*2,
+                                           math.sqrt(2*n['acceleration_counts_s2']*abs(delta))), delta)
             else:
                 span = abs(anchor['positive' if eye >= 0 else 'negative']-anchor['neutral'])
                 desired = self.assist.step(packet,state,eye,eye_motion,span)
             low, high = self.neck_bounds
-            cap = min(n['speed_counts_s'],self.speeds[col])
+            distance = high-position if desired >= 0 else position-low
+            cap = min(n['speed_counts_s'], math.sqrt(2*n['acceleration_counts_s2']*max(0., distance)))
             desired = float(np.clip(desired, -cap, cap))
-            self.velocity = desired
-            goal = float(np.clip(position+self.velocity*dt, low, high))
+            old = self.velocity
+            self.velocity += float(np.clip(desired-old, -n['acceleration_counts_s2']*dt, n['acceleration_counts_s2']*dt))
+            goal = float(np.clip(position+(old+self.velocity)*dt/2, low, high))
             if goal in (low, high):
                 self.velocity = 0.
-            if returning and abs(position-2047) < .25:
+            if returning and abs(position-2047) < .25 and abs(self.velocity) <= n['acceleration_counts_s2']*dt:
                 goal, self.velocity = 2047., 0.
             result[col] = goal
         return limit_step(previous, result, self.speeds, dt), dict(

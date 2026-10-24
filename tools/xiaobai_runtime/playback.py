@@ -8,7 +8,6 @@ import time
 import wave
 from pathlib import Path
 import numpy as np
-from .cancellation import OperatorStop
 from .mapping import live_preflight,limit_step
 from .protocol import Bus,ServoStatusError,CorruptResponse,ReadTimeout,ProtocolError
 
@@ -80,7 +79,7 @@ def verified_feedback(bus,sid,motor,confirm,records,should_stop=lambda:False,ini
     """
     record=None;clean=0
     for attempt in range(4):
-        if should_stop():raise OperatorStop('Operator stop during feedback confirmation')
+        if should_stop():raise RuntimeError('Operator stop during feedback confirmation')
         if attempt:time.sleep(.01)
         state=None
         try:
@@ -110,7 +109,7 @@ def startup_feedback(reader,sid,deadline,records,should_stop=lambda:False,wait=t
     attempts and the caller's existing startup deadline. Servo alarms, invalid
     physical readings and the transport's error-rate gate are never retried here.
     """
-    if should_stop():raise OperatorStop('Operator stop during startup feedback')
+    if should_stop():raise RuntimeError('Operator stop during startup feedback')
     try:return reader(sid)
     except (CorruptResponse,ReadTimeout) as first:
         if not can_recover():raise
@@ -119,10 +118,10 @@ def startup_feedback(reader,sid,deadline,records,should_stop=lambda:False,wait=t
         clean=0;last_error=first
         recovery_deadline=min(deadline,time.monotonic()+.5)
         for attempt in range(4):
-            if should_stop():raise OperatorStop('Operator stop during startup feedback recovery')
+            if should_stop():raise RuntimeError('Operator stop during startup feedback recovery')
             if time.monotonic()+.02>=recovery_deadline:break
             wait(.02)  # No position writes during this startup-only hold.
-            if should_stop():raise OperatorStop('Operator stop during startup feedback recovery')
+            if should_stop():raise RuntimeError('Operator stop during startup feedback recovery')
             try:state=reader(sid)
             except (CorruptResponse,ReadTimeout) as exc:
                 if not can_recover():raise
@@ -204,7 +203,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         'feedback_policy':feedback_policy,'feedback_notifications':[]}
     def should_stop():return stop.is_set() or Path(stop_file).exists()
     def feedback_checked(sid,initial=None,observed_at=None):
-        if should_stop():raise OperatorStop('Operator stop during feedback')
+        if should_stop():raise RuntimeError('Operator stop during feedback')
         last_feedback_attempt[sid]=time.monotonic()
         if record_only:
             try:
@@ -351,13 +350,12 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             camera_eye_id=gaze_override.camera_eye_id
             feedback_scheduler=BudgetedFeedback(bus,ids,priority_ids=(camera_eye_id,32))
             result['runtime_feedback_schedule']=dict(timeout_ms=3,budget_ms=7,max_requests_per_tick=8,
-                priority_ids=[camera_eye_id,32],priority_period_s=.08,inline_retry=False,
-                selection_policy='oldest_attempt_with_eye_neck_priority')
+                priority_ids=[camera_eye_id,32],priority_period_s=.08,inline_retry=False)
         next_command_at=None
         result['phase']='playing'
         clock.start();last_tick=time.monotonic();previous_index=-1;skipped=0;started=time.monotonic()
         while True:
-            if should_stop():raise OperatorStop('Operator stop')
+            if should_stop():raise RuntimeError('Operator stop')
             if clock.fault:raise RuntimeError('Audio callback fault: '+clock.fault)
             t=clock.time()
             if t is None:
@@ -381,12 +379,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 raise RuntimeError('Playback watchdog: stalled for >100 ms')
             if feedback_age_limit is not None and not record_only:
                 stale=[sid for sid in ids if now-last_good_feedback[sid]>feedback_age_limit]
-                if stale:
-                    result['feedback_watchdog']=dict(limit_s=feedback_age_limit,
-                        stale_ages_s={sid:now-last_good_feedback[sid] for sid in stale},
-                        partial_id=feedback_scheduler.sid if feedback_scheduler is not None else None,
-                        partial_fields=len(feedback_scheduler.parts) if feedback_scheduler is not None else 0)
-                    raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
+                if stale:raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
             face_index=index
             if face_hz!=fps:
                 sample_time=max(0.,t+profile['actuator_latency_ms']/1000)
@@ -442,9 +435,6 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 events[-1]['stage_ms']=dict(gaze=1000*(gaze_done-gaze_started),
                     command=1000*(command_done-gaze_done),feedback=1000*(time.monotonic()-command_done))
         result.update(completed=True,skipped_source_frames=skipped,audio_seconds_at_stop=t)
-    except OperatorStop as exc:
-        result.update(stopped_by_operator=True,stop_reason=str(exc),error=None)
-        raise
     except Exception as exc:
         result['error']=str(exc)
         raise
