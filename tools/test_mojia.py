@@ -68,6 +68,121 @@ class MojiaMappingTests(unittest.TestCase):
         self.assertEqual(len(diff['jaw31_shapes']),7)
 
 
+class MojiaBlinkTests(unittest.TestCase):
+    def fixture(self):
+        ids = [5, 6, 20, 21, 8, 31]
+        positions = np.full((360, len(ids)), 2047.)
+        positions[:, -1] = 2000 + np.arange(360) % 20
+        payload = dict(motor_ids=ids, positions=positions.tolist(), frames=360, fps=dict(num=60, den=1))
+        endpoints = {5:2320, 6:2150, 20:1803, 21:1943}
+        profile = dict(motors=[dict(id=sid, neutral=2047, safe_min=min(2047, end),
+            safe_max=max(2047, end), device_min=min(2047, end), device_max=max(2047, end))
+            for sid, end in endpoints.items()])
+        shapes = dict(EyeBlinkLeft={5:2320, 6:2150}, EyeBlinkRight={20:1803, 21:1943})
+        weights = np.zeros((360, 2)); weights[60:64] = 1.
+        return payload, profile, weights, ['EyeBlinkLeft', 'EyeBlinkRight'], shapes
+
+    def test_blink_variant_preserves_other_axes_and_reaches_original_endpoints(self):
+        from adjust_mojia_blinks import adjust_blinks
+        payload, profile, weights, order, shapes = self.fixture()
+        before = copy.deepcopy(payload)
+        output, report = adjust_blinks(payload, profile, weights, order, shapes)
+        self.assertEqual(payload, before)
+        x = np.asarray(output['positions']); source = np.asarray(payload['positions'])
+        np.testing.assert_array_equal(x[:, 4:], source[:, 4:])
+        self.assertEqual(len(report['events']), 2)
+        for event in report['events']:
+            for sid, endpoint in event['endpoints'].items():
+                j = payload['motor_ids'].index(int(sid))
+                self.assertEqual(x[event['closed_start_frame'], j], endpoint)
+                np.testing.assert_array_equal(x[event['closed_start_frame']:event['closed_end_frame'], j], endpoint)
+                m = next(m for m in profile['motors'] if m['id'] == int(sid))
+                self.assertTrue(m['safe_min'] <= x[:, j].min() <= x[:, j].max() <= m['safe_max'])
+        self.assertFalse(report['fixed_endpoint_dwell'])
+        self.assertTrue(all(e['duration_s'] < .6 for e in report['events']))
+        for e in report['events']:
+            self.assertGreater(e['opening_s'], e['closing_s'])
+            self.assertLessEqual(e['command_plateau_s'], 1/60)
+
+    def test_reduced_schedule_removes_original_blinks_from_json(self):
+        from adjust_mojia_blinks import adjust_blinks, runs
+        payload, profile, weights, order, shapes = self.fixture()
+        weights[:] = 0.
+        source = np.asarray(payload['positions']); endpoints = [2320, 2150, 1803, 1943]
+        for peak in range(30, 275, 35):
+            weights[peak:peak+4] = 1.
+            source[peak:peak+4, :4] = endpoints
+        payload['positions'] = source.tolist()
+        output, report = adjust_blinks(payload, profile, weights, order, shapes,
+                                      audio_energy=np.full(360, .5), keep_fraction=.7)
+        self.assertEqual(report['frequency']['source_events'], 7)
+        self.assertEqual(report['frequency']['selected_events'], 5)
+        result = np.asarray(output['positions'])
+        self.assertEqual(len(runs(result[:, 0] >= 2319)), 5)
+        np.testing.assert_array_equal(result[:, 4:], source[:, 4:])
+        removed = [c for c in report['frequency']['candidates'] if not c['selected']]
+        for c in removed:
+            np.testing.assert_array_equal(result[c['begin']:c['end'], :4], 2047.)
+
+    def test_audio_context_changes_duration_without_random_timing_or_moving_peak(self):
+        from adjust_mojia_blinks import adjust_blinks
+        payload, profile, weights, order, shapes = self.fixture()
+        weights[180:184] = 1.
+        energy = np.ones(360); energy[150:215] = 0.
+        output, report = adjust_blinks(payload, profile, weights, order, shapes, audio_energy=energy)
+        events = [e for e in report['events'] if e['side'] == 'Left']
+        self.assertEqual([e['source_peak_frame'] for e in events], [60, 180])
+        self.assertLess(events[0]['duration_s'], events[1]['duration_s'])
+        self.assertLess(events[0]['opening_s'], events[1]['opening_s'])
+        repeat, again = adjust_blinks(payload, profile, weights, order, shapes, audio_energy=energy)
+        self.assertEqual(output, repeat)
+        self.assertEqual(report, again)
+        with self.assertRaisesRegex(ValueError, 'audio energy'):
+            adjust_blinks(payload, profile, weights, order, shapes, audio_energy=energy[:-1])
+
+    def test_expression_changes_release_with_the_same_audio(self):
+        from adjust_mojia_blinks import adjust_blinks
+        payload, profile, weights, order, shapes = self.fixture()
+        weights[180:184] = 1.
+        order = order + ['BrowInnerUp', 'MouthFrownLeft', 'MouthFrownRight']
+        weights = np.column_stack([weights, np.zeros((360, 3))])
+        weights[160:210, 2:] = .8
+        _, report = adjust_blinks(payload, profile, weights, order, shapes, audio_energy=np.full(360, .5))
+        events = [e for e in report['events'] if e['side'] == 'Left']
+        self.assertLess(events[0]['opening_s'], events[1]['opening_s'])
+
+    def test_audio_envelope_preserves_opposite_phase_stereo_energy(self):
+        import wave
+        from adjust_mojia_blinks import audio_energy_from_wav
+        rate = 16000; signal = np.sin(np.arange(rate)*2*np.pi*220/rate)
+        signal[:rate//2] *= .01; signal[rate//2:] *= .5
+        pcm = (np.column_stack([signal, -signal])*32767).astype('<i2')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'stereo.wav'
+            with wave.open(str(path), 'wb') as wav:
+                wav.setnchannels(2); wav.setsampwidth(2); wav.setframerate(rate); wav.writeframes(pcm.tobytes())
+            energy = audio_energy_from_wav(path, 60, 60)
+        self.assertGreater(float(energy[40:50].mean()), float(energy[10:20].mean())+.5)
+
+    def test_two_blinks_with_sustained_partial_squint_are_not_merged(self):
+        from adjust_mojia_blinks import adjust_blinks
+        payload, profile, weights, order, shapes = self.fixture()
+        weights[:] = .3; weights[60:64] = 1.; weights[180:184] = 1.
+        _, report = adjust_blinks(payload, profile, weights, order, shapes)
+        self.assertEqual(len(report['events']), 4)
+        self.assertTrue(all(e['command_plateau_s'] < .5 for e in report['events']))
+
+    def test_no_blinks_unchanged_and_unsafe_endpoint_rejected(self):
+        from adjust_mojia_blinks import adjust_blinks
+        payload, profile, weights, order, shapes = self.fixture()
+        output, report = adjust_blinks(payload, profile, weights*0, order, shapes)
+        self.assertEqual(output['positions'], payload['positions'])
+        self.assertFalse(report['events'])
+        shapes['EyeBlinkLeft'][5] += 1
+        with self.assertRaisesRegex(ValueError, 'endpoint outside'):
+            adjust_blinks(payload, profile, weights, order, shapes)
+
+
 class MojiaStartupTests(unittest.TestCase):
     def test_mouth_gain_scales_only_mouth_displacement_without_mutating_input(self):
         from mojia_performance import mouth_gain_targets,MOUTH_IDS

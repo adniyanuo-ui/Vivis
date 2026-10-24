@@ -3,8 +3,8 @@ set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 PYTHON="$PWD/.venv/bin/python"
 COMMON=(--config mojia/person_gaze.json
-        --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json
-        --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json
+        --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json
+        --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200.json
         --audio exmple/0001.wav --authorized-tongue-observation
         --usb-volume-times-three --hold-vertical-eyes --face-fps 60 --mouth-gain 1.5 --repeat 3)
 for arg in "$@"; do

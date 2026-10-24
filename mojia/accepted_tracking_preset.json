@@ -3,7 +3,7 @@
   "date": "2026-10-24",
   "config_path": "mojia/person_gaze.json",
   "config_sha256": "f2c6dc1456064dccbb73d6ceb5fca4a30e03a276a90097c04ecb29d64c39d5ce",
-  "basis": "User accepted the complete right-camera performance: larger neck following range and clearer mouth opening; requested saving current settings and replaying twice",
+  "basis": "User accepted complete natural1200 blink performance and requested local Git save; neck load1023 comparison is a subsequent trial",
   "hardware_registers": [
     {
       "id": 2,
@@ -100,7 +100,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 1200,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -126,7 +126,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 1200,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -490,7 +490,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 1200,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -516,7 +516,7 @@
         0
       ],
       "acceleration_raw": 0,
-      "speed_raw": 300,
+      "speed_raw": 1200,
       "max_torque_raw": 1000,
       "torque_limit_raw": 1000,
       "torque_enabled_at_capture": 1,
@@ -944,7 +944,13 @@
     "neck_device_limits": [
       1600,
       2600
-    ]
+    ],
+    "targets": "mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200.json",
+    "profile": "mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json",
+    "eyelid_speed_counts_s": 1200,
+    "blink_events": 18,
+    "ordinary_blink_mean_target_duration_s": 0.31547619047619035,
+    "neck_max_load_raw": 350
   },
   "acceptance_evidence": {
     "completed_run": "outputs/mojia/manual_show_20261024_134642_61917/performance",
@@ -972,6 +978,14 @@
           "read_failures": 432
         }
       ]
+    },
+    "natural_blink_acceptance": {
+      "directory": "outputs/mojia/manual_show_20261024_154937_145671/performance",
+      "completed": true,
+      "user_feedback": "播放完毕，全部正常，可以本地git保存",
+      "hardware_readback": "outputs/mojia/accepted_natural1200_readback_20261024_160045.json",
+      "software_neck_load_threshold": 350,
+      "playback_profile_sha256": "c30201b59bc0350a1117e52f831ddf89dd39c44d15bf71ca556f60006b3f88ab"
     }
   }
 }
