@@ -5,6 +5,7 @@ an invalid field discards that sample. The caller validates each complete sample
 """
 import time
 
+from .cancellation import OperatorStop
 from .protocol import CorruptResponse, ReadTimeout
 
 
@@ -25,7 +26,7 @@ class BudgetedFeedback:
         # Eight short requests can complete two samples. A timeout consumes its
         # reservation; there is no sleep or immediate retry after that timeout.
         while reads<8 and time.monotonic()+self.timeout_s+.00025<=deadline:
-            if should_stop():raise RuntimeError('Operator stop during scheduled feedback')
+            if should_stop():raise OperatorStop('Operator stop during scheduled feedback')
             now=time.monotonic()
             if self.sid is None:
                 due=[sid for sid in self.priority_ids if now-clocks[sid]>=self.period]

@@ -390,6 +390,32 @@ class AudioClockTests(unittest.TestCase):
                 clock.close()
 
 class PlaybackTests(unittest.TestCase):
+    def test_operator_stop_closes_audio_and_serial_then_allows_next_play(self):
+        import signal
+        from unittest.mock import patch
+        from xiaobai_runtime.playback import play
+        from xiaobai_runtime.cancellation import OperatorStop
+        profile,bus,clock=self.fixture()
+        previous_handler=signal.getsignal(signal.SIGINT)
+        clock.start.side_effect=lambda:signal.getsignal(signal.SIGINT)(signal.SIGINT,None)
+        with tempfile.TemporaryDirectory() as directory,\
+             patch('xiaobai_runtime.playback.Bus',return_value=bus),\
+             patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
+            log=Path(directory)/'log.json'
+            with self.assertRaises(OperatorStop):
+                play(profile,[2],np.full((3,1),2047.),60,'fake.wav',log,Path(directory)/'STOP')
+            result=json.loads(log.read_text())
+            self.assertTrue(result['stopped_by_operator']);self.assertIsNone(result['error'])
+        bus.close.assert_called_once();clock.close.assert_called_once()
+        self.assertIs(signal.getsignal(signal.SIGINT),previous_handler)
+        profile,next_bus,next_clock=self.fixture()
+        with tempfile.TemporaryDirectory() as directory,\
+             patch('xiaobai_runtime.playback.Bus',return_value=next_bus),\
+             patch('xiaobai_runtime.playback.AudioClock',return_value=next_clock):
+            result=play(profile,[2],np.full((3,1),2047.),60,'fake.wav',Path(directory)/'log.json',Path(directory)/'STOP')
+        self.assertTrue(result['completed'])
+        next_bus.close.assert_called_once();next_clock.close.assert_called_once()
+
     def test_mojia_rejects_xiaobai_gaze_before_opening_devices(self):
         from unittest.mock import Mock,patch
         from xiaobai_runtime.playback import play
