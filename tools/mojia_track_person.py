@@ -60,14 +60,11 @@ def main():
         n = config['neck']
         low,high=neck_command_limits(config,profile)
         motors[32].update(safe_min=low, safe_max=high,
-                          max_speed_counts_s=n['speed_counts_s'],
-                          max_load_raw=n.get('max_load_raw',motors[32]['max_load_raw']))
+                          max_speed_counts_s=n['speed_counts_s'])
     selected = {**profile, 'port': args.port, 'motors': list(motors.values())}
     live_preflight(selected, ids)
     if args.check:
-        print(json.dumps(dict(offline_valid=True, ids=ids, camera=config['camera'],
-                             command_limits={sid:[m['safe_min'],m['safe_max']] for sid,m in motors.items()},
-                             software_load_limits={sid:m['max_load_raw'] for sid,m in motors.items()})))
+        print(json.dumps(dict(offline_valid=True, ids=ids, camera=config['camera'], command_limits={sid:[m['safe_min'],m['safe_max']] for sid,m in motors.items()})))
         return
     if args.output.exists():
         raise ValueError('Choose a new output directory')

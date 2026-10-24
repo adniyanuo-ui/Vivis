@@ -161,7 +161,6 @@ def main():
                              gaze_owner_ids=profile['gaze_owner_ids'],fps=fps,repeat=args.repeat,
                              face_fps=args.face_fps,scheduled_feedback=profile['scheduled_feedback'],
                              home_ids=home_ids,home_speed=args.home_speed,home_only=args.home_only,
-                             neck_max_load_raw=motors[32]['max_load_raw'],
                              mouth_gain_report=profile['mouth_gain_report'],
                              volume_times_three=args.usb_volume_times_three and not args.home_only)))
         return

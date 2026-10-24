@@ -73,9 +73,6 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         if trial and max(abs(v-2047) for v in values) > cap:
             raise ValueError('Eye trial exceeds coordinate-specific limits')
     n = config['neck']
-    load_limit=n.get('max_load_raw',motors[32]['max_load_raw'])
-    if type(load_limit) is not int or not 1<=load_limit<=1023:
-        raise ValueError('Invalid neck software load threshold')
     if n.get('coordination_mode') != 'visual_error_assist' or 'eye_lead_s' in n:
         raise ValueError('Mojia neck requires visual_error_assist without a fixed eye delay')
     if type(config['camera']['width']) is not int or config['camera']['width'] <= 0:
