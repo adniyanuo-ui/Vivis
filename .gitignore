@@ -53,7 +53,9 @@
 !/tools/mojia_player.py
 !/tools/mojia_track_person.py
 !/tools/mojia_performance.py
+!/tools/analyze_mojia_show.py
 !/tools/test_mojia_gaze.py
+!/tools/test_homing.py
 !/tools/inspect_mojia_dynamics.py
 !/tools/prepare_trt_layout.py
 !/tools/prepare_variant_mesh.py
@@ -112,6 +114,8 @@
 /mojia/*
 !/mojia/墨甲9.23.json
 !/mojia/person_gaze.json
+!/mojia/homing_axes.json
+!/mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json
 !/mojia/accepted_tracking_preset.json
 !/xiaobai/person_gaze.json
 !/tests/

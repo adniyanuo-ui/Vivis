@@ -437,3 +437,121 @@ D建议暂保留32，先独立验证时序改变；后续如仍拖滞可单独�
 ## 2026-10-23 暂停纵向ID7/22，完整歌曲两遍
 
 按用户要求关闭上下眼球动作，新增--hold-vertical-eyes，手动入口默认启用。有效运行配置去掉纵向跟踪轴并将7/22从歌曲命令集合排除，公共播放器把未命令轴的轨迹固定为启动实测值；保持使能、反馈检查及原始纵向100/±20参数快照。横向8/23和颈部32继续原协同，口部和其它表情、音量3倍不变。新增回归确保7/22既不被歌曲命令也不被跟踪接管，专项28项通过，离线两遍入口核验及Git空白检查通过。现场播放结果另记。
+
+## 2026-10-23 联合播放颈部顺滑度与总线调度修复
+
+两遍实际均完成112.894秒，纵向7/22未发位置命令。随后只读核对口部12/13/27/28/29/31、眼球7/8/22/23及颈部32/33/34，已保存寄存器字段无变化；ID32仍P/D/I16/26/0、硬件加速度原始64、速度900、死区5/5、转矩100%。软件加减速64计数/秒²来自提交6f42b49，当时把用户“颈部加减速度都改为64”解释为软件加速/减速及硬件41均设64；这是当时的解释，不是厂家给出的物理换算。该软件限制在单独跟踪时已经存在，本次保留。
+
+对比D26单独跟踪与17:03联合播放：单独指令间隔P95约16.80ms、ID23/32反馈中位间隔均83.74ms、UART帧错误增量0；联合第一遍指令间隔P95/P99/最大约21.65/37.75/49.32ms，ID23/32反馈中位间隔116.75/633.41ms，UART帧错误增量77。第二遍帧错误增量78。原联合读取沿用每帧一轴、四次短寄存器读取、每次20ms超时，失败后等待10ms重试；故实际反馈阶段P99约32ms，明确超过16.67ms周期。该阻塞是影响顺滑度的软件机制；UART帧错误的电气/驱动根因尚未确定，不能宣称已修复物理通信问题。
+
+相机detections.jsonl显示单独与两遍联合推理中位耗时约67.79/66.20/66.03ms、帧龄中位约163/162/159ms，均无超过300ms的新结果；第二遍1682个检测结果中仅80帧有人脸，解释该轮有效跟踪时间短，不能归因于推理变慢。相同相机包、编码器输入、时钟、反向、目标丢失和回中条件下，新回归确认联合眼颈目标与单独控制一致，其余歌曲轴保持原目标；没有发现眼颈/口型控制权重叠。
+
+联合模式新增单线程分步反馈调度。单调时钟定时60Hz发送，音频DAC时钟取当前歌曲帧，错过周期不补发过期帧。每周期最多7ms反馈预算、8次短读，每次3ms超时且无即时重试；未完成的四段样本可跨周期接续，错误丢弃整份样本，不更新有效反馈时间。ID23/32的80ms刷新阈值同时优先，其余轴仍按最旧反馈优先。启动读写继续使用原20ms/一次重试；故障传感器依旧暂停并确认或停止，通信失败比例5%、全部轴1秒新鲜度、100ms控制看门狗等原约束保留。无需额外串口线程或并发运动进程。总线独占与既有停止方式保留。
+
+入口增加--face-fps 30/60，默认60。30只降低歌曲表情采样，音频时长与眼颈60Hz不变；采用零阶保持，可能损失短促口型峰值。简单把整个循环改30Hz且仍每帧读一轴，33轴和关键轴优先会让最旧有效反馈约1.5秒，违反原1秒约束，因此没有采用。新增tools/analyze_mojia_show.py读取旧/新日志，报告指令/反馈间隔、阶段耗时、失败次数和UART计数，输出timing_report.json。
+
+仅只读真机验证新3ms超时：660次短读全部有效，中位0.327ms、P99约0.796ms、最大1.654ms，UART帧错误增量0；没有发送位置或改舵机参数。证据outputs/mojia/combined_schedule_readonly_20261023_173902.json。全量159项中158通过、1项可选模型测试跳过，含读取预算、分步样本、超时丢弃、不即时重试/5%错误限制、相同输入下单独/联合一致及30/60Hz歌曲采样的完整模拟音频循环。Shell语法、两个离线启动模式、日志分析及Git空白检查通过。新调度的完整真机运动尚待用户手动启动验收，不能以只读和模拟测试代替现场顺滑度确认；功能分支未合main。
+
+## 2026-10-23 18:54起步ID4坏包与启动恢复遗漏
+
+用户手动运行outputs/mojia/manual_show_20261023_185443_281711，首遍只发送3次起步位置指令，音频未启动、实时段发送帧数0。异常位置在起步feedback_checked，尚未启用3ms分步反馈。地址60的两次回复分别为ffff0404003000e7和ffff1404001000e7，均校验失败，后者回复ID字段为20而请求ID为4；这些是原始坏包，不能把其中的负载值或ID当成有效硬件状态。本次UART帧错误计数增量0，说明该计数为0仍不能排除应用层校验错误。电气、设备发送、驱动或其它具体根因尚未锁定。
+
+上一轮仅修复实时段，启动阶段仍沿用两个坏包即退出，覆盖存在遗漏。本轮仅在经过审查的联合路径，对起步和首帧到位读取增加有界恢复：暂停发送新目标，每隔20ms重新采集完整、通过原有保护校验的反馈；最多4次新采样、0.5秒恢复窗口并受原启动期限限制，连续两次有效才继续。真实报警、5%通信失败比例超限、待确认的传感器异常和操作者停止不被该恢复绕过。恢复后重置起步计时基准，避免把暂停累计成超时或大步长。新增phase和startup_communication_recoveries日志，分析入口支持尚未开始音乐的失败记录。
+
+此次启动快照再次确认嘴部12/13/27/28/29/31均硬件41=0、速度900，眼球7/22为0/100，8/23为0/300；ID32为硬件41=64、速度900、PID16/26/0。本轮未改这些设置。软件neck.acceleration_counts_s2=64只作用于ID32，限制规划速度的加速和减速；observed_acceleration_raw=64是硬件41预期读回元数据，不是另一处电机写入，更不是目标位置。
+
+新增恢复连续性、永久损坏、真实报警、停止、期限及整合启动回归；整合回归注入ID4坏包并人为停顿110ms，确认能保持目标、恢复并继续模拟完整音频，不触发错误的大步长。全量162项中161通过、1项可选模型测试跳过，离线入口与Git空白检查通过。未自动重播，修复后的真机起步与整曲效果仍待用户再次手动运行；坏包的根因未宣称已排除。
+
+
+## 2026-10-24 35轴回中与用户层硬件参数待确认清单
+
+用户确认ID2–36共35轴，包括无表情映射的9/24，均以2047为中位。新增配置驱动回中，默认临时速度上限60计数/秒，公共平滑曲线、起止速度/加速度为零的指令规划；真实机械效果尚待观察。回中前停止跟踪/音乐，完成后恢复各轴原速度，再启动任务；9/24若原未使能则恢复原状态。--home-only仅回中，不打开相机、不改音量、不播放媒体。执行中中止保留低速和最后目标，不恢复高速。用户要求先列清单再确认删除，本轮没有删除下述特殊设置。
+
+建议分层为：用户任务只表达中位/表情/跟踪意图；通用协调/轨迹策略使用归一化坐标或角度；设备描述管理角色、标定和能力；驱动管理固件寄存器及真实保护。去掉业务层硬编码不等于删除标定、取消协议校验或清除固件保护。以下按当前有效值列出，普通模板与历史数值另列。机器可读清单：outputs/mojia/user_layer_parameter_audit_20261024.json。
+
+
+### A 软件限制与例外
+
+| 编号/项目 | 当前值及作用 | 位置 | 建议处理（待确认） |
+|---|---|---|---|
+| 1. neck.acceleration_counts_s2 | 64；ID32软件加速、减速和行程制动；不是写硬件41 | `mojia/person_gaze.json`<br>`tools/xiaobai_runtime/mojia_gaze.py` | 按用户意图移除专用计数域限制，或改为通用轨迹策略；硬件41保持独立 |
+| 2. per-axis speed ceilings | 嘴12/13/27/28/29/31=900，横眼8/23=300，纵眼7/22=100，颈32=900；其它表情通常300；既逐帧limit_step又用作指令速度；并非单纯硬件读回 | `tools/mojia_performance.py`<br>`mojia/person_gaze.json`<br>`tools/xiaobai_runtime/playback.py`<br>`tools/xiaobai_runtime/mapping.py` | 应用层取消按ID覆盖，下沉为设备能力/运动策略；不可把取消限步误当成无需发送有效速度 |
+| 3. fixed PID/acceleration/deadband checks | ID32启动要求P/D/I16/26/0、硬件41=64、死区5/5；嘴六轴启动要求41=0、46=900；读回不一致就拒绝；这些代码本身没有写PID或死区 | `tools/xiaobai_runtime/mojia_performance.py`<br>`tools/mojia_performance.py`<br>`mojia/person_gaze.json` | 去掉业务层固定值锁定，保留型号、工作模式和协议可解释性检查；需要的参数由设备层管理 |
+| 4. temperature policy | 配置生成器和当前普通轴60℃；ID29运行覆盖80℃；实际设备阈值另读70/80℃；软件额外阈值停播；不改舵机温度保护寄存器 | `tools/prepare_mojia.py`<br>`mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json`<br>`tools/mojia_performance.py`<br>`tools/xiaobai_runtime/playback.py`<br>`tools/xiaobai_runtime/mapping.py` | 移除业务层60/80与ID29温度特判；设备层继续监测真实硬件阈值/报警 |
+| 5. load policy | 普通轴350，ID29=1023；按load_raw&1023比较；额外负载门槛；1023仍是有限阈值；不修改固件过载参数 | `tools/prepare_mojia.py`<br>`tools/mojia_performance.py`<br>`tools/xiaobai_runtime/playback.py` | 业务层移除按ID特判，下沉为设备保护策略；协议位掩码不应删 |
+| 6. initial settle tolerance | 默认20计数，ID31=32，ID29=40；首帧、ID29恢复和新回中到位验收使用 | `mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json`<br>`tools/prepare_mojia.py`<br>`tools/mojia_performance.py`<br>`tools/xiaobai_runtime/playback.py`<br>`tools/xiaobai_runtime/homing.py` | 去掉轴特判，统一由设备分辨率、反馈精度和任务到位条件给出 |
+| 7. position feedback tolerance | 字段5计数，校验仅允许0..5；有feedback_min/max的脸部轴对设备边界不使用这5计数宽容；当前颈部用软件范围加容差，脸部通常检查独立设备反馈范围；不是所有轴都放宽5 | `tools/xiaobai_runtime/mapping.py`<br>`tools/xiaobai_runtime/playback.py`<br>`tools/prepare_mojia.py` | 移除人为按计数补丁，统一设备反馈域和任务命令域的定义 |
+| 8. ID29 disabled recovery | 仅特定授权路径允许29从卸力、超范围实测恢复；目标2047，10秒，100ms采样，两次有效，结束卸力；本次回中阶段速度改为min(home-speed,900)；扩展实测启动走廊、单轴使能及结束卸力；不是通用关节生命周期 | `tools/mojia_performance.py`<br>`tools/mojia_player.py`<br>`play_mojia_full_show.sh` | 改为通用关节使能/恢复/停止策略；用户确认之前保留原例外 |
+| 9. startup position clipping policy | startup_target中10计数门槛、特殊恢复白名单29/35/36；已使能脸部有独立feedback域；该函数被联合入口调用；旧arm流程额外恢复/持颈规则另列D组 | `tools/mojia_player.py` | 设备层统一启动姿态合法性；移除业务层ID名单 |
+| 10. neck command scheduler | ID32每次至少2计数、间隔40ms；回中允许最后1计数；速度档位50，当前adaptive_speed=false固定900；目标合并/通信节流；50档算法当前未启用，但2计数/40ms生效 | `tools/xiaobai_runtime/mojia_gaze.py`<br>`tools/xiaobai_runtime/mojia_performance.py` | 改为通用发送策略，参数不依赖某一ID；改变前需与已认可顺滑度对照 |
+| 11. trial caps | 眼速度<=300、横向±60/纵向±30；颈速度<=900、软件加速度<=200、行程试验±80/普通±160；增益1..180；即使修改JSON，验证器仍会以这些写死上限拒绝配置 | `tools/xiaobai_runtime/mojia_gaze.py` | 放入设备/试验配置，通用业务逻辑不写型号经验上限 |
+| 12. other numeric tolerances | 眼编码器位移至少1计数；触端余量1计数；颈回中0.25计数吸附；反馈日志/闭环时效0.3秒；运动证据和数值收敛条件；不写硬件 | `tools/xiaobai_runtime/mojia_gaze.py`<br>`mojia/person_gaze.json` | 转换为通用分辨率/归一化精度；不要与机械死区混为一谈 |
+
+
+### B 协同算法参数
+
+| 编号/项目 | 当前值及作用 | 位置 | 建议处理（待确认） |
+|---|---|---|---|
+| 13. eye pursuit | gain3.2、max_axis_speed5归一化单位/秒、图像死区0.035、滤波60ms、渐入120ms、丢脸保持400ms、退出800ms；眼球速度和丢脸行为；属于行为算法，含软件限速5 | `mojia/person_gaze.json`<br>`tools/xiaobai_runtime/person_gaze.py` | 保留通用算法且配置化；若也要求移除限速5需单独确认，避免改变已认可效果 |
+| 14. neck visual assistance | gain120计数/秒、启动图像偏差0.14、停止0.07、滤波120ms、累计增长2像素(4/width)；图像滞回与抗噪；不是硬件26/27死区5/5 | `mojia/person_gaze.json`<br>`tools/xiaobai_runtime/mojia_gaze.py` | 保留协调逻辑；将计数域增益改为与设备无关的坐标，再由适配层换算 |
+| 15. terminal return | 每遍最后5秒眼颈回中；静态眼头跟踪也最后5秒回中；歌曲尚未结束时跟踪提前退出 | `tools/xiaobai_runtime/mojia_performance.py`<br>`tools/mojia_track_person.py` | 作为任务生命周期策略配置，不按设备写死；是否保留由用户确认 |
+
+
+### C 设备映射/标定
+
+| 编号/项目 | 当前值及作用 | 位置 | 建议处理（待确认） |
+|---|---|---|---|
+| 16. IDs and roles | 横眼8/23、纵眼7/22、颈32、固定33/34、嘴部六轴；相机右眼跟随23；业务代码重复检查/查找具体ID，移植需改代码 | `mojia/person_gaze.json`<br>`tools/xiaobai_runtime/mojia_gaze.py`<br>`tools/xiaobai_runtime/mojia_performance.py`<br>`tools/mojia_track_person.py` | 下沉到机器人描述文件，以left_yaw/right_yaw/neck_yaw角色访问；标定数据保留 |
+| 17. neutral and stroke | 多处硬编码2047；横眼1987..2107，纵眼2027..2067，颈1967..2127；33/34旧模板2027..2067；各轴另有标定和设备边界；硬编码中位和试验行程；中位不是速度/容差 | `mojia/person_gaze.json`<br>`tools/xiaobai_runtime/mojia_gaze.py`<br>`tools/xiaobai_runtime/mojia_performance.py`<br>`tools/prepare_mojia.py`<br>`tools/mojia_player.py`<br>`tools/xiaobai_runtime/mapping.py` | 从设备中位/标定读取；不能删除标定端点和实际设备范围 |
+| 18. models and register assumptions | STS3032=521，SM45BL=10760；型号按ID段推断；41加速度、46速度、18 BIT2速度单位；混合了ID与型号；SDK保留已有41，并非把软件64写进所有轴 | `tools/prepare_mojia.py`<br>`tools/mojia_track_person.py`<br>`tools/xiaobai_runtime/mojia_gaze.py`<br>`tools/xiaobai_runtime/feetech_sdk.py`<br>`tools/xiaobai_runtime/homing.py` | 型号/固件识别和寄存器语义保留在驱动；从业务层移除ID段假设 |
+| 19. facial mixing assumptions | ID31 jaw_owner=all_calibrated；眼睑5/6/20/21的眨眼/眼球去重规则；EyeLook30度端点假设；决定同一舵机多个表情如何合成，影响口型和眼睑 | `tools/xiaobai_runtime/mapping.py`<br>`tools/prepare_mojia.py`<br>`mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json` | 机制应通用，角色/耦合/端点留在设备标定；不能直接删掉后期望口型不变 |
+| 20. ownership and held axes | 任务不发7/22，33/34仅监测，9/24原不在任务映射；当前新增35轴回中一次，之后仍按原任务控制权；硬件角色/任务选择重复写死；回中与任务阶段范围不同 | `play_mojia_full_show.sh`<br>`tools/mojia_performance.py`<br>`tools/xiaobai_runtime/mojia_performance.py`<br>`mojia/homing_axes.json` | 改为配置驱动的所有权表；保留每轴单一控制者 |
+
+
+### D 历史/非当前入口
+
+| 编号/项目 | 当前值及作用 | 位置 | 建议处理（待确认） |
+|---|---|---|---|
+| 21. old arm flow | mojia_player arm仅29/35/36特殊恢复，速度30/60，32/33/34按5计数/100ms回中，20秒超时；位置变化2、到位10/20计数；独立arm命令存在，但当前联合入口未调用arm函数 | `tools/mojia_player.py` | 迁移至通用生命周期或弃用旧命令；不可当作当前播放的有效值 |
+| 22. Xiaobai neck path | ±20/80/160；速度25*倍率，软件加速度35*min(倍率,2)，先眼80ms，增益60*倍率；小白眼速度2.5/秒和增益0.8；小白入口仍可用；墨甲显式拒用，当前墨甲不经过此颈部控制器 | `tools/xiaobai_runtime/person_gaze.py`<br>`xiaobai/person_gaze.json`<br>`play_0001_xiaobai_tracking.sh` | 通用化时统一角色/算法策略，不把旧数值混入墨甲 |
+| 23. old templates and descriptions | 源播放profile ID31速度600被运行覆盖900；33/34模板50但任务不发位置；README旧段落仍说41=0、死区2/2、软件200；模板或历史说明不等于当前有效参数，容易误读 | `mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json`<br>`README.md` | 历史明确标注；确认后收敛唯一配置来源 |
+| 24. readback snapshots | accepted_tracking_preset.json中35轴PID、死区、速度、加速度、转矩读回；证据快照，不会自动恢复硬件；观测元数据可能被单独启动校验引用 | `mojia/accepted_tracking_preset.json` | 保留历史证据，区分读回和执行配置 |
+| 31. legacy commissioning/home/sweep | 小白ID31型号11272，12计数往返、步长2、速度60、到位6；旧颈回中32/33/34速度60、步长5/100ms、到位10/20；扫描32试验±40/80/160、速度25、步长2/100ms、固件2.53/phase44锁定；小白旧profile生成速度300、温度60、负载350、motion_gain0.25；历史独立调试/使能工具，不被当前墨甲联合入口调用 | `tools/commission_xiaobai_jaw.py`<br>`tools/xiaobai_neck_home.py`<br>`tools/xiaobai_neck_sweep.py`<br>`tools/prepare_xiaobai_trial.py`<br>`tools/xiaobai_rearm_ttl.py` | 若保留旧工具，应显式限定机器人/设备配置；通用化时合并生命周期和单位换算 |
+| 32. read-only dynamics interpretation | inspect_mojia_dynamics将41原始值乘100作为名义加速度；速度倍率由phase推断，84原始值乘50；零加速度特殊模式不换算；只读报告字段；不参与本次运动限制或写寄存器；不能把名义值当成已验证物理响应 | `tools/inspect_mojia_dynamics.py` | 移入对应型号/固件解释器并标注验证状态；保留原始读回 |
+
+### E 通信/通用保护
+
+| 编号/项目 | 当前值及作用 | 位置 | 建议处理（待确认） |
+|---|---|---|---|
+| 25. priority polling IDs | ID23/32超过80ms优先；旧路径只优先23约100ms；对特定ID的刷新调度 | `tools/xiaobai_runtime/feedback_schedule.py`<br>`tools/xiaobai_runtime/playback.py` | 用角色/订阅者需求定义优先级，保留串口单一所有者 |
+| 26. timing and recovery | 60Hz、反馈预算7ms/8请求/单次3ms、静默1ms、启动20ms；启动坏包20ms间隔/4次/0.5秒；旧读失败等10ms重试；传输调度策略，不是舵机物理加速度或温度 | `tools/xiaobai_runtime/playback.py`<br>`tools/xiaobai_runtime/protocol.py`<br>`tools/xiaobai_runtime/feedback_schedule.py`<br>`tools/mojia_performance.py` | 下沉设备服务/运行时配置；不要为了去特殊参数又恢复阻塞发送 |
+| 27. global faults | 全部轴1秒有效反馈、100ms控制停顿、通信失败比例5%；checksum/ID/长度/型号/模式/设备边界检查；通用故障处理与协议完整性 | `tools/xiaobai_runtime/playback.py`<br>`tools/xiaobai_runtime/protocol.py`<br>`tools/xiaobai_runtime/feetech_sdk.py` | 继续保留；设备阈值/协议语义由驱动提供，用户层仅接收状态 |
+| 28. voltage policy | 普通STS raw40..90；SM raw90..254；从扫描写入profile并在软件再次检查；设备配置的阈值副本与运行状态检查 | `tools/prepare_mojia.py`<br>`tools/xiaobai_runtime/playback.py` | 由设备服务读取和检查，应用不要写死电压数值 |
+
+
+### F 非舵机硬件
+
+| 编号/项目 | 当前值及作用 | 位置 | 建议处理（待确认） |
+|---|---|---|---|
+| 29. USB audio and camera | USB Audio Device、Speaker15/23、固定-22.5/-10.5dB及0.7535659；右眼摄像头by-id、ttyCH343USB0/1Mbaud；具体外设和三倍音量适配，不是舵机设置 | `tools/mojia_performance.py`<br>`mojia/person_gaze.json`<br>`mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json` | 若做跨硬件通用化，同样外置为设备配置；本轮未删除 |
+
+
+### G 新增回中
+
+| 编号/项目 | 当前值及作用 | 位置 | 建议处理（待确认） |
+|---|---|---|---|
+| 30. generic homing policy | 全部35轴中位2047来自本次明确确认；默认临时速度60、最短1秒平滑曲线、继承task到位容差/其它默认20、两次确认、超时曲线时长+10秒；新增执行前通用回中；成功恢复原速度，原未使能的非任务轴恢复未使能；中断保持低速 | `mojia/homing_axes.json`<br>`tools/xiaobai_runtime/homing.py`<br>`tools/mojia_performance.py` | 速度60为本次建议而非设备固有值；回中策略可统一配置，所有旧轴特判仍待审查 |
+
+本轮验证：全量167项中166通过、1项可选模型测试跳过；新增回中曲线速度/端点、非2047中位、临时使能及原速度恢复、中断保持低速、真实报警阻止运动、35轴home-only不启动视觉/音频等回归。60/40速度的离线入口、Shell语法和Git空白检查通过。本轮没有连接串口或启动真机回中/播放；32项清单仍待用户确认，未删除原特殊设置。
+
+## 2026-10-24 相机占用恢复及阶段基线
+
+用户运行manual_show_20261024_121121_16744时相机启动失败，尚未进入运动流程。设备路径存在、权限正常、OpenCV编译支持V4L2；DEBUG定位VIDIOC_S_FMT返回EBUSY。root只读占用查询确认/dev/video0被ies.service的face_track占用，串口被重启后的dms.service头/身体节点占用。按既有Vivis接管授权停止这两个服务，但没有禁用开机启动；只为当前串口恢复james访问ACL。停止后相机可读640×480 MJPG/30FPS，HTTP画面有效。手动入口现在对活动的冲突服务明确报错，并给出停止命令；相机缺失、权限不足、打开失败及串口权限不足都有区分诊断，不自动关服务或修改设备权限。
+
+35轴只读比对发现DMS覆盖了参数：普通轴多为41=10/46=0，ID32变成PID32/32/0、死区0/0、41=50、46=2400，目标和实测2242。按已保存accepted_tracking_preset.json核对型号/设备范围后，恢复加速度、速度、PID及死区字段并独立读回，未写位置、模式、设备范围或扭矩使能。第一次ID2参数写应答丢失，但读回已是目标值，后续从新快照继续、没有重发该写；余下恢复42处变化，其中5次缺失写应答均由两次独立读回确认。证据为outputs/mojia/restore_accepted_20261024_122111.json、restore_all_accepted_20261024_122602.json、restore_all_verified_20261024_122634.json。回中通用RAM写入也增加该确认方式，真实状态报警/不符/坏读仍失败，绝不重发写入。
+
+修复回中阶段误套跟踪行程：回中可从设备范围内的当前姿态进入中位，跟踪/播放开始后仍使用原任务范围。ID9实测2052、目标2047、设备命令上限2050；仅在中位附近复用已有到位容差判断编码器残差，所有下发目标仍夹在设备命令范围内，不新增ID9特判。禁用轴的使能前目标也经过限位；到位后两次读取每轴42目标RAM，必须等于声明中位。回中结束的速度/使能恢复写应答丢失时读回确认，保留停止/负载/温度/错误率保护。首次home-only自动创建状态目录，避免依赖此前相机服务生成目录。
+
+启动只读预检通过35轴，跟踪/表情任务监测33轴；USB Audio Device解析到当前hw:3,0，HTTP相机帧龄约135ms、JPEG有效。证据outputs/mojia/startup_ready_20261024_123218.json。全量174项中173通过、1项可选模型测试跳过；覆盖缺失/无权限/被占用相机诊断、串口访问、超出跟踪范围启动、近中位残差不放宽命令限位、丢写应答读回确认及首次home-only目录创建。另通过两个FPS离线模式、Shell语法及Git空白检查。
+
+本次保存当前功能分支基线，包含当前输入播放profile和35轴中位清单；媒体、模型及原始现场日志保持本机资源。保留所有待确认的用户层特殊设置，没有开展分层/ROS2整改。当前已验证相机、音频设备识别、35轴通信及启动条件，未自动执行35轴回中或完整两遍音乐；新流程机械顺滑度和整曲联合效果仍待用户手动验收，不能标为稳定实机版本或合入main。

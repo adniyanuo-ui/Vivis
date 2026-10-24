@@ -13,6 +13,27 @@ from xiaobai_runtime.protocol import Bus,packet,decode_status,goal_packet,Protoc
 from xiaobai_runtime.mapping import ROOT,inputs,audit,draft_profile,compile_trajectory,limit_step,live_preflight
 
 class ProtocolTests(unittest.TestCase):
+    def test_sdk_reports_missing_or_inaccessible_serial_device(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.feetech_sdk import OfficialSDKBus
+        with patch('xiaobai_runtime.feetech_sdk.os.path.exists',return_value=False):
+            with self.assertRaisesRegex(ProtocolError,'Serial device is missing'):
+                OfficialSDKBus('/dev/vivis-test-serial')
+        with patch('xiaobai_runtime.feetech_sdk.os.path.exists',return_value=True),patch('xiaobai_runtime.feetech_sdk.os.access',return_value=False):
+            with self.assertRaisesRegex(ProtocolError,'sudo setfacl'):
+                OfficialSDKBus('/dev/vivis-test-serial')
+
+    def test_deferred_read_failure_has_no_inline_sleep_or_retry(self):
+        from unittest.mock import Mock,patch
+        bus=Bus.__new__(Bus);bus.read_requests=0;bus.corrupt_responses=[];bus.read_failures=[]
+        bus.retry_reads=False;bus._read_once=Mock(side_effect=ReadTimeout('missing'))
+        with patch('xiaobai_runtime.protocol.time.sleep') as sleep:
+            with self.assertRaises(ReadTimeout):bus.read(2,56,2)
+        sleep.assert_not_called();self.assertEqual(bus._read_once.call_count,1)
+        self.assertEqual(len(bus.read_failures),1)
+        bus.read_requests=99;bus.read_failures=[{}]*5
+        with self.assertRaisesRegex(ProtocolError,'exceeds 5%'):bus.read(2,56,2)
+
     def test_sdk_timeout_is_instance_local_and_timeouts_still_fail(self):
         from xiaobai_runtime.feetech_sdk import OfficialSDKBus
         from scservo_sdk.port_handler import LATENCY_TIMER
@@ -743,5 +764,51 @@ class AudioBufferTests(unittest.TestCase):
                     self.assertAlmostEqual(clock.time(),.125)
                     self.assertAlmostEqual(clock.duration,.01)
                 finally:clock.close()
+
+class StartupFeedbackTests(unittest.TestCase):
+    def test_startup_requires_two_consecutive_complete_valid_samples(self):
+        import time
+        from unittest.mock import Mock
+        from xiaobai_runtime.playback import startup_feedback
+        healthy=dict(position=2047,load_raw=0,temperature_c=40,status_register=0)
+        reader=Mock(side_effect=[CorruptResponse('two bad packets in bus.read'),healthy,
+                                 ReadTimeout('lost fresh sample'),healthy,healthy])
+        records=[];wait=Mock()
+        result=startup_feedback(reader,4,time.monotonic()+1,records,wait=wait)
+        self.assertEqual(result,healthy);self.assertEqual(reader.call_count,5)
+        self.assertTrue(records[0]['recovered']);self.assertEqual(wait.call_count,4)
+
+    def test_startup_recovery_is_bounded_and_never_retries_actual_alarm(self):
+        import time
+        from unittest.mock import Mock
+        from xiaobai_runtime.playback import startup_feedback,SensorReadingError
+        from xiaobai_runtime.protocol import ServoStatusError
+        records=[];reader=Mock(side_effect=CorruptResponse('persistent bad packet'))
+        with self.assertRaisesRegex(RuntimeError,'startup communication recovery failed'):
+            startup_feedback(reader,4,time.monotonic()+1,records,wait=Mock())
+        self.assertEqual(reader.call_count,5);self.assertFalse(records[0]['recovered'])
+        for fault in (SensorReadingError('hot'),ServoStatusError(4,4),ProtocolError('5% gate')):
+            reader=Mock(side_effect=fault)
+            with self.assertRaises(type(fault)):
+                startup_feedback(reader,4,time.monotonic()+1,[],wait=Mock())
+            self.assertEqual(reader.call_count,1)
+        reader=Mock(side_effect=ReadTimeout('missing'))
+        with self.assertRaises(ReadTimeout):
+            startup_feedback(reader,4,time.monotonic()+1,[],wait=Mock(),can_recover=lambda:False)
+        self.assertEqual(reader.call_count,1)
+
+    def test_startup_recovery_honors_deadline_and_operator_stop(self):
+        import time
+        from unittest.mock import Mock
+        from xiaobai_runtime.playback import startup_feedback
+        reader=Mock(side_effect=ReadTimeout('missing'))
+        with self.assertRaisesRegex(RuntimeError,'startup communication recovery failed'):
+            startup_feedback(reader,4,time.monotonic(),[],wait=Mock())
+        self.assertEqual(reader.call_count,1)
+        reader.reset_mock()
+        with self.assertRaisesRegex(RuntimeError,'Operator stop'):
+            startup_feedback(reader,4,time.monotonic()+1,[],should_stop=lambda:True,wait=Mock())
+        reader.assert_not_called()
+
 
 if __name__=='__main__':unittest.main()

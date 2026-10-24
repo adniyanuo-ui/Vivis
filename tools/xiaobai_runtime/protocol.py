@@ -57,6 +57,8 @@ class Bus:
             if isinstance(exc,CorruptResponse):self.corrupt_responses.append(failure)
             if self.read_requests>=100 and len(self.read_failures)/self.read_requests>.05:
                 raise ProtocolError('Damaged/missing feedback exceeds 5% of reads') from exc
+            if not getattr(self,'retry_reads',True):
+                raise  # The timed controller schedules recovery after its next command.
             time.sleep(.010)
             return self._read_once(sid,address,count)
     def _read_once(self,sid,address,count):

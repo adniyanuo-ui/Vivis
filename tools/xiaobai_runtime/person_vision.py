@@ -1,5 +1,6 @@
 """USB capture and YuNet detector for the isolated visual service. No actuator I/O."""
 import math
+import os
 import hashlib
 import json
 import threading
@@ -42,10 +43,18 @@ class LatestCamera:
         self.latest = None
         self.error = None
         self.sequence = 0
-        self.capture = cv2.VideoCapture(config['device'], cv2.CAP_V4L2)
+        device=config['device']
+        if isinstance(device,str) and device.startswith('/dev/'):
+            if not os.path.exists(device):
+                raise RuntimeError('Camera device is missing: '+device+'; check USB connection and configured device path')
+            if not os.access(device,os.R_OK|os.W_OK):
+                raise RuntimeError('Camera device access denied: '+device+'; check video group/device ACL permissions')
+        self.capture = cv2.VideoCapture(device, cv2.CAP_V4L2)
         if not self.capture.isOpened():
             self.capture.release()
-            raise RuntimeError('Cannot open camera: ' + str(config['device']))
+            raise RuntimeError('Cannot open camera: '+str(device)+
+                '; check competing processes with sudo fuser -v '+os.path.realpath(str(device))+
+                ' and verify V4L2 format support. System camera services may restart after reboot.')
         self.capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
         self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, config['width'])
         self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config['height'])

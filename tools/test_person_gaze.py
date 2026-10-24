@@ -15,7 +15,7 @@ from xiaobai_runtime.mapping import ROOT, limit_step
 from xiaobai_runtime.person_gaze import (GazeOverride, GazePolicy, TargetReceiver, VERSION,
                                         axis_normalized, axis_position, validate_config, validate_packet,
                                         prepare_direction_trial, prepare_neck_follow_trial, NeckFollowTrial)
-from xiaobai_runtime.person_vision import select_largest
+from xiaobai_runtime.person_vision import select_largest,LatestCamera
 
 
 def configuration():
@@ -60,6 +60,29 @@ class SelectionTests(unittest.TestCase):
         for faces in [None, [], [face(0, 0, 1, 1)], [face(0, 0, 100, 100, .5)],
                       [face(700, 10, 100, 100)], [[float('nan')] * 15]]:
             self.assertEqual(select_largest(faces, 640, 480), (None, []))
+
+
+class CameraOpenTests(unittest.TestCase):
+    def test_missing_camera_is_reported_before_capture(self):
+        cv=Mock()
+        with patch.dict('sys.modules',{'cv2':cv}),patch('xiaobai_runtime.person_vision.os.path.exists',return_value=False):
+            with self.assertRaisesRegex(RuntimeError,'Camera device is missing'):
+                LatestCamera(dict(device='/dev/vivis-test-camera'))
+        cv.VideoCapture.assert_not_called()
+
+    def test_camera_permission_error_is_distinct_from_busy(self):
+        cv=Mock()
+        with patch.dict('sys.modules',{'cv2':cv}),patch('xiaobai_runtime.person_vision.os.path.exists',return_value=True),patch('xiaobai_runtime.person_vision.os.access',return_value=False):
+            with self.assertRaisesRegex(RuntimeError,'Camera device access denied'):
+                LatestCamera(dict(device='/dev/vivis-test-camera'))
+        cv.VideoCapture.assert_not_called()
+
+    def test_capture_failure_releases_device_and_explains_ownership_check(self):
+        cv=Mock();cv.VideoCapture.return_value.isOpened.return_value=False
+        with patch.dict('sys.modules',{'cv2':cv}),patch('xiaobai_runtime.person_vision.os.path.exists',return_value=True),patch('xiaobai_runtime.person_vision.os.access',return_value=True):
+            with self.assertRaisesRegex(RuntimeError,'sudo fuser -v'):
+                LatestCamera(dict(device='/dev/vivis-test-camera'))
+        cv.VideoCapture.return_value.release.assert_called_once()
 
 
 class TransportTests(unittest.TestCase):

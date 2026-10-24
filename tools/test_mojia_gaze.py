@@ -376,6 +376,116 @@ class MojiaPerformanceTests(unittest.TestCase):
             a.prepare(np.full((3,len(ids)),2047.),np.full(len(ids),2047.),
                 [dict(id=32,config_0_39_hex=raw.hex(),state_40_70_hex=ram.hex())],10.)
 
+    def test_combined_matches_standalone_for_same_camera_feedback_and_clock(self):
+        """Arbitration must preserve solo eye/neck output and the song's other axes."""
+        from xiaobai_runtime.mojia_performance import MojiaPlaybackGaze, tracking_profile
+        from xiaobai_runtime.mapping import limit_step
+        for held_vertical in (False, True):
+            with self.subTest(held_vertical=held_vertical):
+                c,p,ids,receiver=self.setup_performance()
+                if held_vertical:
+                    c['control']['vertical_enabled']=False
+                    c['control']['held_eye_ids']=[7,22]
+                    c['control']['axes']=[a for a in c['control']['axes'] if a['id'] not in (7,22)]
+                    p=tracking_profile(c,p,ids)
+                combined=MojiaPlaybackGaze(c,p,ids,receiver)
+                owned=combined.owned
+                solo=MojiaPursuit(c,owned,combined.speeds,True)
+                now=10.;elapsed=0.;duration=15.
+                previous=np.full(len(owned),2047.)
+                last=np.full(len(ids),2047.)
+                combined.prepare(np.array([last]),last,[],now)
+                solo.observe_eye(2047,now)
+                scheduler=NeckCommandScheduler(2047,now,c['neck']['speed_counts_s'],
+                                               adaptive_speed=c['neck']['adaptive_speed'])
+                limits=np.array([next(m['max_speed_counts_s'] for m in p['motors'] if m['id']==sid) for sid in ids])
+                for i in range(900):
+                    # Uneven ticks, reversals, target loss, encoder observations and return.
+                    dt=(.008,.025,.017)[i%3];now+=dt;elapsed+=dt
+                    target=packet(now,.65*np.sin(elapsed*1.4))
+                    if 4<elapsed<6:target['target']=None
+                    receiver.poll.side_effect=None;receiver.poll.return_value=target
+                    if i%6==0:
+                        observed=round(previous[owned.index(23)])
+                        solo.observe_eye(observed,now)
+                        combined.observe(23,dict(position=observed),now)
+                    previous,_=solo.step(target,previous,dt,now,returning=elapsed>=duration-5)
+                    expected=previous.copy()
+                    expected[-1],_=scheduler.step(previous[-1],now,returning=elapsed>=duration-5)
+                    base=np.full(len(ids),2047.)
+                    base[ids.index(31)]=1900+20*np.sin(elapsed)
+                    combined.set_audio_time(elapsed,duration)
+                    actual=combined.apply(base,last,dt,now)
+                    np.testing.assert_allclose(actual[combined.columns],expected,atol=1e-9)
+                    for j,sid in enumerate(ids):
+                        if sid not in owned:self.assertEqual(actual[j],base[j])
+                    last=limit_step(last,actual,limits,dt)
+                    np.testing.assert_allclose(last[combined.columns],expected,atol=1e-9)
+
+    def test_budgeted_audio_loop_recovers_read_loss_and_samples_face_at_30_or_60(self):
+        import tempfile,time
+        from pathlib import Path
+        from unittest.mock import patch
+        from test_xiaobai import PlaybackTests
+        from xiaobai_runtime.mojia_performance import MojiaPlaybackGaze
+        from xiaobai_runtime.playback import play
+        from xiaobai_runtime.protocol import ReadTimeout,CorruptResponse
+        for face_hz in (30,60):
+            with self.subTest(face_hz=face_hz):
+                c,p,ids,r=self.setup_performance();fixture,bus,clock=PlaybackTests().fixture()
+                for key in ['audio_device','hardware_stop_description','physical_audio_output_confirmed','actuator_latency_ms','stop_method']:
+                    p[key]=fixture[key]
+                p.update(serial_backend='feetech_python',feedback_mode='short_registers',
+                         scheduled_feedback=True,face_update_hz=face_hz,feedback_max_age_s=1.,changed_goals_only=False)
+                clock.duration=.4
+                positions={sid:2047 for sid in ids};motors={m['id']:m for m in p['motors']}
+                def state(sid):
+                    return dict(position=positions[sid],temperature_c=25,load_raw=0,status_register=0,
+                                voltage_raw=120 if 31<=sid<=35 else 60)
+                def snapshot(sid):
+                    raw=bytearray(40);raw[18]=4;raw[21:24]=bytes(c['neck']['observed_pid_raw'])
+                    raw[26:28]=bytes(c['neck']['observed_deadband_counts'])
+                    ram=bytearray(31);ram[1]=c['neck']['observed_acceleration_raw']
+                    return dict(id=sid,model_raw=motors[sid]['model_raw_expected'],mode=0,torque_enable=1,
+                        configured_min=0,configured_max=4095,position_raw=2047,**{k:v for k,v in state(sid).items() if k!='position'},
+                        config_0_39_hex=raw.hex(),state_40_70_hex=ram.hex())
+                startup_loss=[False]
+                def startup_state(sid):
+                    if sid==4 and not startup_loss[0]:
+                        startup_loss[0]=True
+                        time.sleep(.11)  # Recovery must reset the ramp's step clock.
+                        raise CorruptResponse('captured ID4 startup failure')
+                    return state(sid)
+                bus.snapshot.side_effect=snapshot;bus.feedback.side_effect=startup_state
+                bus.goals.side_effect=lambda goals,speeds:positions.update(goals)
+                attempts=[0]
+                def read(sid,address,count):
+                    attempts[0]+=1
+                    if attempts[0]==23:raise ReadTimeout('injected one lost field')
+                    s=state(sid)
+                    return {56:s['position'].to_bytes(2,'little'),60:b'\x00\x00',
+                            62:bytes([s['voltage_raw'],s['temperature_c']]),65:b'\x00'}[address]
+                bus.read.side_effect=read
+                trajectory=np.full((24,len(ids)),2047.)
+                trajectory[:,ids.index(31)]=2000-np.arange(24)
+                a=MojiaPlaybackGaze(c,p,ids,r)
+                with tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.feetech_sdk.OfficialSDKBus',return_value=bus),patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
+                    result=play(p,ids,trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP',gaze_override=a)
+                self.assertTrue(result['completed'])
+                self.assertTrue(startup_loss[0])
+                self.assertEqual(len(result['startup_communication_recoveries']),1)
+                self.assertTrue(result['startup_communication_recoveries'][0]['recovered'])
+                bus.set_read_policy.assert_called_once_with(3,retry=False)
+                self.assertEqual(sum(len(e.get('feedback_errors',[])) for e in result['events']),1)
+                for e in result['events']:
+                    self.assertLessEqual(e['feedback_schedule']['reads'],8)
+                    source=e.get('face_frame',e['frame'])
+                    if face_hz==30:self.assertEqual(source%2,0)
+                    self.assertEqual(e['goals'][31],trajectory[source,ids.index(31)])
+                self.assertGreaterEqual(len(result['events']),20)
+                samples=[s for e in result['events'] for s in e.get('feedback_samples',[])]
+                for sid in (23,32):self.assertGreaterEqual(sum(s['id']==sid for s in samples),3)
+
     def test_audio_loop_keeps_jaw_and_prioritizes_eye_feedback(self):
         import tempfile,time,gc
         from pathlib import Path
@@ -422,6 +532,61 @@ class MojiaPerformanceTests(unittest.TestCase):
         stamps=[t for sid,t in reads if sid==23]
         self.assertGreaterEqual(len(stamps),3)
         self.assertLess(max(np.diff(stamps)),.16)
+
+
+class BudgetedFeedbackTests(unittest.TestCase):
+    def setup_reader(self,latency=.0002):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from xiaobai_runtime.feedback_schedule import BudgetedFeedback
+        now=[1.];samples=[];errors=[];bus=Mock()
+        payload={56:b'\xff\x07',60:b'\x00\x00',62:b'\x78\x28',65:b'\x00'}
+        def read(sid,address,count):
+            now[0]+=latency
+            return payload[address]
+        bus.read.side_effect=read
+        reader=BudgetedFeedback(bus,[2,23,32]);clocks={sid:0. for sid in reader.ids}
+        def sample(sid,state,started):
+            samples.append((sid,state,started));clocks[sid]=now[0]
+        return reader,now,SimpleNamespace(monotonic=lambda:now[0]),clocks,sample,samples,errors
+
+    def test_priorities_and_partial_samples_preserve_full_feedback(self):
+        from unittest.mock import patch
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            result=reader.step(1.007,clocks,sample,lambda *a:errors.append(a))
+        self.assertEqual([s[0] for s in samples],[23,32])
+        self.assertEqual(result['reads'],8)
+        self.assertEqual(samples[0][1],dict(position=2047,load_raw=0,voltage_raw=120,temperature_c=40,status_register=0))
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader(.001)
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            reader.step(1.005,clocks,sample,lambda *a:errors.append(a))
+            self.assertFalse(samples);self.assertEqual(clocks[23],0.)
+            now[0]=1.0167
+            reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+        self.assertEqual(samples[0][0],23)
+        self.assertLess(samples[0][2],1.0167)
+
+    def test_timeout_discards_partial_and_yields_until_next_tick(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.protocol import ReadTimeout,ProtocolError
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
+        reader.bus.read.side_effect=[b'\xff\x07',ReadTimeout('injected')]
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            result=reader.step(1.007,clocks,sample,lambda *a:errors.append(a))
+        self.assertEqual(result['reads'],2);self.assertFalse(samples)
+        self.assertIsNone(reader.sid);self.assertFalse(reader.parts)
+        self.assertEqual(clocks[23],0.);self.assertEqual(len(errors),1)
+        reader.bus.read.side_effect=ProtocolError('servo alarm')
+        with patch('xiaobai_runtime.feedback_schedule.time',clock),self.assertRaises(ProtocolError):
+            reader.step(1.007,clocks,sample,lambda *a:errors.append(a))
+
+    def test_deadline_does_not_start_an_unbudgeted_transaction(self):
+        from unittest.mock import patch
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            reader.step(1.003,clocks,sample,lambda *a:errors.append(a))
+        reader.bus.read.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

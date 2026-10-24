@@ -14,6 +14,7 @@ from xiaobai_runtime.mapping import ROOT, read_json, live_preflight
 from xiaobai_runtime.playback import play, check_feedback
 from xiaobai_runtime.person_gaze import TargetReceiver
 from xiaobai_runtime.mojia_performance import tracking_profile, MojiaPlaybackGaze
+from xiaobai_runtime.homing import home_all,validate_home_axes,home_check,homing_feedback_motor,write_ram_verified
 
 
 def configure_show_volume(device):
@@ -48,6 +49,7 @@ def prepare(config,profile,ids,positions,authorize_tongue=False):
     # Allow UART transmission and servo broadcast parsing to finish before a
     # feedback query. The SDK accounts for wire time in addition to this gap.
     p['post_goal_quiet_ms']=1
+    p['scheduled_feedback']=True
     motors={m['id']:m for m in p['motors']}
     for sid in [12,13,27,28,29,31]:motors[sid]['max_speed_counts_s']=900
     if authorize_tongue:
@@ -63,7 +65,7 @@ def prepare(config,profile,ids,positions,authorize_tongue=False):
     return p,monitored,trajectory
 
 
-def recover_tongue(bus,motor,guard,events):
+def recover_tongue(bus,motor,guard,events,speed=900):
     s=bus.snapshot(29)
     if s['torque_enable']==1:return
     if s['model_raw']!=521 or s['mode']!=0 or not 0<=s['position_raw']<=4095:
@@ -73,12 +75,10 @@ def recover_tongue(bus,motor,guard,events):
     envelope={**motor,'feedback_min':min(s['position_raw'],motor['device_min']),
               'feedback_max':max(s['position_raw'],motor['device_max'])}
     check_feedback(29,feedback(s),envelope)
-    guard();bus.goals({29:2047},{29:900})
+    guard();bus.goals({29:2047},{29:speed})
     if bus.read(29,40,1)==b'\x00':
-        result,status=bus.sdk.write1ByteTxRx(29,40,1)
-        enabled=bus.read(29,40,1)
-        if result or status or enabled!=b'\x01':raise RuntimeError('ID29 enable failed')
-    guard();bus.goals({29:2047},{29:900});deadline=time.monotonic()+10;healthy=0
+        events.append(dict(kind='enable',**write_ram_verified(bus,29,40,1)))
+    guard();bus.goals({29:2047},{29:speed});deadline=time.monotonic()+10;healthy=0
     while time.monotonic()<deadline:
         guard();f=bus.feedback(29);events.append(f);check_feedback(29,f,envelope)
         healthy=healthy+1 if abs(f['position']-2047)<=motor['initial_settle_tolerance_counts'] else 0
@@ -97,12 +97,18 @@ def main():
     parser.add_argument('--audio',type=Path,default=ROOT/'exmple/0001.wav')
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--repeat',type=int,default=3)
+    parser.add_argument('--home-inventory',type=Path,default=ROOT/'mojia/homing_axes.json')
+    parser.add_argument('--home-speed',type=int,default=60,help='Temporary neutral homing speed cap in counts/s')
+    parser.add_argument('--home-only',action='store_true',help='Home all inventory axes; no camera, audio or task execution')
+    parser.add_argument('--face-fps',type=int,choices=(30,60),default=60,
+                        help='Facial song sampling; eye/neck control remains at the source 60 Hz')
     parser.add_argument('--authorized-tongue-observation',action='store_true')
     parser.add_argument('--usb-volume-times-three',action='store_true',help='Use the saved original USB volume reference, never cumulative gain')
     parser.add_argument('--hold-vertical-eyes',action='store_true',help='Hold ID7/22: neither song nor tracking may send them position commands')
     parser.add_argument('--check',action='store_true')
     args=parser.parse_args()
     if not 1<=args.repeat<=10:parser.error('Repeat must be 1..10')
+    if not 1<=args.home_speed<=32767:parser.error('Home speed must be within 1..32767')
     config,original=read_json(args.config),read_json(args.profile)
     if args.hold_vertical_eyes:
         config['control']['vertical_enabled']=False
@@ -110,13 +116,25 @@ def main():
         config['control']['held_eye_ids']=[7,22]
     ids,positions,fps=load_targets(args.targets,original,args.audio,ROOT/'mojia/墨甲9.23.json')
     profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation)
+    if fps!=60:parser.error('The reviewed combined controller requires the 60 FPS source')
+    profile['face_update_hz']=args.face_fps
+    home_axes=read_json(args.home_inventory)['axes'];home_ids=[a['id'] for a in home_axes]
+    home_neutrals={a['id']:a['neutral'] for a in home_axes}
+    if (len(set(home_ids))!=len(home_ids) or not set(ids)<=set(home_ids)
+            or any(type(a.get('neutral')) is not int or a.get('neutral_confirmed') is not True for a in home_axes)):
+        parser.error('Home inventory must cover every task axis with confirmed neutrals')
+    motors={m['id']:m for m in profile['motors']}
+    if any(a['neutral']!=motors[a['id']]['neutral'] for a in home_axes if a['id'] in motors):
+        parser.error('Home inventory and task neutrals differ')
     if args.check:
         print(json.dumps(dict(offline_valid=True,monitored=ids,commanded=profile['diagnostic_command_ids'],
                              gaze_owner_ids=profile['gaze_owner_ids'],fps=fps,repeat=args.repeat,
-                             volume_times_three=args.usb_volume_times_three)))
+                             face_fps=args.face_fps,scheduled_feedback=profile['scheduled_feedback'],
+                             home_ids=home_ids,home_speed=args.home_speed,home_only=args.home_only,
+                             volume_times_three=args.usb_volume_times_three and not args.home_only)))
         return
     args.output.mkdir(parents=True,exist_ok=False)
-    for name,data in [('config',config),('profile',profile)]:
+    for name,data in [('config',config),('profile',profile),('home_inventory',dict(axes=home_axes))]:
         (args.output/f'{name}.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
     stop_file=ROOT/'outputs/mojia/STOP';stopped=False
     def stop(*_):
@@ -126,7 +144,9 @@ def main():
     def guard():
         if stopped or stop_file.exists():raise RuntimeError('Operator stop')
     summary=dict(completed=False,rounds=[],error=None,startup_events=[],tongue_disabled_after=False)
+    summary['homing']={}
     status_path=ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
+    status_path.parent.mkdir(parents=True,exist_ok=True)
     def publish(state, error=None):
         temporary=status_path.with_suffix('.tmp')
         temporary.write_text(json.dumps(dict(updated_monotonic=time.monotonic(),active=False,
@@ -137,29 +157,47 @@ def main():
     motors={m['id']:m for m in profile['motors']}
     try:
         guard()
-        if args.usb_volume_times_three:
+        if args.usb_volume_times_three and not args.home_only:
             profile['audio_gain'],summary['audio_volume']=configure_show_volume(profile['audio_device'])
             (args.output/'profile.json').write_text(json.dumps(profile,ensure_ascii=False,indent=2)+'\n')
-        guard();receiver=TargetReceiver(config);receiver.wait_ready()
         from xiaobai_runtime.feetech_sdk import OfficialSDKBus
-        bus=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20)
-        snapshots=[bus.snapshot(sid) for sid in ids]
+        bus=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20,
+                           trace_path=args.output/'homing_serial_trace.json')
+        snapshots=[bus.snapshot(sid) for sid in home_ids]
+        validate_home_axes(home_axes,snapshots)
+        original_speeds={s['id']:int.from_bytes(bytes.fromhex(s['state_40_70_hex'])[6:8],'little') for s in snapshots}
         summary['startup_snapshots']=snapshots
         # Review every axis before making any startup write.
         for s in snapshots:
-            sid=s['id'];m=motors[sid]
+            sid=s['id']
+            if sid not in motors:
+                home_check(feedback(s),s,home_neutrals[sid],20)
+                continue
+            m=motors[sid]
             recovery=sid==29 and s['torque_enable']==0 and args.authorized_tongue_observation
-            startup_target(s,m,sid in [32,33,34],recovery)
+            if (s['configured_min'],s['configured_max'])!=(m['device_min'],m['device_max']):
+                raise RuntimeError(f'ID{sid}: device limits changed; review home/task configuration')
+            if recovery:startup_target(s,m,False,True)
             if not recovery:
-                if s['torque_enable']!=1:raise RuntimeError(f'ID{sid}: torque disabled')
-                check_feedback(sid,feedback(s),m)
-            if sid in [12,13,27,28,29,31]:
+                # The explicitly requested all-axis home primes disabled axes
+                # at measured positions before enabling; playback still requires torque.
+                home_check(feedback(s),s,m['neutral'],m.get('initial_settle_tolerance_counts',20))
+                check_feedback(sid,feedback(s),homing_feedback_motor(m,s))
+            if not args.home_only and sid in [12,13,27,28,29,31]:
                 ram=bytes.fromhex(s['state_40_70_hex'])
                 if ram[1]!=0 or int.from_bytes(ram[6:8],'little')!=900:
                     raise RuntimeError(f'ID{sid}: expected saved mouth acceleration0/speed900')
         if args.authorized_tongue_observation:
-            recover_tongue(bus,motors[29],guard,summary['startup_events'])
+            recover_tongue(bus,motors[29],guard,summary['startup_events'],speed=min(args.home_speed,900))
+        publish('homing')
+        print(f'HOME {len(home_axes)} AXES START speed_cap={args.home_speed}',flush=True)
+        home_all(bus,home_axes,motors,guard,summary['homing'],args.home_speed,original_speeds,keep_enabled=ids)
+        print('HOME COMPLETE; original speed settings restored',flush=True)
         bus.close();bus=None
+        if args.home_only:
+            summary['completed']=True
+            return
+        guard();receiver=TargetReceiver(config);receiver.wait_ready()
         for lap in range(1,args.repeat+1):
             guard();directory=args.output/f'round_{lap}';directory.mkdir()
             override=MojiaPlaybackGaze(config,profile,ids,receiver,

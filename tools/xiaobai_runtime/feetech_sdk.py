@@ -6,6 +6,9 @@ Only RAM 41..47 is written; acceleration is preserved from the initial readback.
 import sys
 import struct
 import time
+import os
+import getpass
+import shlex
 from pathlib import Path
 from .protocol import Bus, ProtocolError, CorruptResponse, ReadTimeout, ServoStatusError, goal_packet
 
@@ -36,6 +39,11 @@ class OfficialSDKBus(Bus):
         self.feedback_mode = feedback_mode
         if write_mode not in ['position_speed','position_only']:raise ValueError('Unknown SDK write mode')
         self.write_mode=write_mode
+        if isinstance(port,str) and port.startswith('/dev/'):
+            if not os.path.exists(port):raise ProtocolError('Serial device is missing: '+port+'; check USB adapter connection')
+            if not os.access(port,os.R_OK|os.W_OK):
+                command='sudo setfacl -m '+shlex.quote('u:'+getpass.getuser()+':rw')+' '+shlex.quote(port)
+                raise ProtocolError('Serial device access denied: '+port+'; grant current-user access with: '+command)
         self.handler = PortHandler(port)
         if not self.handler.setBaudRate(baud):
             raise ProtocolError('Official SDK could not open serial port')
@@ -66,6 +74,14 @@ class OfficialSDKBus(Bus):
 
     def close(self):
         self.handler.closePort()
+
+    def set_read_policy(self, timeout_ms, retry=True):
+        """Instance-local policy; startup retains the original retry/timeout."""
+        if type(timeout_ms) not in (int,float) or not 2<=timeout_ms<=50 or type(retry) is not bool:
+            raise ValueError('Invalid runtime read policy')
+        self.transaction_timeout_ms=timeout_ms
+        self.retry_reads=retry
+        self.handler.setPacketTimeout=lambda length:self.handler.setPacketTimeoutMillis(timeout_ms)
 
     def _read_once(self, sid, address, count):
         if not 0 <= sid <= 253 or not 0 <= address <= 255 or not 1 <= count <= 100:

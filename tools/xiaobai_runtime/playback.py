@@ -101,6 +101,40 @@ def verified_feedback(bus,sid,motor,confirm,records,should_stop=lambda:False,ini
                 return state
     raise RuntimeError(f'{sid}: feedback anomaly did not clear with two consecutive healthy confirmations')
 
+
+def startup_feedback(reader,sid,deadline,records,should_stop=lambda:False,wait=time.sleep,can_recover=lambda:True):
+    """Hold startup targets while a damaged/missing sample is reacquired.
+
+    Recovery needs two consecutive validated *whole* samples, within four fresh
+    attempts and the caller's existing startup deadline. Servo alarms, invalid
+    physical readings and the transport's error-rate gate are never retried here.
+    """
+    if should_stop():raise RuntimeError('Operator stop during startup feedback')
+    try:return reader(sid)
+    except (CorruptResponse,ReadTimeout) as first:
+        if not can_recover():raise
+        record=dict(id=sid,monotonic=time.monotonic(),error=str(first),samples=[],recovered=False)
+        records.append(record)
+        clean=0;last_error=first
+        recovery_deadline=min(deadline,time.monotonic()+.5)
+        for attempt in range(4):
+            if should_stop():raise RuntimeError('Operator stop during startup feedback recovery')
+            if time.monotonic()+.02>=recovery_deadline:break
+            wait(.02)  # No position writes during this startup-only hold.
+            if should_stop():raise RuntimeError('Operator stop during startup feedback recovery')
+            try:state=reader(sid)
+            except (CorruptResponse,ReadTimeout) as exc:
+                if not can_recover():raise
+                record['samples'].append(dict(attempt=attempt,error=str(exc)))
+                clean=0;last_error=exc
+            else:
+                record['samples'].append(dict(attempt=attempt,state=state))
+                clean=clean+1 if state is not None else 0
+                if clean>=2 and time.monotonic()<=recovery_deadline:
+                    record['recovered']=True
+                    return state
+        raise RuntimeError(f'ID{sid}: startup communication recovery failed; no two consecutive valid samples') from last_error
+
 def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=None,gaze_override=None):
     if (not isinstance(ids,list) or not ids or len(set(ids))!=len(ids)
             or any(type(sid) is not int or not 0<=sid<=253 for sid in ids)):
@@ -135,6 +169,17 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     if feedback_policy not in ('stop_on_fault','record_only'):
         raise ValueError('Unknown feedback policy')
     record_only=feedback_policy=='record_only'
+    scheduled_feedback=profile.get('scheduled_feedback',False)
+    if type(scheduled_feedback) is not bool:
+        raise ValueError('Invalid scheduled feedback flag')
+    if scheduled_feedback and (not mojia_gaze or record_only or feedback_age_limit is None
+            or profile.get('serial_backend')!='feetech_python' or profile.get('feedback_mode')!='short_registers'):
+        raise ValueError('Scheduled feedback requires the reviewed Mojia SDK tracking path')
+    face_hz=profile.get('face_update_hz',fps)
+    if type(face_hz) not in (int,float) or not math.isfinite(face_hz) or not 1<=face_hz<=fps:
+        raise ValueError('Invalid face sampling frequency')
+    if face_hz!=fps and not scheduled_feedback:
+        raise ValueError('Separate face sampling requires scheduled Mojia playback')
     trajectory=np.asarray(trajectory,dtype=float)
     if (trajectory.ndim!=2 or not len(trajectory) or trajectory.shape[1]!=len(ids)
             or not np.isfinite(trajectory).all()):
@@ -151,12 +196,13 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         previous_handlers[sig]=signal.signal(sig,lambda *_:stop.set())
     clock=None;bus=None;gc_suspended=False;events=[];result={'completed':False,'stop_policy':profile['stop_method'],
         'initial_approach_commands':0,'servo_ids':ids,'motion_gain':profile.get('motion_gain',1),
-        'preflight_snapshots':[],'sensor_confirmations':[],
+        'preflight_snapshots':[],'sensor_confirmations':[],'startup_communication_recoveries':[],
+        'phase':'preflight',
         'command_ids':sorted(command_ids),'monitor_ids':list(ids),
-        'playback_fps':fps,'feedback_polls_per_frame':polls_per_frame,
+        'playback_fps':fps,'face_update_hz':face_hz,'feedback_polls_per_frame':polls_per_frame,
         'feedback_policy':feedback_policy,'feedback_notifications':[]}
     def should_stop():return stop.is_set() or Path(stop_file).exists()
-    def feedback_checked(sid,initial=None):
+    def feedback_checked(sid,initial=None,observed_at=None):
         if should_stop():raise RuntimeError('Operator stop during feedback')
         last_feedback_attempt[sid]=time.monotonic()
         if record_only:
@@ -181,8 +227,30 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 'safe_max':motors[sid]['safe_max'],
                 'tolerance_counts':motors[sid].get('position_feedback_tolerance_counts',0)})
         result['last_feedback']={'id':sid,**state}
-        if mojia_gaze:gaze_override.observe(sid,state,time.monotonic())
+        if mojia_gaze:gaze_override.observe(sid,state,time.monotonic() if observed_at is None else observed_at)
         return state
+
+    def feedback_error(sid,exc):
+        pending_sensor=any(r['id']==sid and not r['recovered'] for r in result['sensor_confirmations'])
+        if feedback_age_limit is None or pending_sensor:raise exc
+        events[-1]['feedback_error']={'id':sid,'error':str(exc)}
+        if polls_per_frame>1 or scheduled_feedback:
+            events[-1].setdefault('feedback_errors',[]).append(events[-1]['feedback_error'])
+
+    def scheduled_sample(sid,state,observed_at):
+        # An actual sensor/servo alarm still takes the existing hold-and-confirm
+        # or stop path. Only communication loss is deferred between commands.
+        checked=feedback_checked(sid,state,observed_at)
+        if checked is not None:
+            sample={'id':sid,**checked,'sample_started_monotonic':observed_at}
+            events[-1]['feedback']=sample
+            events[-1].setdefault('feedback_samples',[]).append(sample)
+
+    def startup_feedback_checked(sid,deadline):
+        if not scheduled_feedback:return feedback_checked(sid)
+        return startup_feedback(feedback_checked,sid,deadline,result['startup_communication_recoveries'],
+            should_stop,stop.wait,
+            lambda:not any(r['id']==sid and not r['recovered'] for r in result['sensor_confirmations']))
     try:
         if should_stop():raise RuntimeError('Stop file exists')
         # Verify physical audio output has been configured before opening the bus.
@@ -237,6 +305,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             for column,sid in enumerate(ids):
                 if sid not in command_ids:trajectory[:,column]=last[column]
         # Start from measured positions, and approach frame zero with the same rate limit.
+        result['phase']='initial_approach'
         last_tick=time.monotonic();ramp_deadline=last_tick+15
         while np.max(abs(last-trajectory[0]))>.5:
             if should_stop():raise RuntimeError('Stopped during initial approach')
@@ -249,14 +318,18 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             bus.goals(goals,speeds);last_sent=goals
             result['initial_approach_commands']+=1
             sid=ids[poll%len(ids)];poll+=1
-            state=feedback_checked(sid)
+            previous_recoveries=len(result['startup_communication_recoveries'])
+            state=startup_feedback_checked(sid,ramp_deadline)
+            if len(result['startup_communication_recoveries'])!=previous_recoveries:
+                last_tick=time.monotonic()  # Recovery held transmission; resume with a fresh bounded step.
         # Verify that measured positions actually reached the first frame before audio.
+        result['phase']='first_frame_settle'
         deadline=time.monotonic()+5
         while True:
             if should_stop():raise RuntimeError('Stopped before audio')
             settled=True
             for sid,target in zip(ids,trajectory[0]):
-                state=feedback_checked(sid)
+                state=startup_feedback_checked(sid,deadline)
                 settled &= state is not None and abs(state['position']-target)<=motors[sid].get('initial_settle_tolerance_counts',20)
             if settled:break
             if time.monotonic()>deadline:raise RuntimeError('Servos did not settle at first frame')
@@ -266,6 +339,17 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             # clips, never traverse that graph in the 60 Hz command deadline.
             gc.collect();gc.disable();gc_suspended=True
             result['cyclic_gc_suspended_during_audio']=True
+        feedback_scheduler=None
+        if scheduled_feedback:
+            from .feedback_schedule import BudgetedFeedback
+            # Startup checks use the original timeout/retry. Playback reads are
+            # individually bounded and retried by scheduling a fresh sample.
+            bus.set_read_policy(3,retry=False)
+            feedback_scheduler=BudgetedFeedback(bus,ids)
+            result['runtime_feedback_schedule']=dict(timeout_ms=3,budget_ms=7,max_requests_per_tick=8,
+                priority_ids=[23,32],priority_period_s=.08,inline_retry=False)
+        next_command_at=None
+        result['phase']='playing'
         clock.start();last_tick=time.monotonic();previous_index=-1;skipped=0;started=time.monotonic()
         while True:
             if should_stop():raise RuntimeError('Operator stop')
@@ -276,9 +360,16 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 stop.wait(.001);continue
             if t>=run_duration:break
             if t<0:stop.wait(min(.002,-t));continue
+            now=time.monotonic()
+            if scheduled_feedback and next_command_at is not None and now<next_command_at:
+                stop.wait(min(.001,next_command_at-now));continue
             index=min(len(trajectory)-1,max(0,int((t+profile['actuator_latency_ms']/1000)*fps)))
-            if index==previous_index:stop.wait(.001);continue
-            now=time.monotonic();dt=(1/fps if previous_index<0 else now-last_tick)
+            if index==previous_index and not scheduled_feedback:stop.wait(.001);continue
+            dt=(1/fps if previous_index<0 else now-last_tick)
+            if scheduled_feedback:
+                if next_command_at is None:next_command_at=now
+                next_command_at+=1/fps
+                while next_command_at<=now:next_command_at+=1/fps
             # A blocked USB call must not cause an unbounded jump on its return.
             if dt>.1:
                 result['watchdog_interval_s']=dt
@@ -286,7 +377,11 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             if feedback_age_limit is not None and not record_only:
                 stale=[sid for sid in ids if now-last_good_feedback[sid]>feedback_age_limit]
                 if stale:raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
-            target=trajectory[index]
+            face_index=index
+            if face_hz!=fps:
+                sample_time=max(0.,t+profile['actuator_latency_ms']/1000)
+                face_index=min(len(trajectory)-1,int(math.floor(sample_time*face_hz)*fps/face_hz))
+            target=trajectory[face_index]
             gaze_started=time.monotonic() if mojia_gaze else None
             if gaze_override is not None:
                 if mojia_gaze:gaze_override.set_audio_time(t,run_duration)
@@ -304,6 +399,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             command_done=time.monotonic() if mojia_gaze else None
             if previous_index>=0:skipped+=max(0,index-previous_index-1)
             events.append({'audio_seconds':t,'frame':index,'sent_monotonic':now,'goals':goals})
+            if face_hz!=fps:events[-1]['face_frame']=face_index
             if gaze_override is not None:
                 events[-1]['person_gaze']=gaze_override.last_diagnostic
             if profile.get('changed_goals_only'):
@@ -311,7 +407,11 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             previous_index=index
             # Prioritize the stalest axis so a single lost reply does not wait
             # another complete rotation and unnecessarily hit its age limit.
-            for _ in range(polls_per_frame):
+            if feedback_scheduler is not None:
+                deadline=min(next_command_at-.001,time.monotonic()+.007)
+                events[-1]['feedback_schedule']=feedback_scheduler.step(deadline,last_good_feedback,
+                    scheduled_sample,feedback_error,should_stop)
+            for _ in range(0 if feedback_scheduler is not None else polls_per_frame):
                 clocks=last_feedback_attempt if record_only else last_good_feedback
                 sid=min(ids,key=lambda axis:clocks[axis])
                 # Keep the eye movement evidence fresh with the same number of
@@ -320,13 +420,10 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 try:
                     state=feedback_checked(sid)
                 except (CorruptResponse,ReadTimeout) as exc:
-                    pending_sensor=any(r['id']==sid and not r['recovered'] for r in result['sensor_confirmations'])
-                    if feedback_age_limit is None or pending_sensor:raise
                     # Discard invalid telemetry; never invent a healthy measurement.
                     # Independent per-axis freshness and the existing error-rate gate
                     # bound temporary loss, while every commanded pose remains limited.
-                    events[-1]['feedback_error']={'id':sid,'error':str(exc)}
-                    if polls_per_frame>1:events[-1].setdefault('feedback_errors',[]).append(events[-1]['feedback_error'])
+                    feedback_error(sid,exc)
                 else:
                     if state is not None:
                         events[-1]['feedback']={'id':sid,**state}
