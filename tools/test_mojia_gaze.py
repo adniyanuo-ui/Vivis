@@ -402,6 +402,38 @@ class MojiaPerformanceTests(unittest.TestCase):
         receiver=Mock();receiver.poll.side_effect=lambda now:packet(now,.3)
         return c,p,ids,receiver
 
+    def test_neck_software_load_limit_applies_only_to_neck_and_both_directions(self):
+        from xiaobai_runtime.mojia_performance import tracking_profile
+        from xiaobai_runtime.playback import check_feedback
+        c=baseline_config();c['neck']['max_load_raw']=1023
+        p=profile();ids=[m['id'] for m in p['motors']]
+        runtime=tracking_profile(c,p,ids);motors={m['id']:m for m in runtime['motors']}
+        self.assertEqual(motors[32]['max_load_raw'],1023)
+        self.assertTrue(all(m['max_load_raw']==350 for m in runtime['motors'] if m['id']!=32))
+        self.assertTrue(all(m['max_load_raw']==350 for m in p['motors']))
+        state=dict(position=2047,temperature_c=25,voltage_raw=120,status_register=0)
+        for raw in (350,700,1022,1024+350,1024+1022):
+            check_feedback(32,dict(state,load_raw=raw),motors[32])
+        for raw in (1023,1024+1023):
+            with self.assertRaisesRegex(RuntimeError,'excessive load'):
+                check_feedback(32,dict(state,load_raw=raw),motors[32])
+        with self.assertRaisesRegex(RuntimeError,'excessive load'):
+            check_feedback(31,dict(state,load_raw=350),motors[31])
+        with self.assertRaises(RuntimeError):
+            check_feedback(32,dict(state,load_raw=0,status_register=4),motors[32])
+        with self.assertRaisesRegex(RuntimeError,'over temperature'):
+            check_feedback(32,dict(state,load_raw=0,temperature_c=80),motors[32])
+        c['neck'].pop('max_load_raw')
+        fallback=tracking_profile(c,p,ids)
+        self.assertEqual(next(m for m in fallback['motors'] if m['id']==32)['max_load_raw'],350)
+
+    def test_neck_load_limit_rejects_invalid_configuration(self):
+        c=baseline_config()
+        for value in (True,0,-1,1024,350.,'1023'):
+            c['neck']['max_load_raw']=value
+            with self.assertRaisesRegex(ValueError,'load threshold'):
+                validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',True,True)
+
     def test_left_camera_adapter_observes_only_its_own_eye_encoder(self):
         from xiaobai_runtime.mojia_performance import MojiaPlaybackGaze
         c,p,ids,r=self.setup_performance();c['control']['camera_eye']='left'

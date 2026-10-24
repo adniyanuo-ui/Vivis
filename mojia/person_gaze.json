@@ -82,6 +82,7 @@
     "sign": 1,
     "range_mode": "device",
     "speed_counts_s": 900,
+    "max_load_raw": 1023,
     "acceleration_counts_s2": 64,
     "direction_confirmed": false,
     "gain_counts_s": 120,

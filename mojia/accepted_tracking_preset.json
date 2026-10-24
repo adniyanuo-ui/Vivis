@@ -2,8 +2,8 @@
   "schema_version": "mojia-accepted-tracking-preset-1.0",
   "date": "2026-10-24",
   "config_path": "mojia/person_gaze.json",
-  "config_sha256": "f2c6dc1456064dccbb73d6ceb5fca4a30e03a276a90097c04ecb29d64c39d5ce",
-  "basis": "User accepted complete natural1200 blink performance and requested local Git save; neck load1023 comparison is a subsequent trial",
+  "config_sha256": "391362d1951e086a6a18af78621b1e56e1bbac86a8f781510825950ee1b87f68",
+  "basis": "User accepted natural1200 full playback; current ID32 software threshold1023 is a separately authorized comparison, not a claim of jitter improvement",
   "hardware_registers": [
     {
       "id": 2,
@@ -950,7 +950,7 @@
     "eyelid_speed_counts_s": 1200,
     "blink_events": 18,
     "ordinary_blink_mean_target_duration_s": 0.31547619047619035,
-    "neck_max_load_raw": 350
+    "neck_max_load_raw": 1023
   },
   "acceptance_evidence": {
     "completed_run": "outputs/mojia/manual_show_20261024_134642_61917/performance",
@@ -986,6 +986,31 @@
       "hardware_readback": "outputs/mojia/accepted_natural1200_readback_20261024_160045.json",
       "software_neck_load_threshold": 350,
       "playback_profile_sha256": "c30201b59bc0350a1117e52f831ddf89dd39c44d15bf71ca556f60006b3f88ab"
+    },
+    "neck_load_trial": {
+      "baseline_commit": "1abfd74",
+      "baseline_config_sha256": "f2c6dc1456064dccbb73d6ceb5fca4a30e03a276a90097c04ecb29d64c39d5ce",
+      "directory": "outputs/mojia/manual_show_20261024_160355_155455/performance",
+      "software_threshold": 1023,
+      "hardware_tuning_unchanged": true,
+      "hardware_readback": "outputs/mojia/neck_load1023_final_readback_20261024_160903.json",
+      "rounds": [
+        {
+          "round": "round_1",
+          "completed": true,
+          "id32_sampled_max_load_raw": 48,
+          "id32_load_samples_ge350": 0,
+          "id32_samples": 1188
+        },
+        {
+          "round": "round_2",
+          "completed": true,
+          "id32_sampled_max_load_raw": 43,
+          "id32_load_samples_ge350": 0,
+          "id32_samples": 1194
+        }
+      ],
+      "jitter_effect": "Not established; sampled loads remain below the previous350 threshold; user observation pending"
     }
   }
 }

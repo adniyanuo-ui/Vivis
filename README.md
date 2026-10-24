@@ -168,7 +168,9 @@ bash tools/build_a2f.sh
 .venv/bin/python tools/mojia_performance.py --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK.json --authorized-tongue-observation --usb-volume-times-three --repeat 3 --output outputs/mojia/完整演示_新编号
 ```
 
-加`--check`只验证离线配置，不打开设备。`--authorized-tongue-observation`对应已有的ID29观察授权：仅该轴软件负载阈值1023、温度上限80℃、首帧容差40计数，保留硬件报警；如果该轴未使能，以2047目标、至多本次回中速度（默认60）进行既有恢复，10秒内必须进入40计数走廊，最终仍按设备范围检查。全部演示结束或中止后单独卸载ID29，颈部保持使能。其余轴没有该例外；用户层特殊设置清理需等待用户确认。
+加`--check`只验证离线配置，不打开设备。`--authorized-tongue-observation`对应已有的ID29观察授权：该轴软件负载阈值1023、温度上限80℃、首帧容差40计数，保留硬件报警；如果该轴未使能，以2047目标、至多本次回中速度（默认60）进行既有恢复，10秒内必须进入40计数走廊，最终仍按设备范围检查。全部演示结束或中止后单独卸载ID29，颈部保持使能。ID32另按下述单独配置的软件负载对照执行，其余轴保留原阈值；用户层特殊设置清理需等待用户确认。
+
+2026-10-24用户要求ID32双向软件负载阈值350→1023。唯一配置项为mojia/person_gaze.json中的neck.max_load_raw，独立跟踪和联合播放都从此项设置ID32的运行profile，原始导出profile作为未指定该项时的兼容默认值；不修改其它轴、硬件扭矩、PID或设备过载保护。比较实际采用load_raw与1023位掩码后的幅值，所以左右方向使用同一阈值，幅值达到1023仍触发停止。该阈值只决定何时停止，不参与速度/PID/扭矩调节；此前ID32两轮最大采样幅值均43，日志未显示350阈值造成停播，现有证据不支持把持续右转抖动归因于该门槛。硬件/温度/电压/位置及通信检查保留，调大软件阈值本身不证明抖动已改善。联合--check输出neck_max_load_raw，独立--check输出software_load_limits，便于核对实际生效值。
 
 每遍尾段仅让跟踪轴平滑回中，预留时间至少5秒，音乐和其余表情完整播放；下一遍从实测眼头姿态接续。初始过渡不以900速度强制颈部归中。每遍生成独立`playback_log.json`，总结果在`summary.json`；预览保持`http://127.0.0.1:8765/`。
 

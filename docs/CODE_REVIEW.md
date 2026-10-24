@@ -478,7 +478,7 @@ D建议暂保留32，先独立验证时序改变；后续如仍拖滞可单独�
 | 2. per-axis speed ceilings | 嘴12/13/27/28/29/31=900，横眼8/23=300，纵眼7/22=100，颈32=900；其它表情通常300；既逐帧limit_step又用作指令速度；并非单纯硬件读回 | `tools/mojia_performance.py`<br>`mojia/person_gaze.json`<br>`tools/xiaobai_runtime/playback.py`<br>`tools/xiaobai_runtime/mapping.py` | 应用层取消按ID覆盖，下沉为设备能力/运动策略；不可把取消限步误当成无需发送有效速度 |
 | 3. fixed PID/acceleration/deadband checks | ID32启动要求P/D/I16/26/0、硬件41=64、死区5/5；嘴六轴启动要求41=0、46=900；读回不一致就拒绝；这些代码本身没有写PID或死区 | `tools/xiaobai_runtime/mojia_performance.py`<br>`tools/mojia_performance.py`<br>`mojia/person_gaze.json` | 去掉业务层固定值锁定，保留型号、工作模式和协议可解释性检查；需要的参数由设备层管理 |
 | 4. temperature policy | 配置生成器和当前普通轴60℃；ID29运行覆盖80℃；实际设备阈值另读70/80℃；软件额外阈值停播；不改舵机温度保护寄存器 | `tools/prepare_mojia.py`<br>`mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json`<br>`tools/mojia_performance.py`<br>`tools/xiaobai_runtime/playback.py`<br>`tools/xiaobai_runtime/mapping.py` | 移除业务层60/80与ID29温度特判；设备层继续监测真实硬件阈值/报警 |
-| 5. load policy | 普通轴350，ID29=1023；按load_raw&1023比较；额外负载门槛；1023仍是有限阈值；不修改固件过载参数 | `tools/prepare_mojia.py`<br>`tools/mojia_performance.py`<br>`tools/xiaobai_runtime/playback.py` | 业务层移除按ID特判，下沉为设备保护策略；协议位掩码不应删 |
+| 5. load policy | 普通轴350，ID29=1023；2026-10-24用户另指定ID32双向1023，来自neck.max_load_raw；按load_raw&1023比较；1023仍是有限阈值；不修改固件过载参数 | `mojia/person_gaze.json`<br>`tools/prepare_mojia.py`<br>`tools/mojia_performance.py`<br>`tools/xiaobai_runtime/playback.py` | 业务层移除按ID特判，下沉为设备保护策略；协议位掩码不应删 |
 | 6. initial settle tolerance | 默认20计数，ID31=32，ID29=40；首帧、ID29恢复和新回中到位验收使用 | `mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json`<br>`tools/prepare_mojia.py`<br>`tools/mojia_performance.py`<br>`tools/xiaobai_runtime/playback.py`<br>`tools/xiaobai_runtime/homing.py` | 去掉轴特判，统一由设备分辨率、反馈精度和任务到位条件给出 |
 | 7. position feedback tolerance | 字段5计数，校验仅允许0..5；有feedback_min/max的脸部轴对设备边界不使用这5计数宽容；当前颈部用软件范围加容差，脸部通常检查独立设备反馈范围；不是所有轴都放宽5 | `tools/xiaobai_runtime/mapping.py`<br>`tools/xiaobai_runtime/playback.py`<br>`tools/prepare_mojia.py` | 移除人为按计数补丁，统一设备反馈域和任务命令域的定义 |
 | 8. ID29 disabled recovery | 仅特定授权路径允许29从卸力、超范围实测恢复；目标2047，10秒，100ms采样，两次有效，结束卸力；本次回中阶段速度改为min(home-speed,900)；扩展实测启动走廊、单轴使能及结束卸力；不是通用关节生命周期 | `tools/mojia_performance.py`<br>`tools/mojia_player.py`<br>`play_mojia_full_show.sh` | 改为通用关节使能/恢复/停止策略；用户确认之前保留原例外 |
@@ -645,3 +645,15 @@ D建议暂保留32，先独立验证时序改变；后续如仍拖滞可单独�
 1200该轮最终完整播放112.8935秒、6774个控制周期，completed=true、error=null，未触发负载或其它停止；41346次读取无坏包/缺失。四眼睑ID5/6/20/21的采样最大负载依次264/232/240/232，温度范围分别39–41/38–42/37–40/38–40℃，硬件状态均0。最终读回四轴46=1200、41=0。ID5的264是本轮离散采样最大值，不能替代高频瞬时电流/负载测量；但本次程序确实未重现1800那次384触发停止。最后7项眨眼专项回归、Git空白检查通过，日志与timing_report保存。保留18次目标事件、普通平均315ms的JSON包络且不增加帧数；实际闭合深度、运动总时长及自然度仍以现场反馈为准，不将命令包络当成已测机械时长。
 
 用户随后确认“播放完毕，全部正常，可以本地git保存”。只读核对35轴，四眼睑速度1200、加速度0，其它已认可的速度/PID/死区/扭矩和设备范围一致，更新accepted_tracking_preset及当前profile的验收元数据；证据accepted_natural1200_readback_20261024_160045.json，无位置或寄存器写入。审查生成器、各阶段对照profile和回归：非眼睑列不变、事件实际移除、快闭慢开、时长/帧数不因1200降速延长、原限位/保护保留。全量187项中186通过、1项可选模型跳过。先保存此已验收眨眼阶段本地提交，再单独进行用户新要求的ID32软件负载1023对照，便于回退；媒体及原始运行日志仍不入库。
+
+## 2026-10-24 ID32软件负载1023、两遍对照及本地保存
+
+已验收的眨眼1200阶段单独保存为本地提交1abfd74，当前功能分支未推送。用户另问350软件阈值是否导致ID32右转抖动，并明确要求双向改1023、播放两遍。代码check_feedback只在load_raw幅值达到门槛时抛出异常、终止任务，不按该值降速、限扭或调PID；方向位不参与幅值比较，左右阈值相同。此前152248/154937两轮ID32最大采样值均43且任务完成，没有达到350的停播记录，因此现有代码和数据不支持将持续抖动归因于350门槛。稀疏采样仍不能证明不存在瞬态机械波动。
+
+唯一新增配置neck.max_load_raw=1023位于person_gaze.json。联合tracking_profile与独立跟踪都读取此项设置32的运行profile；无该项的旧配置回退到原profile值。只覆盖32，不改变其它普通轴350或ID29既有授权例外。离线入口显示实际阈值，验证整数1–1023；1023仍按大于等于比较停止，不取消硬件报警、温度、电压、位置、反馈新鲜度或通信检查。此次没有写任何寄存器，也未调整PID16/26/0、速度900、硬件加速度64、软件加减速64、死区5/5、1600–2600范围或协调算法。
+
+新增回归覆盖仅32改变、两个方向幅值350/700/1022允许而1023停止、其它轴350仍停止、硬件报警/超温仍停止、旧配置回退及非法阈值拒绝。全量189项中188通过、1项可选模型跳过；独立与联合离线入口均显示ID32=1023，口型1.5倍、跟踪所有权和眼睑1200/18次不变，Git空白检查通过。
+
+manual_show_20261024_160355_155455两遍均完整播放约112.894秒、各6774周期，completed=true、error=null。运行profile确认32阈值1023。两轮32反馈采样分别1188/1194个，最大负载48/43，达到350的样本均0；两轮读取坏包169/41218与372/40953，按既有策略保留供后续通信诊断，没有放宽错误率门槛。当前实际数据仍未进入350与1023之间的对照区间，不能将任何观感变化归因于提高该门槛，也不宣称它改善了抖动。
+
+结束后只读复核35轴硬件参数与已认可快照一致，证据neck_load1023_final_readback_20261024_160903.json。accepted_tracking_preset同步当前配置哈希及软件选项，在neck_load_trial中保留350基线提交/哈希、对照日志与负载统计，并明确抖动效果待现场反馈；已验收眨眼的原始记录保留。只保存本地功能分支，不推送、不合main，原始媒体和运行日志不入库。
