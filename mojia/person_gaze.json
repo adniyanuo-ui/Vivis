@@ -91,7 +91,7 @@
       5,
       5
     ],
-    "observed_acceleration_raw": 64,
+    "observed_acceleration_raw": 0,
     "observed_pid_raw": [
       16,
       26,
@@ -99,5 +99,5 @@
     ],
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-24 user unified all mapped axes speed900 except eyelids5/6/20/21=1200; IDs9/24 excluded; acceleration/PID/deadband/range/coordination unchanged"
+  "parameter_revision_source": "2026-10-24 user set hardware acceleration RAM41 of32/33/34/35 to0, now all35 axes read0; mapped speeds900 except eyelids1200; IDs9/24 excluded from speed change; software neck acceleration64, PID/deadband/range/coordination unchanged"
 }
