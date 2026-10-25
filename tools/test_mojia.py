@@ -50,6 +50,15 @@ class MojiaMappingTests(unittest.TestCase):
         self.assertEqual(jaw_open_only[0,ids.index(31)],2047)
         self.assertEqual(jaw_open_only[0,ids.index(35)],2247)
 
+    def test_requested_mouth_close_endpoint_uses_existing_weighted_composition(self):
+        values=np.zeros((2,61));values[:,self.order.index('MouthClose')]=1
+        values[1,self.order.index('JawOpen')]=1
+        ids,positions,_=self.compile(values)
+        self.assertEqual(self.shapes['MouthClose'],{31:2048})
+        self.assertEqual(positions[0,ids.index(31)],2048)
+        self.assertEqual(positions[1,ids.index(31)],(1380+2048)/2)
+        self.assertTrue(np.all(np.delete(positions[0],ids.index(31))==2047))
+
     def test_reversed_blink_direction_and_bounded_combination(self):
         values=np.zeros((1,61));values[0,self.order.index('EyeBlinkLeft')]=1
         ids,positions,_=self.compile(values)
@@ -65,7 +74,7 @@ class MojiaMappingTests(unittest.TestCase):
         diff=compare_calibrations(old,self.shapes)
         self.assertEqual(diff['newly_mapped_ids'],[29,35,36])
         self.assertEqual(diff['no_longer_mapped_ids'],[9,24])
-        self.assertEqual(len(diff['jaw31_shapes']),7)
+        self.assertEqual(len(diff['jaw31_shapes']),8)
 
 
 class MojiaWorkTests(unittest.TestCase):
@@ -136,7 +145,7 @@ class MojiaWorkTests(unittest.TestCase):
         from unittest.mock import patch
         from prepare_mojia_work import main
         from mojia_player import load_targets
-        reference=ROOT/'mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json'
+        reference=ROOT/'mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000_PROFILE.json'
         before=reference.read_bytes()
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);source=root/'source.json';video=root/'video.mp4';audio=root/'decoded.wav';prefix=root/'second'
@@ -313,7 +322,7 @@ class MojiaStartupTests(unittest.TestCase):
         with patch('mojia_performance.time.sleep'):
             recover_tongue(bus,motor,lambda:None,events)
         self.assertEqual(len(events),2)
-        for call in bus.goals.call_args_list:self.assertEqual(call.args,({29:2047},{29:900}))
+        for call in bus.goals.call_args_list:self.assertEqual(call.args,({29:2047},{29:1000}))
         bus.feedback.return_value={**bus.feedback.return_value,'position':4096}
         with self.assertRaises(RuntimeError):recover_tongue(bus,motor,lambda:None,[])
 

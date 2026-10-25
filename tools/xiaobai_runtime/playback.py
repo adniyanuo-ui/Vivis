@@ -184,6 +184,12 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     if scheduled_feedback and (not mojia_gaze or record_only or feedback_age_limit is None
             or profile.get('serial_backend')!='feetech_python' or profile.get('feedback_mode')!='short_registers'):
         raise ValueError('Scheduled feedback requires the reviewed Mojia SDK tracking path')
+    control_hz=profile.get('control_hz',fps)
+    if (type(control_hz) not in (int,float) or not math.isfinite(control_hz)
+            or control_hz not in (30,60) and control_hz!=fps or not 1<=control_hz<=fps):
+        raise ValueError('Invalid control frequency')
+    if control_hz!=fps and not scheduled_feedback:
+        raise ValueError('Separate control frequency requires scheduled Mojia playback')
     face_hz=profile.get('face_update_hz',fps)
     if type(face_hz) not in (int,float) or not math.isfinite(face_hz) or not 1<=face_hz<=fps:
         raise ValueError('Invalid face sampling frequency')
@@ -207,7 +213,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         'preflight_snapshots':[],'sensor_confirmations':[],'startup_communication_recoveries':[],
         'phase':'preflight',
         'command_ids':sorted(command_ids),'monitor_ids':list(ids),
-        'playback_fps':fps,'face_update_hz':face_hz,'feedback_polls_per_frame':polls_per_frame,
+        'playback_fps':fps,'control_hz':control_hz,'baud':profile['baud'],
+        'face_update_hz':face_hz,'feedback_polls_per_frame':polls_per_frame,
         'feedback_policy':feedback_policy,'feedback_notifications':[]}
     result['software_acceleration_limits']={m['id']:m['max_acceleration_counts_s2']
         for m in profile['motors'] if m.get('max_acceleration_counts_s2') is not None}
@@ -244,6 +251,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 'safe_max':motors[sid]['safe_max'],
                 'tolerance_counts':motors[sid].get('position_feedback_tolerance_counts',0)})
         result['last_feedback']={'id':sid,**state}
+        result.setdefault('last_feedback_by_id',{})[str(sid)]=dict(state)
         if mojia_gaze:
             gaze_override.telemetry_warnings=[{k:r[k] for k in ('id','kind','value','threshold')}
                                              for r in warning_recorder.active.values()]
@@ -285,7 +293,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         if profile.get('serial_backend')=='feetech_python':
             from .feetech_sdk import OfficialSDKBus
             trace_path=Path(log_path).with_name('serial_trace.json') if profile.get('capture_serial_trace') else None
-            bus=OfficialSDKBus(profile['port'],profile['baud'],profile.get('feedback_mode','block'),profile.get('write_mode','position_speed'),profile.get('changed_goals_only',False),trace_path,profile.get('post_goal_quiet_ms',0),profile.get('sync_group_size',30),profile.get('sync_group_gap_ms',0),profile.get('sdk_transaction_timeout_ms'),servo_status_policy='record_only' if record_only else 'raise')
+            bus=OfficialSDKBus(profile['port'],profile['baud'],profile.get('feedback_mode','block'),profile.get('write_mode','position_speed'),profile.get('changed_goals_only',False),trace_path,profile.get('post_goal_quiet_ms',0),profile.get('sync_group_size',30),profile.get('sync_group_gap_ms',0),profile.get('sdk_transaction_timeout_ms'),servo_status_policy='record_only' if record_only else 'raise',snapshot_chunk_bytes=profile.get('snapshot_chunk_bytes'))
         else:
             bus=Bus(profile['port'],profile['baud'])
         result['serial_backend']=profile.get('serial_backend','local')
@@ -370,9 +378,14 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             # individually bounded and retried by scheduling a fresh sample.
             bus.set_read_policy(3,retry=False)
             camera_eye_id=gaze_override.camera_eye_id
-            feedback_scheduler=BudgetedFeedback(bus,ids,priority_ids=(camera_eye_id,32))
-            result['runtime_feedback_schedule']=dict(timeout_ms=3,budget_ms=7,max_requests_per_tick=8,
-                priority_ids=[camera_eye_id,32],priority_period_s=.08,inline_retry=False)
+            feedback_requests=int(8*60/control_hz)
+            feedback_scheduler=BudgetedFeedback(bus,ids,priority_ids=(camera_eye_id,32),max_feedback_age_s=feedback_age_limit,
+                                                max_requests_per_step=feedback_requests)
+            result['runtime_feedback_schedule']=dict(timeout_ms=3,budget_ms=1000/control_hz,
+                budget_mode='remaining_control_period',command_guard_ms=1,max_requests_per_tick=feedback_requests,
+                priority_ids=[camera_eye_id,32],priority_period_s=.08,inline_retry=False,
+                fair_attempt_scheduling=True,urgent_age_s=feedback_scheduler.urgent_age_s,
+                fair_urgent_attempts=True,continue_other_axes_after_read_error=True)
         next_command_at=None
         result['phase']='playing'
         clock.start();last_tick=time.monotonic();previous_index=-1;skipped=0;started=time.monotonic()
@@ -390,18 +403,24 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 stop.wait(min(.001,next_command_at-now));continue
             index=min(len(trajectory)-1,max(0,int((t+profile['actuator_latency_ms']/1000)*fps)))
             if index==previous_index and not scheduled_feedback:stop.wait(.001);continue
-            dt=(1/fps if previous_index<0 else now-last_tick)
+            dt=(1/control_hz if previous_index<0 else now-last_tick)
             if scheduled_feedback:
                 if next_command_at is None:next_command_at=now
-                next_command_at+=1/fps
-                while next_command_at<=now:next_command_at+=1/fps
+                next_command_at+=1/control_hz
+                while next_command_at<=now:next_command_at+=1/control_hz
             # A blocked USB call must not cause an unbounded jump on its return.
             if dt>.1:
                 result['watchdog_interval_s']=dt
                 raise RuntimeError('Playback watchdog: stalled for >100 ms')
             if feedback_age_limit is not None and not record_only:
                 stale=[sid for sid in ids if now-last_good_feedback[sid]>feedback_age_limit]
-                if stale:raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
+                if stale:
+                    result['feedback_watchdog']={str(sid):dict(
+                        valid_feedback_age_s=now-last_good_feedback[sid],
+                        last_attempt_age_s=(now-feedback_scheduler.last_attempt[sid]
+                            if feedback_scheduler is not None and sid in feedback_scheduler.last_attempt else None),
+                        last_valid_state=result.get('last_feedback_by_id',{}).get(str(sid))) for sid in stale}
+                    raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
             face_index=index
             if face_hz!=fps:
                 sample_time=max(0.,t+profile['actuator_latency_ms']/1000)
@@ -437,7 +456,10 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             # Prioritize the stalest axis so a single lost reply does not wait
             # another complete rotation and unnecessarily hit its age limit.
             if feedback_scheduler is not None:
-                deadline=min(next_command_at-.001,time.monotonic()+.007)
+                # Use the actual slack after the goal packet/quiet interval.
+                # A fixed7/14ms cap wasted usable time at lower baud, while
+                # dense goal packets left too little time to recover bad reads.
+                deadline=next_command_at-.001
                 events[-1]['feedback_schedule']=feedback_scheduler.step(deadline,last_good_feedback,
                     scheduled_sample,feedback_error,should_stop)
             for _ in range(0 if feedback_scheduler is not None else polls_per_frame):

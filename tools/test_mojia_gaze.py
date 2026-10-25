@@ -81,19 +81,25 @@ class MojiaGazeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'software acceleration differs'):
             validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,True)
 
-    def test_current_unified_speed_policy_keeps_only_eyelid_override(self):
+    def test_current_speed_policy_only_raises_calibrated_mouth_axes(self):
         from xiaobai_runtime.mojia_performance import tracking_profile
         c=json.loads((ROOT/'mojia/person_gaze.json').read_text())
-        p=json.loads((ROOT/'mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json').read_text())
+        p=json.loads((ROOT/'mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000_PROFILE.json').read_text())
         validate_mojia(c,p,ROOT/'mojia/墨甲9.23.json',True,True)
-        self.assertEqual(c['control']['speed_counts_s'],900)
+        self.assertEqual(c['control']['speed_counts_s'],1000)
         self.assertTrue(all('speed_counts_s' not in a for a in c['control']['axes']))
         runtime=tracking_profile(c,p,[m['id'] for m in p['motors']])
         self.assertEqual({m['id']:m['max_acceleration_counts_s2'] for m in runtime['motors']
                           if 'max_acceleration_counts_s2' in m},{32:64,33:64,34:64})
         for m in runtime['motors']:
             self.assertNotIn(m['id'],(9,24))
-            self.assertEqual(m['max_speed_counts_s'],1200 if m['id'] in (5,6,20,21) else 900)
+            mouth={10,11,12,13,15,25,26,27,28,29,30,31,35,36}
+            self.assertEqual(m['max_speed_counts_s'],1200 if m['id'] in mouth else 1000)
+        from mojia_performance import prepare
+        source_ids=p['diagnostic_command_ids']
+        policy=json.loads((ROOT/'mojia/telemetry_policy.json').read_text())
+        prepared,_,_=prepare(c,p,source_ids,np.full((2,len(source_ids)),2047.),True,1.5,policy)
+        self.assertTrue(all(m['max_speed_counts_s']==(1200 if m['id'] in mouth else 1000) for m in prepared['motors']))
 
     def test_device_range_uses_both_asymmetric_hardware_endpoints(self):
         from xiaobai_runtime.mojia_gaze import neck_command_limits
@@ -254,7 +260,7 @@ class MojiaGazeTests(unittest.TestCase):
     def test_independent_vertical_speed_and_bad_axis_limit(self):
         c=baseline_config()
         validate_mojia(c,profile(),ROOT/'mojia/墨甲9.23.json',False,True)
-        for value in [True,0,-1,901,float('nan')]:
+        for value in [True,0,-1,1001,float('nan')]:
             invalid=copy.deepcopy(c);invalid['control']['axes'][-1]['speed_counts_s']=value
             with self.assertRaises(ValueError):validate_mojia(invalid,profile(),ROOT/'mojia/墨甲9.23.json',False,True)
         controller=MojiaPursuit(c,[8,23,7,22],[300,300,100,100])
@@ -546,14 +552,15 @@ class MojiaPerformanceTests(unittest.TestCase):
         from xiaobai_runtime.mojia_performance import MojiaPlaybackGaze
         from xiaobai_runtime.playback import play
         from xiaobai_runtime.protocol import ReadTimeout,CorruptResponse
-        for face_hz,eye in ((30,'left'),(60,'right')):
-            with self.subTest(face_hz=face_hz,camera_eye=eye):
+        for face_hz,eye,control_hz in ((30,'left',60),(60,'right',60),(30,'right',30)):
+            with self.subTest(face_hz=face_hz,camera_eye=eye,control_hz=control_hz):
                 c,p,ids,r=self.setup_performance();fixture,bus,clock=PlaybackTests().fixture()
                 c['control']['camera_eye']=eye
                 for key in ['audio_device','hardware_stop_description','physical_audio_output_confirmed','actuator_latency_ms','stop_method']:
                     p[key]=fixture[key]
                 p.update(serial_backend='feetech_python',feedback_mode='short_registers',
-                         scheduled_feedback=True,face_update_hz=face_hz,feedback_max_age_s=1.,changed_goals_only=False)
+                         scheduled_feedback=True,face_update_hz=face_hz,control_hz=control_hz,
+                         feedback_max_age_s=1.,changed_goals_only=False)
                 clock.duration=.4
                 positions={sid:2047 for sid in ids};motors={m['id']:m for m in p['motors']}
                 def state(sid):
@@ -593,6 +600,10 @@ class MojiaPerformanceTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.feetech_sdk.OfficialSDKBus',return_value=bus),patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
                     result=play(p,ids,trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP',gaze_override=a)
                 self.assertTrue(result['completed'])
+                self.assertEqual(result['control_hz'],control_hz)
+                self.assertEqual(result['playback_fps'],60)
+                self.assertEqual(result['runtime_feedback_schedule']['budget_ms'],1000/control_hz)
+                self.assertEqual(result['runtime_feedback_schedule']['budget_mode'],'remaining_control_period')
                 self.assertEqual(result['runtime_feedback_schedule']['priority_ids'],[a.camera_eye_id,32])
                 self.assertTrue(startup_loss[0])
                 self.assertEqual({r['id'] for r in result['startup_communication_recoveries']},{2,4})
@@ -600,11 +611,13 @@ class MojiaPerformanceTests(unittest.TestCase):
                 bus.set_read_policy.assert_called_once_with(3,retry=False)
                 self.assertEqual(sum(len(e.get('feedback_errors',[])) for e in result['events']),1)
                 for e in result['events']:
-                    self.assertLessEqual(e['feedback_schedule']['reads'],8)
+                    self.assertLessEqual(e['feedback_schedule']['reads'],8*60/control_hz)
                     source=e.get('face_frame',e['frame'])
                     if face_hz==30:self.assertEqual(source%2,0)
                     self.assertEqual(e['goals'][31],trajectory[source,ids.index(31)])
-                self.assertGreaterEqual(len(result['events']),20)
+                self.assertGreaterEqual(len(result['events']),int(control_hz*.33))
+                stamps=[e['sent_monotonic'] for e in result['events']]
+                self.assertAlmostEqual(float(np.median(np.diff(stamps))),1/control_hz,delta=.004)
                 samples=[s for e in result['events'] for s in e.get('feedback_samples',[])]
                 for sid in (a.camera_eye_id,32):self.assertGreaterEqual(sum(s['id']==sid for s in samples),3)
 
@@ -667,7 +680,7 @@ class BudgetedFeedbackTests(unittest.TestCase):
             now[0]+=latency
             return payload[address]
         bus.read.side_effect=read
-        reader=BudgetedFeedback(bus,[2,23,32]);clocks={sid:0. for sid in reader.ids}
+        reader=BudgetedFeedback(bus,[2,23,32]);clocks={sid:.9 for sid in reader.ids}
         def sample(sid,state,started):
             samples.append((sid,state,started));clocks[sid]=now[0]
         return reader,now,SimpleNamespace(monotonic=lambda:now[0]),clocks,sample,samples,errors
@@ -683,25 +696,35 @@ class BudgetedFeedbackTests(unittest.TestCase):
         reader,now,clock,clocks,sample,samples,errors=self.setup_reader(.001)
         with patch('xiaobai_runtime.feedback_schedule.time',clock):
             reader.step(1.005,clocks,sample,lambda *a:errors.append(a))
-            self.assertFalse(samples);self.assertEqual(clocks[23],0.)
+            self.assertFalse(samples);self.assertEqual(clocks[23],.9)
             now[0]=1.0167
             reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
         self.assertEqual(samples[0][0],23)
         self.assertLess(samples[0][2],1.0167)
 
-    def test_timeout_discards_partial_and_yields_until_next_tick(self):
+    def test_timeout_discards_partial_and_services_others_without_same_tick_retry(self):
         from unittest.mock import patch
         from xiaobai_runtime.protocol import ReadTimeout,ProtocolError
         reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
-        reader.bus.read.side_effect=[b'\xff\x07',ReadTimeout('injected')]
+        original=reader.bus.read.side_effect;failed=False
+        def read(sid,address,count):
+            nonlocal failed
+            if sid==23 and address==60 and not failed:
+                failed=True;now[0]+=.003
+                raise ReadTimeout('injected')
+            return original(sid,address,count)
+        reader.bus.read.side_effect=read
         with patch('xiaobai_runtime.feedback_schedule.time',clock):
             result=reader.step(1.007,clocks,sample,lambda *a:errors.append(a))
-        self.assertEqual(result['reads'],2);self.assertFalse(samples)
-        self.assertIsNone(reader.sid);self.assertFalse(reader.parts)
-        self.assertEqual(clocks[23],0.);self.assertEqual(len(errors),1)
+        self.assertLessEqual(result['reads'],8)
+        self.assertGreater(result['reads'],2);self.assertNotIn(23,[s[0] for s in samples])
+        self.assertEqual(result['failed_ids'],[23]);self.assertNotEqual(reader.sid,23)
+        self.assertEqual([c.args[1] for c in reader.bus.read.call_args_list if c.args[0]==23],[56,60])
+        self.assertEqual(clocks[23],.9);self.assertEqual(len(errors),1)
         reader.bus.read.side_effect=ProtocolError('servo alarm')
+        now[0]=1.0167
         with patch('xiaobai_runtime.feedback_schedule.time',clock),self.assertRaises(ProtocolError):
-            reader.step(1.007,clocks,sample,lambda *a:errors.append(a))
+            reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
 
     def test_deadline_does_not_start_an_unbudgeted_transaction(self):
         from unittest.mock import patch
@@ -709,6 +732,191 @@ class BudgetedFeedbackTests(unittest.TestCase):
         with patch('xiaobai_runtime.feedback_schedule.time',clock):
             reader.step(1.003,clocks,sample,lambda *a:errors.append(a))
         reader.bus.read.assert_not_called()
+
+    def test_30hz_slot_can_service_more_axes_when_slack_exists_without_exceeding_cap(self):
+        from unittest.mock import patch
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader(.001)
+        reader.max_requests_per_step=16
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            result=reader.step(1.022,clocks,sample,lambda *a:errors.append(a))
+        self.assertEqual(result['reads'],16)
+        self.assertEqual(len(samples),4)
+        self.assertLessEqual(now[0],1.022)
+
+    def test_failed_priority_axis_does_not_starve_healthy_axes_or_refresh_valid_clock(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.protocol import CorruptResponse
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
+        original=reader.bus.read.side_effect
+        def read(sid,address,count):
+            if sid==23:
+                now[0]+=.003
+                raise CorruptResponse('persistent priority-axis damage')
+            return original(sid,address,count)
+        reader.bus.read.side_effect=read
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+            self.assertEqual(clocks[23],.9)
+            self.assertGreater(reader.last_attempt[23],.9)
+            now[0]=1.0167
+            reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+        self.assertIn(32,[s[0] for s in samples]);self.assertIn(2,[s[0] for s in samples])
+        self.assertEqual(clocks[23],.9)
+
+    def test_approaching_watchdog_deadline_overrides_eye_and_neck_priority(self):
+        from unittest.mock import patch
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
+        clocks[2]=.2  # 0.8s old; priority axes are also due but only0.1s old.
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            result=reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+        self.assertEqual(samples[0][0],2);self.assertEqual(result['urgent_ids'],[2])
+        self.assertLess(now[0]-.2,1.)
+
+    def test_urgent_retry_discards_damaged_whole_sample_and_recovers_on_next_tick(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.protocol import CorruptResponse
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
+        clocks[2]=.2;original=reader.bus.read.side_effect;failed=False
+        def read(sid,address,count):
+            nonlocal failed
+            if sid==2 and address==65 and not failed:
+                failed=True;now[0]+=.003
+                raise CorruptResponse('captured failure at final field')
+            return original(sid,address,count)
+        reader.bus.read.side_effect=read
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+            self.assertNotIn(2,[s[0] for s in samples]);self.assertEqual(clocks[2],.2)
+            self.assertNotEqual(reader.sid,2)
+            now[0]=1.0167
+            reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+        self.assertIn(2,[s[0] for s in samples]);self.assertGreater(clocks[2],1.)
+        self.assertEqual([c.args[1] for c in reader.bus.read.call_args_list if c.args[0]==2],[56,60,62,65]*2)
+
+    def test_failed_urgent_axis_rotates_to_other_urgent_axes_without_refreshing_validity(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.protocol import CorruptResponse
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
+        clocks.update({2:.1,23:.15,32:.2});original=reader.bus.read.side_effect
+        def read(sid,address,count):
+            if sid==2:
+                now[0]+=.003
+                raise CorruptResponse('oldest urgent axis repeatedly damaged')
+            return original(sid,address,count)
+        reader.bus.read.side_effect=read
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            first=reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+            now[0]=1.+1/60
+            second=reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+        self.assertEqual(clocks[2],.1)
+        self.assertTrue({23,32}<={s[0] for s in samples})
+        self.assertLessEqual(first['reads'],8);self.assertLessEqual(second['reads'],8)
+        self.assertLessEqual(len([c for c in reader.bus.read.call_args_list if c.args[0]==2]),2)
+
+    def test_persistently_dead_axis_remains_stale_while_healthy_axes_are_serviced(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.protocol import ReadTimeout
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
+        original=reader.bus.read.side_effect
+        def read(sid,address,count):
+            if sid==23:
+                now[0]+=.003
+                raise ReadTimeout('axis disconnected')
+            return original(sid,address,count)
+        reader.bus.read.side_effect=read
+        with patch('xiaobai_runtime.feedback_schedule.time',clock):
+            for tick in range(56):
+                now[0]=1.+tick/60
+                reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+        self.assertEqual(clocks[23],.9)
+        self.assertEqual([sid for sid in reader.ids if now[0]-clocks[sid]>1.],[23])
+
+
+class BaudTrialTests(unittest.TestCase):
+    def fixture(self,fail_id=None):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from xiaobai_runtime.protocol import ReadTimeout
+        records=[];states={};rates={};writes=[]
+        for sid in range(2,37):
+            cfg=bytearray(40);cfg[3:5]=(10760 if 31<=sid<=35 else 521).to_bytes(2,'little');cfg[5]=sid
+            ram=bytearray(31);ram[0]=1;ram[6:8]=(900).to_bytes(2,'little');ram[15]=1
+            states[sid]=(cfg,ram);rates[sid]=1000000
+            records.append(dict(id=sid,model_raw=int.from_bytes(cfg[3:5],'little'),
+                                config_0_39_hex=cfg.hex(),state_40_70_hex=ram.hex()))
+        port=SimpleNamespace(baudrate=1000000,flush=lambda:None,reset_input_buffer=lambda:None)
+        def read(sid,address,count):
+            if port.baudrate!=rates[sid]:raise ReadTimeout('wrong baud')
+            cfg,ram=states[sid]
+            return bytes(cfg[address:address+count] if address<40 else ram[address-40:address-40+count])
+        def write(sid,address,value):
+            self.assertEqual(port.baudrate,rates[sid]);self.assertIn(address,(6,55));writes.append((sid,address,value))
+            cfg,ram=states[sid]
+            if address==55:ram[15]=value
+            else:
+                self.assertEqual(ram[15],0)
+                if sid==fail_id and value==1:raise RuntimeError('injected baud write failure')
+                cfg[6]=value;rates[sid]={0:1000000,1:500000,2:250000}[value]
+            return (0,0)
+        def snapshot(sid):
+            cfg=read(sid,0,40);ram=read(sid,40,31)
+            return dict(id=sid,config_0_39_hex=cfg.hex(),state_40_70_hex=ram.hex())
+        bus=SimpleNamespace(port=port,handler=SimpleNamespace(),sdk=SimpleNamespace(write1ByteTxRx=write),
+                            read=read,_read_once=read,snapshot=snapshot)
+        return bus,records,rates,states,writes
+
+    def test_all_axes_switch_and_restore_without_motion_parameter_writes(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from xiaobai_runtime.baud_trial import migrate
+        bus,records,rates,states,writes=self.fixture()
+        with tempfile.TemporaryDirectory() as tmp,patch('xiaobai_runtime.baud_trial.time.sleep'):
+            self.assertTrue(migrate(bus,records,1000000,500000,Path(tmp)/'a.json')['completed'])
+            self.assertEqual(set(rates.values()),{500000})
+            self.assertTrue(migrate(bus,records,500000,1000000,Path(tmp)/'b.json')['completed'])
+            self.assertEqual(set(rates.values()),{1000000})
+        self.assertTrue(all(states[sid][1][15]==1 for sid in states))
+        self.assertEqual(len([w for w in writes if w[1]==6]),70)
+
+    def test_partial_transition_rolls_back_current_and_previous_axes(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from xiaobai_runtime.baud_trial import migrate
+        bus,records,rates,states,writes=self.fixture(fail_id=4)
+        with tempfile.TemporaryDirectory() as tmp,patch('xiaobai_runtime.baud_trial.time.sleep'):
+            path=Path(tmp)/'a.json'
+            with self.assertRaisesRegex(RuntimeError,'injected'):
+                migrate(bus,records,1000000,500000,path)
+            self.assertTrue(json.loads(path.read_text())['rolled_back'])
+        self.assertEqual(set(rates.values()),{1000000})
+        self.assertTrue(all(states[sid][1][15]==1 for sid in states))
+        self.assertFalse(any(sid>4 for sid,_,_ in writes))
+
+    def test_bad_inventory_stops_before_any_write(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from xiaobai_runtime.baud_trial import migrate
+        bus,records,rates,states,writes=self.fixture();records[-1]['model_raw']=999
+        with tempfile.TemporaryDirectory() as tmp,patch('xiaobai_runtime.baud_trial.time.sleep'):
+            with self.assertRaisesRegex(RuntimeError,'Unexpected model'):
+                migrate(bus,records,1000000,500000,Path(tmp)/'a.json')
+        self.assertFalse(writes)
+
+    def test_missing_write_ack_is_verified_without_replaying_the_write(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from xiaobai_runtime.baud_trial import migrate
+        bus,records,rates,states,writes=self.fixture();original=bus.sdk.write1ByteTxRx
+        def no_ack(*args):original(*args);return (-6,0)
+        bus.sdk.write1ByteTxRx=no_ack
+        with tempfile.TemporaryDirectory() as tmp,patch('xiaobai_runtime.baud_trial.time.sleep'):
+            self.assertTrue(migrate(bus,records,1000000,500000,Path(tmp)/'a.json')['completed'])
+        self.assertEqual(len(writes),35*3)
+        self.assertEqual(set(rates.values()),{500000})
 
 
 if __name__=='__main__':unittest.main()

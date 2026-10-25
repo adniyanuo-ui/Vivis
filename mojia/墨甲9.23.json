@@ -323,8 +323,12 @@
             "shape": "JawOpen"
         },
         {
-            "posSize": 0,
+            "posSize": 1,
             "positions": [
+                {
+                    "id": 31,
+                    "position": 2048
+                }
             ],
             "shape": "MouthClose"
         },
@@ -626,8 +630,7 @@
         },
         {
             "posSize": 0,
-            "positions": [
-            ],
+            "positions": [],
             "shape": "MouthRollLower"
         },
         {
@@ -794,8 +797,7 @@
         },
         {
             "posSize": 0,
-            "positions": [
-            ],
+            "positions": [],
             "shape": "CheekPuff"
         },
         {

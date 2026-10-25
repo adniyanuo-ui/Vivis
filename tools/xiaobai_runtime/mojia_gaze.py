@@ -39,7 +39,7 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Mojia calibration changed')
     c = config['control']
     eye_speed=c.get('speed_counts_s',60)
-    if not finite(eye_speed) or not 0 < eye_speed <= 900:
+    if not finite(eye_speed) or not 0 < eye_speed <= 1000:
         raise ValueError('Invalid eye speed for commissioning stage')
     if not c.get('mount_confirmed') or c['camera_mount'] not in ('fixed', 'eye'):
         raise ValueError('Confirm camera mounting before motion')
@@ -60,7 +60,7 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
     motors = {m['id']: m for m in profile['motors']}
     for a in axes:
         axis_speed=a.get('speed_counts_s',eye_speed)
-        if not finite(axis_speed) or not 0 < axis_speed <= 900:
+        if not finite(axis_speed) or not 0 < axis_speed <= 1000:
             raise ValueError('Invalid per-axis eye speed')
         values = [a[k] for k in ('negative', 'neutral', 'positive')]
         m = motors[a['id']]
@@ -87,7 +87,7 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
             not finite(n['offset_counts']) or not 1<=n['offset_counts']<=(80 if trial else 160)):
         raise ValueError('Invalid bounded Mojia neck setup')
     if (n['id'] != 32 or n['sign'] not in (-1, 1) or type(n['sign']) is not int
-            or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 900
+            or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 1000
             or not finite(n['acceleration_counts_s2']) or not 0 < n['acceleration_counts_s2'] <= 200
             or motors[32]['model_raw_expected'] != 10760
             or not finite(low) or not finite(high)

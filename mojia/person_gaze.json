@@ -69,17 +69,17 @@
       }
     ],
     "mount_confirmation_source": "2026-10-24 user switched back to the right-eye camera; moving camera reference is right yaw ID23",
-    "speed_counts_s": 900,
+    "speed_counts_s": 1000,
     "vertical_enabled": true,
     "vertical_direction_confirmed": true,
     "validated_source": "2026-10-23 user accepted horizontal and vertical eye parameters; freeze these values during neck tuning"
   },
-  "calibration_sha256": "8264e3370aae554bc116749378c2cd5fc7a865af959ab800f7331d6f60a70fbe",
+  "calibration_sha256": "b3b0321ac804d89cc131749890fe031035654ce07644a594bcad47ec4eb67943",
   "neck": {
     "id": 32,
     "sign": 1,
     "range_mode": "device",
-    "speed_counts_s": 900,
+    "speed_counts_s": 1000,
     "acceleration_counts_s2": 64,
     "direction_confirmed": false,
     "gain_counts_s": 120,
@@ -99,5 +99,5 @@
     ],
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-24 user removed software acceleration limits31/35/36; neck32/33/34 retain64; face-loss neutral return, hardware parameters, speeds and ranges unchanged"
+  "parameter_revision_source": "2026-10-24 user removed software acceleration limits31/35/36; neck32/33/34 retain64; face-loss neutral return, hardware parameters, speeds and ranges unchanged;2026-10-25 all mapped hardware/software speed caps1000, all other settings unchanged"
 }

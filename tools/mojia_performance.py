@@ -80,7 +80,6 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
     p['post_goal_quiet_ms']=1
     p['scheduled_feedback']=True
     motors={m['id']:m for m in p['motors']}
-    for sid in MOUTH_IDS:motors[sid]['max_speed_counts_s']=900
     if authorize_tongue:
         # Existing operator authorization for ID29 only; preserve hardware
         # alarms and device temperature ceiling. Never globally disable guards.
@@ -101,7 +100,7 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
     return p,monitored,trajectory
 
 
-def recover_tongue(bus,motor,guard,events,speed=900):
+def recover_tongue(bus,motor,guard,events,speed=1000):
     s=bus.snapshot(29)
     if s['torque_enable']==1:return
     if s['model_raw']!=521 or s['mode']!=0 or not 0<=s['position_raw']<=4095:
@@ -181,7 +180,8 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
             (directory/'profile.json').write_text(json.dumps(profile,ensure_ascii=False,indent=2)+'\n')
         from xiaobai_runtime.feetech_sdk import OfficialSDKBus
         bus=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20,
-                           trace_path=directory/'homing_serial_trace.json')
+                           trace_path=directory/'homing_serial_trace.json',
+                           snapshot_chunk_bytes=profile.get('snapshot_chunk_bytes'))
         snapshot_deadline=time.monotonic()+10
         snapshots=[startup_feedback(bus.snapshot,sid,snapshot_deadline,
                     report.setdefault('startup_communication_recoveries',[]),should_stop=lambda:guard() or False)
@@ -221,7 +221,7 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
         if args.authorized_tongue_observation:
             prepare_recovery_clearance(bus,clearance_plan,snapshots,motors,guard,
                 report.setdefault('recovery_clearance',{}),args.home_speed)
-            recover_tongue(bus,motors[29],guard,report['startup_events'],speed=min(args.home_speed,900))
+            recover_tongue(bus,motors[29],guard,report['startup_events'],speed=min(args.home_speed,motors[29]['max_speed_counts_s']))
         publish('homing')
         print(f'HOME {len(home_axes)} AXES START speed_cap={args.home_speed}',flush=True)
         home_all(bus,home_axes,motors,guard,report['homing'],args.home_speed,original_speeds,keep_enabled=ids,
@@ -261,6 +261,10 @@ def main():
     parser.add_argument('--home-only',action='store_true',help='Home all inventory axes; no camera, audio or task execution')
     parser.add_argument('--face-fps',type=int,choices=(30,60),default=60,
                         help='Facial song sampling; eye/neck control remains at the source 60 Hz')
+    parser.add_argument('--control-fps',type=int,choices=(30,60),default=60,
+                        help='Actual combined control rate; source timing and audio stay unchanged')
+    parser.add_argument('--baud',type=int,choices=(250000,500000,1000000),
+                        help='Host baud; all servos must already be verified at this baud')
     parser.add_argument('--authorized-tongue-observation',action='store_true')
     parser.add_argument('--usb-volume-times-three',action='store_true',help='Use the saved original USB volume reference, never cumulative gain')
     parser.add_argument('--hold-vertical-eyes',action='store_true',help='Hold ID7/22: neither song nor tracking may send them position commands')
@@ -277,7 +281,10 @@ def main():
     ids,positions,fps=load_targets(args.targets,original,args.audio,ROOT/'mojia/墨甲9.23.json')
     profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation,args.mouth_gain,telemetry_policy)
     if fps!=60:parser.error('The reviewed combined controller requires the 60 FPS source')
-    profile['face_update_hz']=args.face_fps
+    profile['face_update_hz']=min(args.face_fps,args.control_fps)
+    profile['control_hz']=args.control_fps
+    profile['snapshot_chunk_bytes']=2
+    if args.baud is not None:profile['baud']=args.baud
     home_inventory=read_json(args.home_inventory)
     home_axes=home_inventory['axes'];home_ids=[a['id'] for a in home_axes]
     if (len(set(home_ids))!=len(home_ids) or not set(ids)<=set(home_ids)
@@ -295,7 +302,9 @@ def main():
     if args.check:
         print(json.dumps(dict(offline_valid=True,monitored=ids,commanded=profile['diagnostic_command_ids'],
                              gaze_owner_ids=profile['gaze_owner_ids'],fps=fps,repeat=args.repeat,
-                             face_fps=args.face_fps,scheduled_feedback=profile['scheduled_feedback'],
+                             face_fps=profile['face_update_hz'],control_fps=args.control_fps,baud=profile['baud'],
+                             snapshot_chunk_bytes=profile['snapshot_chunk_bytes'],
+                             scheduled_feedback=profile['scheduled_feedback'],
                              home_ids=home_ids,home_speed=args.home_speed,home_only=args.home_only,
                              hardware_preset=str(args.hardware_preset) if hardware_preset is not None else None,
                              telemetry_policy=telemetry_policy,
@@ -319,7 +328,8 @@ def main():
     def guard():
         if stopped or stop_file.exists():raise RuntimeError('Operator stop')
     summary=dict(completed=False,rounds=[],error=None,startup_events=[],tongue_disabled_after=False,mouth_motion_gain=args.mouth_gain)
-    summary.update(repeat_mode='independent_full_cycle',requested_rounds=args.repeat,cleanup_attempted=False)
+    summary.update(repeat_mode='independent_full_cycle',requested_rounds=args.repeat,cleanup_attempted=False,
+                   control_hz=args.control_fps,baud=profile['baud'],source_fps=fps)
     summary['homing']={}
     status_path=ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
     status_path.parent.mkdir(parents=True,exist_ok=True)

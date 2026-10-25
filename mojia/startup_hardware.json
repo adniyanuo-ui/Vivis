@@ -1,6 +1,6 @@
 {
   "schema_version": "mojia-startup-hardware-1.0",
-  "basis": "Accepted hardware tuning with user-requested eyelid1000 speed comparison; restore before low-speed homing",
+  "basis": "2026-10-25 user authorized mouth-speed1200 vs gain1.0 comparison; retain gain1.2, mouth14 axes1200, other mapped axes1000; all other tuning and homing unchanged",
   "excluded_ids": [
     9,
     24
@@ -14,7 +14,7 @@
         2300
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 3,
@@ -24,7 +24,7 @@
         2100
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 4,
@@ -34,7 +34,7 @@
         2168
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 5,
@@ -64,7 +64,7 @@
         2250
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 8,
@@ -74,7 +74,7 @@
         2147
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 10,
@@ -84,7 +84,7 @@
         2547
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 11,
@@ -94,7 +94,7 @@
         2184
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 12,
@@ -104,7 +104,7 @@
         2347
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 13,
@@ -114,7 +114,7 @@
         2600
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 14,
@@ -124,7 +124,7 @@
         2120
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 15,
@@ -134,7 +134,7 @@
         2500
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 16,
@@ -144,7 +144,7 @@
         2347
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 17,
@@ -154,7 +154,7 @@
         2394
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 18,
@@ -164,7 +164,7 @@
         2180
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 19,
@@ -174,7 +174,7 @@
         2140
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 20,
@@ -204,7 +204,7 @@
         2214
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 23,
@@ -214,7 +214,7 @@
         2200
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 25,
@@ -224,7 +224,7 @@
         2200
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 26,
@@ -234,7 +234,7 @@
         2287
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 27,
@@ -244,7 +244,7 @@
         2547
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 28,
@@ -254,7 +254,7 @@
         2500
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 29,
@@ -264,7 +264,7 @@
         2147
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 30,
@@ -274,7 +274,7 @@
         2250
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 31,
@@ -284,7 +284,7 @@
         2050
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 32,
@@ -294,7 +294,7 @@
         2600
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900,
+      "speed_raw": 1000,
       "pid_raw": [
         16,
         26,
@@ -313,7 +313,7 @@
         2647
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 34,
@@ -323,7 +323,7 @@
         2647
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1000
     },
     {
       "id": 35,
@@ -333,7 +333,7 @@
         2247
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     },
     {
       "id": 36,
@@ -343,7 +343,7 @@
         2089
       ],
       "acceleration_raw": 0,
-      "speed_raw": 900
+      "speed_raw": 1200
     }
   ]
 }

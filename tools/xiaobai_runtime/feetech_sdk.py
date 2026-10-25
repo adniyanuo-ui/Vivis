@@ -10,6 +10,7 @@ import os
 import getpass
 import shlex
 from pathlib import Path
+from types import SimpleNamespace
 from .protocol import Bus, ProtocolError, CorruptResponse, ReadTimeout, ServoStatusError, goal_packet
 
 SDK_ROOT = Path(__file__).resolve().parents[2] / 'xiaobai/reference/FTServo_Python'
@@ -18,7 +19,10 @@ from scservo_sdk import PortHandler, sms_sts, GroupSyncWrite, COMM_SUCCESS, COMM
 
 
 class OfficialSDKBus(Bus):
-    def __init__(self, port, baud=1000000, feedback_mode='block',write_mode='position_speed',changed_goals_only=False,trace_path=None,post_goal_quiet_ms=0,sync_group_size=30,sync_group_gap_ms=0,transaction_timeout_ms=None,servo_status_policy='raise'):
+    def __init__(self, port, baud=1000000, feedback_mode='block',write_mode='position_speed',changed_goals_only=False,trace_path=None,post_goal_quiet_ms=0,sync_group_size=30,sync_group_gap_ms=0,transaction_timeout_ms=None,servo_status_policy='raise',snapshot_chunk_bytes=None):
+        if snapshot_chunk_bytes is not None and (type(snapshot_chunk_bytes) is not int or not 1<=snapshot_chunk_bytes<=8):
+            raise ValueError('Snapshot chunks must be1..8 bytes')
+        self.snapshot_chunk_bytes=snapshot_chunk_bytes
         if servo_status_policy not in ('raise','record_only'):
             raise ValueError('Unknown servo status policy')
         self.servo_status_policy=servo_status_policy
@@ -108,7 +112,13 @@ class OfficialSDKBus(Bus):
         return bytes(data)
 
     def snapshot(self, sid):
-        state = super().snapshot(sid)
+        chunk=getattr(self,'snapshot_chunk_bytes',None)
+        if chunk is None:
+            state=super().snapshot(sid)
+        else:
+            def read(axis,address,count):
+                return b''.join(self.read(axis,address+i,min(chunk,count-i)) for i in range(0,count,chunk))
+            state=Bus.snapshot(SimpleNamespace(read=read),sid)
         self.acceleration[sid] = bytes.fromhex(state['state_40_70_hex'])[1]
         self.configured_speeds[sid] = int.from_bytes(bytes.fromhex(state['state_40_70_hex'])[6:8],'little')
         return state

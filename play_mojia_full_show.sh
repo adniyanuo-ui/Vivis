@@ -6,7 +6,7 @@ COMMON=(--config mojia/person_gaze.json
         --profile mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000_PROFILE.json
         --targets mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000.json
         --audio exmple/0001.wav --authorized-tongue-observation
-        --usb-volume-times-three --hold-vertical-eyes --face-fps 60 --mouth-gain 1.5 --repeat 3)
+        --usb-volume-times-three --hold-vertical-eyes --face-fps 60 --mouth-gain 1.0 --repeat 3)
 for arg in "$@"; do
     if [[ "$arg" == --check ]]; then
         exec "$PYTHON" tools/mojia_performance.py "${COMMON[@]}" --output /tmp/vivis-show-offline "$@"
@@ -50,7 +50,7 @@ fi
 if [[ "$home_only" == 1 ]]; then
     printf '仅执行35轴缓慢回中，不启动相机或音频。\n日志：%s/performance\n' "$RUN_DIR"
 else
-    printf '每遍独立准备、35轴缓慢回中，再从头完整播放音频与表情＋横向眼球/颈部跟踪；60 Hz定时控制、分步反馈。\n回中后ID7/22保持原位；音量为原始基准的3倍幅度。\n监控：http://127.0.0.1:8765/\n日志：%s/performance\nCtrl+C 可停止，停止后保持颈部扭矩。\n' "$RUN_DIR"
+    printf '每遍独立准备、35轴缓慢回中，再从头完整播放音频与表情＋横向眼球/颈部跟踪；定时控制默认60 Hz，对照试验可指定30 Hz。\n回中后ID7/22保持原位；音量为原始基准的3倍幅度。\n监控：http://127.0.0.1:8765/\n日志：%s/performance\nCtrl+C 可停止，停止后保持颈部扭矩。\n' "$RUN_DIR"
 fi
 printf '%s\n' "$RUN_DIR" > outputs/mojia/latest_full_show.txt
 exec "$PYTHON" -u tools/mojia_performance.py "${COMMON[@]}" --output "$RUN_DIR/performance" "$@"

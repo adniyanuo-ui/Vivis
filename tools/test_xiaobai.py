@@ -13,6 +13,30 @@ from xiaobai_runtime.protocol import Bus,packet,decode_status,goal_packet,Protoc
 from xiaobai_runtime.mapping import ROOT,inputs,audit,draft_profile,compile_trajectory,limit_step,live_preflight
 
 class ProtocolTests(unittest.TestCase):
+    def test_segmented_sdk_snapshot_decodes_all_bytes_and_preserves_cached_control_fields(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from xiaobai_runtime.feetech_sdk import OfficialSDKBus
+        config=bytearray(40);config[3:5]=(521).to_bytes(2,'little');config[5]=2
+        config[9:11]=(1000).to_bytes(2,'little');config[11:13]=(3000).to_bytes(2,'little')
+        ram=bytearray(31);ram[0]=1;ram[1]=64;ram[6:8]=(900).to_bytes(2,'little')
+        ram[16:18]=(2047).to_bytes(2,'little');ram[22:24]=bytes([60,45])
+        memory=bytes(config+ram)
+        read=lambda sid,address,count:memory[address:address+count]
+        expected=Bus.snapshot(SimpleNamespace(read=read),2)
+        bus=OfficialSDKBus.__new__(OfficialSDKBus);bus.snapshot_chunk_bytes=2
+        bus.acceleration={};bus.configured_speeds={};bus.read=Mock(side_effect=read)
+        self.assertEqual(bus.snapshot(2),expected)
+        self.assertEqual(bus.acceleration,{2:64});self.assertEqual(bus.configured_speeds,{2:900})
+        self.assertEqual(sum(c.args[2] for c in bus.read.call_args_list),71)
+        self.assertTrue(all(c.args[2]<=2 for c in bus.read.call_args_list))
+        def damaged(sid,address,count):
+            if address==56:raise CorruptResponse('bad snapshot chunk')
+            return read(sid,address,count)
+        bus.read.side_effect=damaged;bus.acceleration={2:7};bus.configured_speeds={2:300}
+        with self.assertRaises(CorruptResponse):bus.snapshot(2)
+        self.assertEqual(bus.acceleration,{2:7});self.assertEqual(bus.configured_speeds,{2:300})
+
     def test_sdk_reports_missing_or_inaccessible_serial_device(self):
         from unittest.mock import patch
         from xiaobai_runtime.feetech_sdk import OfficialSDKBus
