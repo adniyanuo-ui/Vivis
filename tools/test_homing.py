@@ -5,9 +5,368 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from xiaobai_runtime.homing import home_all,smooth_home_targets,validate_home_axes
+from xiaobai_runtime.startup_settings import startup_plan,restore_startup_settings
+
+
+class StartupSettingsTests(unittest.TestCase):
+    def fixture(self):
+        import json
+        from xiaobai_runtime.mapping import ROOT
+        preset=json.loads((ROOT/'mojia/startup_hardware.json').read_text())
+        inventory=json.loads((ROOT/'mojia/homing_axes.json').read_text())['axes']
+        config={};ram={};writes=[]
+        for a in inventory:
+            sid=a['id'];c=bytearray(40);r=bytearray(31)
+            c[3:5]=a['model_raw_expected'].to_bytes(2,'little');c[18]=4
+            c[9:11]=(1900).to_bytes(2,'little');c[11:13]=(2100).to_bytes(2,'little')
+            c[21:24]=bytes([32,32,0]);r[0]=int(sid not in (9,24,29));r[1]=10
+            r[2:4]=(2047).to_bytes(2,'little')
+            config[sid]=c;ram[sid]=r
+        for a in preset['axes']:
+            c=config[a['id']];lo,hi=a['device_limits']
+            c[9:11]=lo.to_bytes(2,'little');c[11:13]=hi.to_bytes(2,'little')
+        def snapshot(sid):
+            c=config[sid];r=ram[sid]
+            return dict(id=sid,model_raw=int.from_bytes(c[3:5],'little'),mode=0,status_register=0,
+                configured_min=int.from_bytes(c[9:11],'little'),configured_max=int.from_bytes(c[11:13],'little'),
+                torque_enable=r[0],goal_position_raw=int.from_bytes(r[2:4],'little'),
+                config_0_39_hex=c.hex(),state_40_70_hex=r.hex())
+        def read(sid,address,width):
+            block,offset=(config[sid],address) if address<40 else (ram[sid],address-40)
+            return bytes(block[offset:offset+width])
+        def write(sid,address,value,width):
+            writes.append((sid,address,value,width))
+            block,offset=(config[sid],address) if address<40 else (ram[sid],address-40)
+            block[offset:offset+width]=value.to_bytes(width,'little')
+            return 0,0
+        bus=SimpleNamespace(read=read,snapshot=snapshot,sdk=SimpleNamespace(
+            write1ByteTxRx=lambda sid,addr,value:write(sid,addr,value,1),
+            write2ByteTxRx=lambda sid,addr,value:write(sid,addr,value,2)))
+        return preset,bus,[snapshot(a['id']) for a in inventory],writes,config,ram
+
+    def test_powercycle_restores_both_models_neck_and_stages_low_speed_without_motion(self):
+        preset,bus,before,writes,config,ram=self.fixture();report={}
+        speeds=restore_startup_settings(bus,preset,before,60,lambda:None,report)
+        self.assertTrue(report['completed']);self.assertEqual(len(speeds),35)
+        for sid in range(2,37):
+            if sid in (9,24):
+                self.assertEqual(ram[sid][1],10);self.assertEqual(speeds[sid],0)
+                self.assertFalse(any(row[0]==sid for row in writes));continue
+            self.assertEqual(ram[sid][1],0)
+            self.assertEqual(int.from_bytes(ram[sid][6:8],'little'),60)
+            self.assertEqual(speeds[sid],1000 if sid in (5,6,20,21) else 900)
+        self.assertEqual(list(config[32][21:24]),[16,26,0])
+        self.assertEqual(list(config[32][26:28]),[5,5])
+        self.assertTrue(all(addr in (21,22,23,26,27,41,46) for _,addr,_,_ in writes))
+        self.assertTrue(all(bus.snapshot(s['id'])['torque_enable']==s['torque_enable']
+                            and bus.snapshot(s['id'])['goal_position_raw']==s['goal_position_raw'] for s in before))
+        self.assertEqual(writes[0][1],46)
+
+    def test_repeated_startup_does_not_repeat_matching_writes(self):
+        preset,bus,before,writes,_,_=self.fixture()
+        restore_startup_settings(bus,preset,before,60,lambda:None,{})
+        writes.clear()
+        after=[bus.snapshot(s['id']) for s in before]
+        restore_startup_settings(bus,preset,after,60,lambda:None,{})
+        self.assertEqual(writes,[])
+
+    def test_later_axis_mismatch_or_bad_setting_prevents_all_writes(self):
+        for key,value in [('model_raw',999),('speed_raw',0),('pid_raw',[999,0,0])]:
+            with self.subTest(key=key):
+                preset,bus,before,writes,_,_=self.fixture()
+                preset['axes'][-1][key]=value
+                with self.assertRaises((RuntimeError,ValueError)):
+                    restore_startup_settings(bus,preset,before,60,lambda:None,{})
+                self.assertEqual(writes,[])
+
+    def test_readback_mismatch_aborts_without_repeating_write(self):
+        preset,bus,before,writes,_,_=self.fixture()
+        bus.read=lambda sid,address,count:bytes(count)
+        with self.assertRaisesRegex(RuntimeError,'could not be verified'):
+            restore_startup_settings(bus,preset,before,60,lambda:None,{})
+        self.assertEqual(len(writes),1)
+
+    def test_operator_stop_prevents_first_write(self):
+        preset,bus,before,writes,_,_=self.fixture()
+        def stop():raise RuntimeError('Operator stop')
+        with self.assertRaisesRegex(RuntimeError,'Operator stop'):
+            restore_startup_settings(bus,preset,before,60,stop,{})
+        self.assertEqual(writes,[])
+
+    def test_missing_inventory_rejected(self):
+        preset,bus,before,writes,_,_=self.fixture();preset['axes'].pop()
+        with self.assertRaisesRegex(ValueError,'inventory'):
+            restore_startup_settings(bus,preset,before,60,lambda:None,{})
+        self.assertEqual(writes,[])
+
+    def test_unexpected_goal_change_is_rejected(self):
+        preset,bus,before,writes,_,ram=self.fixture()
+        original=bus.snapshot
+        def snapshot(sid):
+            ram[sid][2:4]=(2050).to_bytes(2,'little')
+            return original(sid)
+        bus.snapshot=snapshot
+        with self.assertRaisesRegex(RuntimeError,'unexpected torque/goal/config change'):
+            restore_startup_settings(bus,preset,before,60,lambda:None,{})
+
+
+class RecoveryClearanceTests(unittest.TestCase):
+    def fixture(self):
+        from unittest.mock import Mock
+        from mojia_performance import recovery_clearance_plan
+        motors={29:dict(id=29,neutral=2047,safe_min=1447,safe_max=2047,device_min=1447,
+                       device_max=2147,max_speed_counts_s=900,model_raw_expected=521,initial_settle_tolerance_counts=40),
+                31:dict(id=31,neutral=2047,safe_min=1380,safe_max=2047,device_min=1380,
+                       device_max=2050,max_speed_counts_s=900,model_raw_expected=10760)}
+        inventory=dict(recovery_clearance=dict(recovering_id=29,moving_id=31,position=1900,
+                       max_speed_counts_s=60,settle_tolerance_counts=20))
+        states=[dict(id=29,torque_enable=0,position_raw=2230),dict(id=31,torque_enable=1,position_raw=2030)]
+        return inventory,motors,states,Mock(),recovery_clearance_plan(inventory,motors)
+
+    def test_disabled_tongue_outside_corridor_first_opens_jaw_at_small_speed(self):
+        from mojia_performance import prepare_recovery_clearance
+        _,motors,states,bus,plan=self.fixture();report={}
+        with patch('mojia_performance.home_all') as home:
+            prepare_recovery_clearance(bus,plan,states,motors,lambda:None,report,60)
+            home.assert_called_once();args=home.call_args.args
+            self.assertEqual(args[1][0]['id'],31);self.assertEqual(args[1][0]['neutral'],1900)
+            self.assertEqual(args[2][31]['initial_settle_tolerance_counts'],20)
+            self.assertEqual(args[5],60);self.assertEqual(home.call_args.kwargs['keep_enabled'],[31])
+        self.assertTrue(report['required']);self.assertEqual(motors[31]['neutral'],2047)
+        self.assertEqual(motors[29]['initial_settle_tolerance_counts'],40)
+
+    def test_no_clearance_motion_for_enabled_or_already_centered_tongue(self):
+        from mojia_performance import prepare_recovery_clearance
+        for torque,position in [(1,2050),(0,2047),(0,2087)]:
+            _,motors,states,bus,plan=self.fixture();states[0].update(torque_enable=torque,position_raw=position)
+            with patch('mojia_performance.home_all') as home:
+                prepare_recovery_clearance(bus,plan,states,motors,lambda:None,{},60)
+                home.assert_not_called()
+
+    def test_clearance_limits_are_validated_before_motion(self):
+        from mojia_performance import recovery_clearance_plan
+        for field,value in [('position',1379),('position',2051),('max_speed_counts_s',901),
+                            ('settle_tolerance_counts',41),('moving_id',29)]:
+            with self.subTest(field=field,value=value):
+                inventory,motors,*_=self.fixture();inventory['recovery_clearance'][field]=value
+                with self.assertRaises(ValueError):recovery_clearance_plan(inventory,motors)
+
+
+class TelemetryPolicyTests(unittest.TestCase):
+    def setUp(self):
+        from xiaobai_runtime.mapping import ROOT
+        import json
+        self.policy=json.loads((ROOT/'mojia/telemetry_policy.json').read_text())
+        self.motor=dict(safe_min=1900,safe_max=2100,max_load_raw=800,max_temperature_c=100,
+                        min_voltage_raw=40,max_voltage_raw=90,telemetry_policy=self.policy)
+        self.state=dict(position=2047,load_raw=0,temperature_c=40,voltage_raw=60,status_register=0)
+
+    def test_strict_threshold_boundaries_and_load_direction_bit(self):
+        from xiaobai_runtime.playback import check_feedback
+        for load,temp,kinds in [(800,80,set()),(801,80,{'load'}),(1023,80,{'load'}),
+                                (0,81,{'temperature'}),(900,100,{'load','temperature'}),
+                                (1024+800,80,set()),(1024+801,80,{'load'})]:
+            with self.subTest(load=load,temp=temp):
+                warnings=check_feedback(5,{**self.state,'load_raw':load,'temperature_c':temp},self.motor)
+                self.assertEqual({w['kind'] for w in warnings},kinds)
+
+    def test_single_165_degree_sample_recovers_without_motion_writes(self):
+        from unittest.mock import Mock,patch
+        from xiaobai_runtime.playback import check_feedback
+        from xiaobai_runtime.telemetry_policy import verify_sample
+        hot={**self.state,'temperature_c':165};cold={**self.state,'temperature_c':43}
+        reader=Mock(return_value=cold);records=[]
+        with patch('xiaobai_runtime.telemetry_policy.time.sleep'):
+            state,warnings=verify_sample(reader,28,hot,lambda f:check_feedback(28,f,self.motor),self.policy,records)
+        self.assertEqual(state,cold);self.assertEqual(warnings,[]);reader.assert_called_once_with(28)
+        self.assertTrue(records[0]['recovered']);self.assertEqual(records[0]['consecutive_high_samples'],0)
+        self.assertEqual(records[0]['samples'][0]['state']['temperature_c'],165)
+
+    def test_four_consecutive_high_samples_stop_and_no_fifth_read(self):
+        from unittest.mock import Mock,patch
+        from xiaobai_runtime.playback import check_feedback
+        from xiaobai_runtime.telemetry_policy import verify_sample,CriticalTemperatureError
+        hot={**self.state,'temperature_c':101};reader=Mock(return_value=hot);records=[]
+        with patch('xiaobai_runtime.telemetry_policy.time.sleep'),self.assertRaisesRegex(CriticalTemperatureError,'4 consecutive'):
+            verify_sample(reader,28,hot,lambda f:check_feedback(28,f,self.motor),self.policy,records)
+        self.assertEqual(reader.call_count,3);self.assertEqual(len(records[0]['samples']),4)
+        self.assertEqual(records[0]['consecutive_high_samples'],4);self.assertFalse(records[0]['recovered'])
+
+    def test_100_degrees_resets_streak_after_three_high_samples(self):
+        from unittest.mock import Mock,patch
+        from xiaobai_runtime.playback import check_feedback
+        from xiaobai_runtime.telemetry_policy import verify_sample
+        hot={**self.state,'temperature_c':165};boundary={**self.state,'temperature_c':100}
+        reader=Mock(side_effect=[hot,hot,boundary]);records=[]
+        with patch('xiaobai_runtime.telemetry_policy.time.sleep'):
+            state,warnings=verify_sample(reader,28,hot,lambda f:check_feedback(28,f,self.motor),self.policy,records)
+        self.assertEqual(state['temperature_c'],100);self.assertEqual(warnings[0]['kind'],'temperature')
+        self.assertTrue(records[0]['recovered']);self.assertEqual(records[0]['consecutive_high_samples'],0)
+
+    def test_corrupt_timeout_and_servo_alarm_are_not_counted_as_hot_or_healthy(self):
+        from unittest.mock import Mock,patch
+        from xiaobai_runtime.playback import check_feedback
+        from xiaobai_runtime.protocol import CorruptResponse,ReadTimeout,ServoStatusError
+        from xiaobai_runtime.telemetry_policy import verify_sample
+        hot={**self.state,'temperature_c':165}
+        for fault in [CorruptResponse('bad'),ReadTimeout('missing'),ServoStatusError(28,4)]:
+            reader=Mock(side_effect=fault);records=[]
+            with patch('xiaobai_runtime.telemetry_policy.time.sleep'),self.assertRaises(type(fault)):
+                verify_sample(reader,28,hot,lambda f:check_feedback(28,f,self.motor),self.policy,records)
+            self.assertEqual(reader.call_count,1);self.assertEqual(records[0]['consecutive_high_samples'],1)
+            self.assertFalse(records[0]['recovered'])
+        reader=Mock(return_value={**hot,'status_register':4});records=[]
+        with patch('xiaobai_runtime.telemetry_policy.time.sleep'),self.assertRaises(ServoStatusError):
+            verify_sample(reader,28,hot,lambda f:check_feedback(28,f,self.motor),self.policy,records)
+        self.assertEqual(records[0]['consecutive_high_samples'],1)
+
+    def test_stop_during_verification_prevents_followup_reads(self):
+        from unittest.mock import Mock,patch
+        from xiaobai_runtime.playback import check_feedback
+        from xiaobai_runtime.telemetry_policy import verify_sample
+        reader=Mock();stop=Mock(side_effect=[False,True]);records=[]
+        with patch('xiaobai_runtime.telemetry_policy.time.sleep'),self.assertRaisesRegex(RuntimeError,'Operator stop'):
+            verify_sample(reader,28,{**self.state,'temperature_c':165},lambda f:check_feedback(28,f,self.motor),
+                          self.policy,records,should_stop=stop)
+        reader.assert_not_called()
+
+    def test_critical_temperature_and_other_faults_still_stop(self):
+        from xiaobai_runtime.playback import check_feedback
+        from xiaobai_runtime.telemetry_policy import CriticalTemperatureError
+        with self.assertRaises(CriticalTemperatureError):
+            check_feedback(5,{**self.state,'temperature_c':101},self.motor)
+        for change in ({'position':4096},{'position':1800},{'status_register':32},{'voltage_raw':100}):
+            with self.subTest(change=change),self.assertRaises(RuntimeError):
+                check_feedback(5,{**self.state,**change},self.motor)
+
+    def test_homing_uses_same_temperature_policy_including_unmapped_axes(self):
+        from xiaobai_runtime.homing import home_check
+        from xiaobai_runtime.telemetry_policy import CriticalTemperatureError
+        snapshot=dict(id=9,configured_min=1900,configured_max=2100,configured_max_temperature=80,
+                      configured_min_voltage_raw=40,configured_max_voltage_raw=90)
+        warnings=home_check({**self.state,'temperature_c':100},snapshot,2047,20,self.policy)
+        self.assertEqual(warnings[0]['kind'],'temperature')
+        with self.assertRaises(CriticalTemperatureError):
+            home_check({**self.state,'temperature_c':101},snapshot,2047,20,self.policy)
+        with self.assertRaisesRegex(RuntimeError,'hardware temperature'):
+            home_check({**self.state,'temperature_c':81},snapshot,2047,20)
+
+    def test_warning_recorder_coalesces_persistent_warnings_and_records_clearance(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.telemetry_policy import WarningRecorder,evaluate
+        records=[];recorder=WarningRecorder(records);high={**self.state,'load_raw':900}
+        with patch('builtins.print') as output:
+            for _ in range(5):recorder.observe(5,high,evaluate(5,high,self.policy))
+            self.assertEqual(output.call_count,1)
+            self.assertEqual(len(records),1);self.assertEqual(records[0]['count'],5)
+            lower={**self.state,'load_raw':801}
+            recorder.observe(5,lower,evaluate(5,lower,self.policy))
+            self.assertEqual(records[0]['first_value'],900)
+            self.assertEqual(records[0]['peak_value'],900);self.assertEqual(records[0]['value'],801)
+            recorder.observe(5,self.state,[])
+            self.assertTrue(records[0]['cleared']);self.assertFalse(recorder.active)
+            recorder.observe(5,high,evaluate(5,high,self.policy))
+            self.assertEqual(len(records),2)
+
+
+class IndependentRoundTests(unittest.TestCase):
+    def run_main(self,repeat=2,fail_prepare=0,fail_unload=0):
+        import json,tempfile
+        from pathlib import Path
+        from contextlib import ExitStack
+        from unittest.mock import Mock
+        import numpy as np
+        import mojia_performance as entry
+        from xiaobai_runtime.mapping import ROOT
+        data={name:json.loads((ROOT/path).read_text()) for name,path in {
+            'config':'mojia/person_gaze.json',
+            'profile':'mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000_PROFILE.json',
+            'inventory':'mojia/homing_axes.json','hardware':'mojia/startup_hardware.json',
+            'policy':'mojia/telemetry_policy.json'}.items()}
+        ids=data['profile']['diagnostic_command_ids'];events=[];receivers=[];prepared=[];unloaded=[]
+        def prepare(*args):
+            report=args[8];prepared.append(report);events.append('prepare')
+            report['homing']={'completed':True}
+            if len(prepared)==fail_prepare:raise RuntimeError('Preparation failure')
+        def receiver(config):
+            r=Mock();receivers.append(r)
+            r.wait_ready.side_effect=lambda:events.append('ready')
+            r.close.side_effect=lambda:events.append('receiver_close')
+            return r
+        def play(*args,**kwargs):
+            events.append('play')
+            np.testing.assert_array_equal(args[2][0],np.full(len(args[1]),2047.))
+            return dict(completed=True,full_clip_requested=True,audio_seconds_at_stop=.05,
+                        sent_frames=3,skipped_source_frames=0)
+        def unload(profile,report):
+            unloaded.append(report);events.append('unload')
+            if len(unloaded)==fail_unload:raise RuntimeError('Cleanup failure')
+            report['tongue_disabled_after']=True
+        with tempfile.TemporaryDirectory() as tmp,ExitStack() as stack:
+            root=Path(tmp);output=root/'run'
+            stack.enter_context(patch.object(entry,'ROOT',root))
+            stack.enter_context(patch.object(entry,'read_json',side_effect=lambda path:copy.deepcopy(data[str(path)])))
+            stack.enter_context(patch.object(entry,'load_targets',return_value=(ids,np.full((3,len(ids)),2047.),60)))
+            stack.enter_context(patch.object(entry,'prepare_round',side_effect=prepare))
+            stack.enter_context(patch.object(entry,'TargetReceiver',side_effect=receiver))
+            adapter=stack.enter_context(patch.object(entry,'MojiaPlaybackGaze'))
+            stack.enter_context(patch.object(entry,'play',side_effect=play))
+            stack.enter_context(patch.object(entry,'unload_tongue',side_effect=unload))
+            stack.enter_context(patch('sys.argv',['show','--config','config','--profile','profile',
+                '--targets','targets','--home-inventory','inventory','--hardware-preset','hardware',
+                '--telemetry-policy','policy','--output',str(output),'--repeat',str(repeat),
+                '--authorized-tongue-observation']))
+            if fail_prepare or fail_unload:
+                with self.assertRaisesRegex(RuntimeError,'Preparation failure|Cleanup failure'):entry.main()
+            else:entry.main()
+            result=json.loads((output/'summary.json').read_text())
+            reports=[json.loads(p.read_text()) for p in sorted(output.glob('round_*/preparation.json'))]
+            return result,reports,events,receivers,adapter.call_count
+
+    def test_each_round_prepares_owns_fresh_receiver_and_controller_and_cleans_up(self):
+        result,reports,events,receivers,controllers=self.run_main()
+        self.assertTrue(result['completed']);self.assertEqual(len(result['rounds']),2)
+        self.assertEqual(events,['prepare','ready','play','receiver_close','unload']*2)
+        self.assertEqual(len(receivers),2);self.assertIsNot(receivers[0],receivers[1])
+        self.assertEqual(controllers,2)
+        self.assertTrue(all(r['completed'] and r['homing']['completed'] and r['tongue_disabled_after'] for r in reports))
+
+    def test_second_preparation_failure_cleans_up_and_never_starts_second_or_third_song(self):
+        result,reports,events,receivers,controllers=self.run_main(repeat=3,fail_prepare=2)
+        self.assertFalse(result['completed']);self.assertEqual(len(result['rounds']),1)
+        self.assertEqual(events.count('prepare'),2);self.assertEqual(events.count('play'),1)
+        self.assertEqual(events.count('unload'),2)
+        self.assertTrue(result['tongue_disabled_after'])
+        self.assertFalse(reports[1]['completed']);self.assertEqual(reports[1]['error'],'Preparation failure')
+
+    def test_unverified_cleanup_prevents_next_round_and_is_not_retried(self):
+        result,reports,events,receivers,controllers=self.run_main(fail_unload=1)
+        self.assertFalse(result['completed']);self.assertEqual(result['rounds'],[])
+        self.assertEqual(events.count('prepare'),1);self.assertEqual(events.count('unload'),1)
+        self.assertFalse(reports[0]['completed']);self.assertEqual(reports[0]['cleanup_error'],'Cleanup failure')
 
 
 class HomingTests(unittest.TestCase):
+    def test_homing_rechecks_single_hot_sample_for_inventory_axes(self):
+        import json
+        from xiaobai_runtime.mapping import ROOT
+        axes,bus,clock,pos,speeds,enabled,writes,restores=self.fixture()
+        original=bus.feedback;injected=False
+        def feedback(sid):
+            nonlocal injected
+            state=original(sid)
+            if sid==4 and not injected:
+                injected=True;return {**state,'temperature_c':165}
+            return state
+        bus.feedback=feedback;report={}
+        policy=json.loads((ROOT/'mojia/telemetry_policy.json').read_text())
+        with patch('xiaobai_runtime.homing.time',clock),patch('xiaobai_runtime.telemetry_policy.time.sleep'):
+            home_all(bus,axes,{},lambda:None,report,max_speed=60,telemetry_policy=policy)
+        self.assertTrue(report['completed'])
+        self.assertEqual(len(report['sensor_confirmations']),1)
+        self.assertTrue(report['sensor_confirmations'][0]['recovered'])
+        self.assertEqual(report['sensor_confirmations'][0]['samples'][0]['state']['temperature_c'],165)
+
     def test_home_only_covers_all35_without_starting_camera_audio_or_volume(self):
         import json,tempfile
         from pathlib import Path
@@ -35,6 +394,9 @@ class HomingTests(unittest.TestCase):
         bus.snapshot.side_effect=snapshot
         ids=[m['id'] for m in p['motors'] if m['id'] not in (32,33,34)]
         def read_json(path):
+            if str(path).endswith('telemetry_policy.json'):
+                return dict(schema_version='mojia-telemetry-policy-1.0',load_warning_raw=800,
+                            temperature_warning_c=80,temperature_stop_c=100,hardware_protection='preserve')
             return copy.deepcopy(c if str(path)=='config' else p if str(path)=='profile' else inventory)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)

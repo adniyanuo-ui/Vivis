@@ -1,6 +1,7 @@
 """Configured neutral poses and a shared smooth startup move; no axis IDs here."""
 import math
 import time
+from .telemetry_policy import evaluate,WarningRecorder,verify_sample
 
 
 def write_ram_verified(bus,sid,address,value,width=1):
@@ -35,17 +36,18 @@ def validate_home_axes(axes,snapshots):
             raise RuntimeError(f'ID{sid}: home speed unit has not been commissioned')
 
 
-def home_check(state,snapshot,neutral=None,tolerance=0):
+def home_check(state,snapshot,neutral=None,tolerance=0,telemetry_policy=None):
     sid=snapshot['id']
     position=state['position']
     near_home=neutral is not None and abs(position-neutral)<=tolerance
     if not 0<=position<=4095 or (not snapshot['configured_min']<=position<=snapshot['configured_max'] and not near_home):
         raise RuntimeError(f'ID{sid}: home position outside device limits')
     if state['status_register']:raise RuntimeError(f'ID{sid}: home servo alarm {state["status_register"]}')
-    if state['temperature_c']>=snapshot['configured_max_temperature']:
+    if not telemetry_policy and state['temperature_c']>=snapshot['configured_max_temperature']:
         raise RuntimeError(f'ID{sid}: home hardware temperature threshold reached')
     if not snapshot['configured_min_voltage_raw']<=state['voltage_raw']<=snapshot['configured_max_voltage_raw']:
         raise RuntimeError(f'ID{sid}: home voltage outside device limits')
+    return evaluate(sid,state,telemetry_policy) if telemetry_policy else []
 
 
 def homing_feedback_motor(motor,snapshot):
@@ -77,7 +79,7 @@ def smooth_home_targets(start,neutral,speed,accelerations=None):
     return duration,at
 
 
-def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,keep_enabled=()):
+def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,keep_enabled=(),telemetry_policy=None):
     """Home the configured inventory; restore speed RAM and temporary enables.
 
     Hardware acceleration/PID/deadband are preserved. Existing task protection
@@ -114,10 +116,16 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
                   planned_duration_s=duration,original_speeds=original,temporary_enable_ids=sorted(temporary),
                   neutral_targets=neutral,initial_positions={s['id']:s['position_raw'] for s in snapshots},
                   samples=[],communication_recoveries=recoveries,ram_writes=[],restored_speeds=False)
+    warning_recorder=WarningRecorder(report.setdefault('telemetry_warnings',[]))
     def check(sid,state):
         tolerance=task_motors.get(sid,{}).get('initial_settle_tolerance_counts',20)
-        home_check(state,states[sid],neutral[sid],tolerance)
-        if sid in task_motors:check_feedback(sid,state,homing_feedback_motor(task_motors[sid],states[sid]))
+        def validate(sample):
+            warnings=home_check(sample,states[sid],neutral[sid],tolerance,telemetry_policy)
+            if sid in task_motors:warnings=check_feedback(sid,sample,homing_feedback_motor(task_motors[sid],states[sid]))
+            return warnings
+        state,warnings=verify_sample(bus.feedback,sid,state,validate,telemetry_policy,
+            report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
+        warning_recorder.observe(sid,state,warnings)
         return state
     def read(sid):
         guard()

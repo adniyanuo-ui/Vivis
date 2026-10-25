@@ -118,6 +118,8 @@
 !/mojia/墨甲9.23.json
 !/mojia/person_gaze.json
 !/mojia/homing_axes.json
+!/mojia/startup_hardware.json
+!/mojia/telemetry_policy.json
 !/mojia/0001_MOJIA_MOTOR_TARGETS_60fps_PLAYBACK_PROFILE.json
 !/mojia/wz2_MOJIA_MOTOR_TARGETS_60fps_PROFILE.json
 !/mojia/wz2_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json
@@ -127,6 +129,8 @@
 !/mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_CONTEXT_PROFILE.json
 !/mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1800_PROFILE.json
 !/mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1200_PROFILE.json
+!/mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000_PROFILE.json
+!/mojia/wz2_expression15_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000_PROFILE.json
 !/mojia/accepted_tracking_preset.json
 !/xiaobai/person_gaze.json
 !/tests/

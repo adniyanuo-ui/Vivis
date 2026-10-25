@@ -11,6 +11,7 @@ import numpy as np
 from .mapping import live_preflight
 from .motion_limits import AccelerationLimiter
 from .protocol import Bus,ServoStatusError,CorruptResponse,ReadTimeout,ProtocolError
+from .telemetry_policy import evaluate,WarningRecorder,CriticalTemperatureError,verify_sample
 
 class SensorReadingError(RuntimeError):pass
 class PositionEdgeReadingError(RuntimeError):pass
@@ -64,15 +65,17 @@ def check_feedback(sid,state,motor):
                 and motor.get('device_min',motor['safe_min'])<=state['position']<=motor.get('device_max',motor['safe_max'])):
             position_error=PositionEdgeReadingError(message)
         else:raise RuntimeError(message)
-    if (state['load_raw']&1023)>=motor['max_load_raw']:raise RuntimeError(f'{sid}: excessive load ({state["load_raw"]&1023})')
+    policy=motor.get('telemetry_policy')
+    if not policy and (state['load_raw']&1023)>=motor['max_load_raw']:raise RuntimeError(f'{sid}: excessive load ({state["load_raw"]&1023})')
     if state['status_register']:raise ServoStatusError(sid,state['status_register'])
     if position_error is not None:raise position_error
-    if state['temperature_c']>=motor['max_temperature_c']:raise SensorReadingError(f'{sid}: over temperature ({state["temperature_c"]} C >= {motor["max_temperature_c"]} C)')
+    if not policy and state['temperature_c']>=motor['max_temperature_c']:raise SensorReadingError(f'{sid}: over temperature ({state["temperature_c"]} C >= {motor["max_temperature_c"]} C)')
     if motor.get('max_voltage_raw') is not None:
         if not motor['min_voltage_raw']<=state['voltage_raw']<=motor['max_voltage_raw']:
             raise SensorReadingError(f'{sid}: voltage feedback outside configured operating range')
+    return evaluate(sid,state,policy) if policy else []
 
-def verified_feedback(bus,sid,motor,confirm,records,should_stop=lambda:False,initial=None):
+def verified_feedback(bus,sid,motor,confirm,records,should_stop=lambda:False,initial=None,on_warnings=None,on_received=None):
     """Hold command transmission while confirming sensor or opted-in edge samples.
     Never accept out-of-range positions as healthy, relax device/load limits,
     communication failures or non-voltage servo alarms.
@@ -85,7 +88,10 @@ def verified_feedback(bus,sid,motor,confirm,records,should_stop=lambda:False,ini
         state=None
         try:
             state=initial if attempt==0 and initial is not None else bus.feedback(sid)
-            check_feedback(sid,state,motor)
+            if on_received is not None:on_received(sid,state)
+            state,warnings=verify_sample(bus.feedback,sid,state,lambda sample:check_feedback(sid,sample,motor),
+                motor.get('telemetry_policy'),records,should_stop,on_received)
+            if on_warnings is not None:on_warnings(sid,state,warnings)
         except (SensorReadingError,ServoStatusError,PositionEdgeReadingError) as exc:
             if not confirm or isinstance(exc,ServoStatusError) and exc.status!=1:raise
             if record is None:
@@ -206,10 +212,14 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     result['software_acceleration_limits']={m['id']:m['max_acceleration_counts_s2']
         for m in profile['motors'] if m.get('max_acceleration_counts_s2') is not None}
     result['acceleration_prelimited_ids']=sorted(prelimited)
+    warning_recorder=WarningRecorder(result.setdefault('telemetry_warnings',[]))
+    def received(sid,state):
+        result['last_feedback_received']={'id':sid,**state}
     def should_stop():return stop.is_set() or Path(stop_file).exists()
     def feedback_checked(sid,initial=None,observed_at=None):
         if should_stop():raise RuntimeError('Operator stop during feedback')
         last_feedback_attempt[sid]=time.monotonic()
+        if initial is not None:result['last_feedback_received']={'id':sid,**initial}
         if record_only:
             try:
                 state=initial if initial is not None else bus.feedback(sid)
@@ -219,12 +229,14 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                     'sdk_response':getattr(bus,'last_sdk_response',None)})
                 return None  # Never invent a position from damaged/missing data.
             try:check_feedback(sid,state,motors[sid])
+            except CriticalTemperatureError:raise
             except RuntimeError as exc:
                 result['feedback_notifications'].append({'id':sid,'monotonic':time.monotonic(),
                     'error':str(exc),'valid_payload':True,'state':state})
         else:
             state=verified_feedback(bus,sid,motors[sid],profile.get('confirm_sensor_transients') is True,
-                                    result['sensor_confirmations'],should_stop,initial)
+                                    result['sensor_confirmations'],should_stop,initial,
+                                    on_warnings=warning_recorder.observe,on_received=received)
         last_good_feedback[sid]=time.monotonic()
         if not motors[sid]['safe_min']<=state['position']<=motors[sid]['safe_max']:
             result.setdefault('position_tolerance_samples',[]).append({
@@ -232,7 +244,10 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 'safe_max':motors[sid]['safe_max'],
                 'tolerance_counts':motors[sid].get('position_feedback_tolerance_counts',0)})
         result['last_feedback']={'id':sid,**state}
-        if mojia_gaze:gaze_override.observe(sid,state,time.monotonic() if observed_at is None else observed_at)
+        if mojia_gaze:
+            gaze_override.telemetry_warnings=[{k:r[k] for k in ('id','kind','value','threshold')}
+                                             for r in warning_recorder.active.values()]
+            gaze_override.observe(sid,state,time.monotonic() if observed_at is None else observed_at)
         return state
 
     def feedback_error(sid,exc):
@@ -288,7 +303,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             if motor.get('confirm_position_edge_counts'):
                 if (state['configured_min'],state['configured_max'])!=(motor['device_min'],motor['device_max']):
                     raise RuntimeError(f'{sid}: device limits changed; edge confirmation requires review')
-            if 'configured_max_temperature' in state and motor['max_temperature_c']>state['configured_max_temperature']:
+            if 'configured_max_temperature' in state and not motor.get('telemetry_policy') and motor['max_temperature_c']>state['configured_max_temperature']:
                 raise RuntimeError(f'{sid}: software temperature limit exceeds current device protection threshold')
             feedback={'position':state['position_raw'],**{k:state[k] for k in ['temperature_c','load_raw','status_register']}}
             if 'voltage_raw' in state:feedback['voltage_raw']=state['voltage_raw']
@@ -299,6 +314,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 if not motor['safe_min']-tolerance<=state['position_raw']<=motor['safe_max']+tolerance:
                     raise RuntimeError('Startup position is outside the bounded command envelope')
             feedback=feedback_checked(sid,feedback);positions.append(feedback['position'])
+            if motor.get('telemetry_policy'):
+                result.setdefault('hardware_temperature_limits',{})[str(sid)]=state.get('configured_max_temperature')
         last=np.clip(np.array(positions,dtype=float),
                      np.array([motors[sid]['safe_min'] for sid in ids]),
                      np.array([motors[sid]['safe_max'] for sid in ids]))

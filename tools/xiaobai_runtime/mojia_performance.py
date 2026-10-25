@@ -85,7 +85,7 @@ class MojiaPlaybackGaze:
         self.status_path=status_path;self.last_publish=0.;self.round=round_number;self.repeat=repeat
         self.publisher=PreviewPublisher(status_path) if status_path is not None else None
         self.audio_seconds=0.;self.duration=0.;self.feedback=None
-        self.returning=False
+        self.returning=False;self.telemetry_warnings=[]
 
     def prepare(self, trajectory, measured, snapshots, now):
         for s in snapshots:
@@ -135,7 +135,7 @@ class MojiaPlaybackGaze:
 
     def publish(self,data):
         if self.publisher is not None:
-            self.publisher.submit(dict(updated_monotonic=time.monotonic(),**data))
+            self.publisher.submit(dict(updated_monotonic=time.monotonic(),telemetry_warnings=self.telemetry_warnings,**data))
 
     def finish(self,completed,error):
         if self.publisher is not None:

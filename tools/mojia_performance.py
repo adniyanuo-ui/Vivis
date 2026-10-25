@@ -15,6 +15,8 @@ from xiaobai_runtime.playback import play, check_feedback,startup_feedback
 from xiaobai_runtime.person_gaze import TargetReceiver
 from xiaobai_runtime.mojia_performance import tracking_profile, MojiaPlaybackGaze
 from xiaobai_runtime.homing import home_all,validate_home_axes,home_check,homing_feedback_motor,write_ram_verified
+from xiaobai_runtime.startup_settings import startup_plan,restore_startup_settings
+from xiaobai_runtime.telemetry_policy import apply_policy,WarningRecorder,verify_sample
 
 MOUTH_IDS=(12,13,27,28,29,31)
 
@@ -69,7 +71,7 @@ def configure_show_volume(device):
                      digital_trim=gain,output_amplitude_factor=3.,before=before,after=after)
 
 
-def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.):
+def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,telemetry_policy=None):
     monitored=list(ids)+[32,33,34]
     if len(set(monitored))!=len(monitored):raise ValueError('Repeated motor ownership')
     p=tracking_profile(config,profile,monitored)
@@ -86,6 +88,11 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.):
         p['acceptance_exception']=dict(id=29,load_threshold_raw=1023,temperature_ceiling_c=80,
                                       initial_settle_tolerance_counts=40,
                                       basis='Authorized ID29 observation; measured 36-count startup residual within device feedback range')
+    if telemetry_policy is not None:
+        apply_policy(p,telemetry_policy)
+        if authorize_tongue:
+            p['acceptance_exception']=dict(id=29,initial_settle_tolerance_counts=40,
+                basis='Existing authorized startup residual; load/temperature use the common telemetry policy')
     trajectory=np.column_stack([positions,np.full((len(positions),3),2047.)])
     for sid in p['gaze_owner_ids']:trajectory[:,monitored.index(sid)]=2047.
     trajectory,p['mouth_gain_report']=mouth_gain_targets(p,monitored,trajectory,mouth_gain)
@@ -103,19 +110,139 @@ def recover_tongue(bus,motor,guard,events,speed=900):
         raise RuntimeError('ID29 device limits changed')
     envelope={**motor,'feedback_min':min(s['position_raw'],motor['device_min']),
               'feedback_max':max(s['position_raw'],motor['device_max'])}
-    check_feedback(29,feedback(s),envelope)
+    warnings=WarningRecorder(events)
+    def checked(state):
+        fresh,alerts=verify_sample(bus.feedback,29,state,lambda sample:check_feedback(29,sample,envelope),
+            motor.get('telemetry_policy'),events,should_stop=lambda:guard() or False)
+        warnings.observe(29,fresh,alerts)
+        return fresh
+    checked(feedback(s))
     guard();bus.goals({29:2047},{29:speed})
     if bus.read(29,40,1)==b'\x00':
         events.append(dict(kind='enable',**write_ram_verified(bus,29,40,1)))
-    guard();bus.goals({29:2047},{29:speed});deadline=time.monotonic()+10;healthy=0
+    guard();bus.goals({29:2047},{29:speed});deadline=time.monotonic()+10;healthy=0;f=feedback(s)
     while time.monotonic()<deadline:
-        guard();f=bus.feedback(29);events.append(f);check_feedback(29,f,envelope)
+        guard();f=checked(bus.feedback(29));events.append(f)
         healthy=healthy+1 if abs(f['position']-2047)<=motor['initial_settle_tolerance_counts'] else 0
         if healthy>=2:
             check_feedback(29,f,motor)
             return
         time.sleep(.1)
-    raise RuntimeError('ID29 did not reach its authorized startup corridor')
+    raise RuntimeError(f'ID29 did not reach its authorized startup corridor: '
+        f'target=2047 position={f["position"]} tolerance={motor["initial_settle_tolerance_counts"]} '
+        f'load={f["load_raw"]&1023} temperature={f["temperature_c"]} status={f["status_register"]}')
+
+
+def recovery_clearance_plan(inventory,motors):
+    """Machine-specific coupling is configured with the homing inventory."""
+    c=inventory.get('recovery_clearance')
+    if c is None:return None
+    sid=c['moving_id'];recovering=c['recovering_id']
+    if sid==recovering or sid not in motors or recovering not in motors:
+        raise ValueError('Invalid recovery clearance ownership')
+    position=c['position'];speed=c['max_speed_counts_s'];tolerance=c['settle_tolerance_counts']
+    m=motors[sid]
+    if (type(position) is not int or not max(m['safe_min'],m['device_min'])<=position<=min(m['safe_max'],m['device_max'])
+            or type(speed) is not int or not 1<=speed<=m['max_speed_counts_s']
+            or type(tolerance) is not int or not 1<=tolerance<=40):
+        raise ValueError('Recovery clearance exceeds reviewed position/speed/tolerance limits')
+    axis=dict(id=sid,neutral=position,neutral_confirmed=True,model_raw_expected=m['model_raw_expected'])
+    return c,axis,{**m,'neutral':position,'initial_settle_tolerance_counts':tolerance}
+
+
+def prepare_recovery_clearance(bus,plan,snapshots,motors,guard,report,home_speed):
+    if plan is None:return
+    c,axis,motor=plan;states={s['id']:s for s in snapshots}
+    recovering=states[c['recovering_id']];m=motors[c['recovering_id']]
+    if recovering['torque_enable']!=0 or abs(recovering['position_raw']-m['neutral'])<=m.get('initial_settle_tolerance_counts',20):
+        report.update(required=False)
+        return
+    report.update(required=True,reason='Disabled recovery axis requires the configured mechanical clearance')
+    print(f'RECOVERY CLEARANCE ID{axis["id"]} -> {axis["neutral"]} before ID{c["recovering_id"]} recovery',flush=True)
+    home_all(bus,[axis],{axis['id']:motor},guard,report,min(home_speed,c['max_speed_counts_s']),
+             keep_enabled=[axis['id']],telemetry_policy=motor.get('telemetry_policy'))
+
+
+def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,telemetry_policy,guard,report,directory,publish):
+    """Fresh full-inventory checks, tuning restoration and homing for one round."""
+    home_ids=[a['id'] for a in home_axes];home_neutrals={a['id']:a['neutral'] for a in home_axes}
+    motors={m['id']:m for m in profile['motors']}
+    report.update(startup_events=[],homing={})
+    warning_recorder=WarningRecorder(report.setdefault('telemetry_warnings',[]))
+    bus=None
+    try:
+        guard()
+        print(f'TELEMETRY load>{telemetry_policy["load_warning_raw"]}: warning; '
+              f'temperature>{telemetry_policy["temperature_warning_c"]}C: warning; '
+              f'temperature>{telemetry_policy["temperature_stop_c"]}C: stop after '
+              f'{telemetry_policy.get("temperature_stop_consecutive_samples",1)} consecutive samples; hardware protection preserved',flush=True)
+        if args.usb_volume_times_three and not args.home_only:
+            profile['audio_gain'],report['audio_volume']=configure_show_volume(profile['audio_device'])
+            (directory/'profile.json').write_text(json.dumps(profile,ensure_ascii=False,indent=2)+'\n')
+        from xiaobai_runtime.feetech_sdk import OfficialSDKBus
+        bus=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20,
+                           trace_path=directory/'homing_serial_trace.json')
+        snapshot_deadline=time.monotonic()+10
+        snapshots=[startup_feedback(bus.snapshot,sid,snapshot_deadline,
+                    report.setdefault('startup_communication_recoveries',[]),should_stop=lambda:guard() or False)
+                   for sid in home_ids]
+        validate_home_axes(home_axes,snapshots)
+        original_speeds={s['id']:int.from_bytes(bytes.fromhex(s['state_40_70_hex'])[6:8],'little') for s in snapshots}
+        report['startup_snapshots']=snapshots
+        # Review every axis before making any startup write.
+        for s in snapshots:
+            sid=s['id']
+            if sid not in motors:
+                fresh,alerts=verify_sample(bus.feedback,sid,feedback(s),
+                    lambda sample:home_check(sample,s,home_neutrals[sid],20,telemetry_policy),telemetry_policy,
+                    report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
+                warning_recorder.observe(sid,fresh,alerts)
+                continue
+            m=motors[sid]
+            recovery=sid==29 and s['torque_enable']==0 and args.authorized_tongue_observation
+            if (s['configured_min'],s['configured_max'])!=(m['device_min'],m['device_max']):
+                raise RuntimeError(f'ID{sid}: device limits changed; review home/task configuration')
+            if recovery:startup_target(s,m,False,True)
+            if not recovery:
+                # The explicitly requested all-axis home primes disabled axes
+                # at measured positions before enabling; playback still requires torque.
+                def validate(sample):
+                    home_check(sample,s,m['neutral'],m.get('initial_settle_tolerance_counts',20),telemetry_policy)
+                    return check_feedback(sid,sample,homing_feedback_motor(m,s))
+                fresh,alerts=verify_sample(bus.feedback,sid,feedback(s),validate,telemetry_policy,
+                    report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
+                warning_recorder.observe(sid,fresh,alerts)
+        if hardware_preset is not None:
+            # Validate the complete inventory before the first parameter write.
+            startup_plan(hardware_preset,snapshots,args.home_speed)
+            original_speeds=restore_startup_settings(bus,hardware_preset,snapshots,args.home_speed,
+                guard,report.setdefault('hardware_restore',{}))
+            print('STARTUP hardware tuning restored and verified; homing speed remains capped',flush=True)
+        if args.authorized_tongue_observation:
+            prepare_recovery_clearance(bus,clearance_plan,snapshots,motors,guard,
+                report.setdefault('recovery_clearance',{}),args.home_speed)
+            recover_tongue(bus,motors[29],guard,report['startup_events'],speed=min(args.home_speed,900))
+        publish('homing')
+        print(f'HOME {len(home_axes)} AXES START speed_cap={args.home_speed}',flush=True)
+        home_all(bus,home_axes,motors,guard,report['homing'],args.home_speed,original_speeds,keep_enabled=ids,
+                 telemetry_policy=telemetry_policy)
+        print('HOME COMPLETE; original speed settings restored',flush=True)
+        bus.close();bus=None
+    finally:
+        if bus is not None:bus.close()
+
+
+def unload_tongue(profile,report):
+    """Established per-run ending: unload ID29, retain the neck's holding torque."""
+    from xiaobai_runtime.feetech_sdk import OfficialSDKBus
+    bus=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20)
+    try:
+        result,status=bus.sdk.write1ByteTxRx(29,40,0)
+        report['tongue_disabled_after']=bus.read(29,40,1)==b'\x00'
+        report['tongue_disable_result']=[result,status]
+        if not report['tongue_disabled_after'] or status:
+            raise RuntimeError('ID29 end-of-round unload could not be verified')
+    finally:bus.close()
 
 
 def main():
@@ -128,6 +255,8 @@ def main():
     parser.add_argument('--repeat',type=int,default=3)
     parser.add_argument('--mouth-gain',type=float,default=1.,help='Mouth displacement multiplier, clipped to existing command limits')
     parser.add_argument('--home-inventory',type=Path,default=ROOT/'mojia/homing_axes.json')
+    parser.add_argument('--hardware-preset',type=Path,default=ROOT/'mojia/startup_hardware.json')
+    parser.add_argument('--telemetry-policy',type=Path,default=ROOT/'mojia/telemetry_policy.json')
     parser.add_argument('--home-speed',type=int,default=60,help='Temporary neutral homing speed cap in counts/s')
     parser.add_argument('--home-only',action='store_true',help='Home all inventory axes; no camera, audio or task execution')
     parser.add_argument('--face-fps',type=int,choices=(30,60),default=60,
@@ -137,23 +266,30 @@ def main():
     parser.add_argument('--hold-vertical-eyes',action='store_true',help='Hold ID7/22: neither song nor tracking may send them position commands')
     parser.add_argument('--check',action='store_true')
     args=parser.parse_args()
-    if not 1<=args.repeat<=10:parser.error('Repeat must be 1..10')
+    if not 1<=args.repeat<=20:parser.error('Repeat must be 1..20')
     if not 1<=args.home_speed<=32767:parser.error('Home speed must be within 1..32767')
     config,original=read_json(args.config),read_json(args.profile)
+    telemetry_policy=read_json(args.telemetry_policy)
     if args.hold_vertical_eyes:
         config['control']['vertical_enabled']=False
         config['control']['axes']=[a for a in config['control']['axes'] if a['id'] not in (7,22)]
         config['control']['held_eye_ids']=[7,22]
     ids,positions,fps=load_targets(args.targets,original,args.audio,ROOT/'mojia/墨甲9.23.json')
-    profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation,args.mouth_gain)
+    profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation,args.mouth_gain,telemetry_policy)
     if fps!=60:parser.error('The reviewed combined controller requires the 60 FPS source')
     profile['face_update_hz']=args.face_fps
-    home_axes=read_json(args.home_inventory)['axes'];home_ids=[a['id'] for a in home_axes]
-    home_neutrals={a['id']:a['neutral'] for a in home_axes}
+    home_inventory=read_json(args.home_inventory)
+    home_axes=home_inventory['axes'];home_ids=[a['id'] for a in home_axes]
     if (len(set(home_ids))!=len(home_ids) or not set(ids)<=set(home_ids)
             or any(type(a.get('neutral')) is not int or a.get('neutral_confirmed') is not True for a in home_axes)):
         parser.error('Home inventory must cover every task axis with confirmed neutrals')
     motors={m['id']:m for m in profile['motors']}
+    clearance_plan=recovery_clearance_plan(home_inventory,motors)
+    hardware_preset=read_json(args.hardware_preset) if not args.home_only else None
+    if hardware_preset is not None:
+        expected={a['id']:a for a in hardware_preset['axes']}
+        if set(expected)!=set(motors) or any(expected[sid]['speed_raw']!=m['max_speed_counts_s'] for sid,m in motors.items()):
+            parser.error('Startup hardware inventory/speeds differ from task profile')
     if any(a['neutral']!=motors[a['id']]['neutral'] for a in home_axes if a['id'] in motors):
         parser.error('Home inventory and task neutrals differ')
     if args.check:
@@ -161,14 +297,19 @@ def main():
                              gaze_owner_ids=profile['gaze_owner_ids'],fps=fps,repeat=args.repeat,
                              face_fps=args.face_fps,scheduled_feedback=profile['scheduled_feedback'],
                              home_ids=home_ids,home_speed=args.home_speed,home_only=args.home_only,
+                             hardware_preset=str(args.hardware_preset) if hardware_preset is not None else None,
+                             telemetry_policy=telemetry_policy,
+                             repeat_mode='independent_full_cycle',preparation_each_round=True,
                              mouth_gain_report=profile['mouth_gain_report'],
                              software_acceleration_counts_s2={m['id']:m['max_acceleration_counts_s2'] for m in profile['motors']
                                  if m.get('max_acceleration_counts_s2') is not None},
                              volume_times_three=args.usb_volume_times_three and not args.home_only)))
         return
     args.output.mkdir(parents=True,exist_ok=False)
-    for name,data in [('config',config),('profile',profile),('home_inventory',dict(axes=home_axes))]:
+    for name,data in [('config',config),('profile',profile),('home_inventory',home_inventory)]:
         (args.output/f'{name}.json').write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
+    if hardware_preset is not None:
+        (args.output/'hardware_preset.json').write_text(json.dumps(hardware_preset,ensure_ascii=False,indent=2)+'\n')
     (args.output/'mouth_gain_report.json').write_text(json.dumps(profile['mouth_gain_report'],indent=2)+'\n')
     stop_file=ROOT/'outputs/mojia/STOP';stopped=False
     def stop(*_):
@@ -178,6 +319,7 @@ def main():
     def guard():
         if stopped or stop_file.exists():raise RuntimeError('Operator stop')
     summary=dict(completed=False,rounds=[],error=None,startup_events=[],tongue_disabled_after=False,mouth_motion_gain=args.mouth_gain)
+    summary.update(repeat_mode='independent_full_cycle',requested_rounds=args.repeat,cleanup_attempted=False)
     summary['homing']={}
     status_path=ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
     status_path.parent.mkdir(parents=True,exist_ok=True)
@@ -187,84 +329,68 @@ def main():
             state=state,error=error,command_ids=profile['diagnostic_command_ids']))+'\n')
         temporary.replace(status_path)
     publish('starting')
-    receiver=bus=None
-    motors={m['id']:m for m in profile['motors']}
+    receiver=None
     try:
-        guard()
-        if args.usb_volume_times_three and not args.home_only:
-            profile['audio_gain'],summary['audio_volume']=configure_show_volume(profile['audio_device'])
-            (args.output/'profile.json').write_text(json.dumps(profile,ensure_ascii=False,indent=2)+'\n')
-        from xiaobai_runtime.feetech_sdk import OfficialSDKBus
-        bus=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20,
-                           trace_path=args.output/'homing_serial_trace.json')
-        snapshot_deadline=time.monotonic()+10
-        snapshots=[startup_feedback(bus.snapshot,sid,snapshot_deadline,
-                    summary.setdefault('startup_communication_recoveries',[]),should_stop=lambda:guard() or False)
-                   for sid in home_ids]
-        validate_home_axes(home_axes,snapshots)
-        original_speeds={s['id']:int.from_bytes(bytes.fromhex(s['state_40_70_hex'])[6:8],'little') for s in snapshots}
-        summary['startup_snapshots']=snapshots
-        # Review every axis before making any startup write.
-        for s in snapshots:
-            sid=s['id']
-            if sid not in motors:
-                home_check(feedback(s),s,home_neutrals[sid],20)
-                continue
-            m=motors[sid]
-            recovery=sid==29 and s['torque_enable']==0 and args.authorized_tongue_observation
-            if (s['configured_min'],s['configured_max'])!=(m['device_min'],m['device_max']):
-                raise RuntimeError(f'ID{sid}: device limits changed; review home/task configuration')
-            if recovery:startup_target(s,m,False,True)
-            if not recovery:
-                # The explicitly requested all-axis home primes disabled axes
-                # at measured positions before enabling; playback still requires torque.
-                home_check(feedback(s),s,m['neutral'],m.get('initial_settle_tolerance_counts',20))
-                check_feedback(sid,feedback(s),homing_feedback_motor(m,s))
-            if not args.home_only and sid in MOUTH_IDS:
-                ram=bytes.fromhex(s['state_40_70_hex'])
-                if ram[1]!=0 or int.from_bytes(ram[6:8],'little')!=900:
-                    raise RuntimeError(f'ID{sid}: expected saved mouth acceleration0/speed900')
-        if args.authorized_tongue_observation:
-            recover_tongue(bus,motors[29],guard,summary['startup_events'],speed=min(args.home_speed,900))
-        publish('homing')
-        print(f'HOME {len(home_axes)} AXES START speed_cap={args.home_speed}',flush=True)
-        home_all(bus,home_axes,motors,guard,summary['homing'],args.home_speed,original_speeds,keep_enabled=ids)
-        print('HOME COMPLETE; original speed settings restored',flush=True)
-        bus.close();bus=None
         if args.home_only:
+            prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,telemetry_policy,
+                          guard,summary,args.output,publish)
             summary['completed']=True
             return
-        guard();receiver=TargetReceiver(config);receiver.wait_ready()
         for lap in range(1,args.repeat+1):
             guard();directory=args.output/f'round_{lap}';directory.mkdir()
-            override=MojiaPlaybackGaze(config,profile,ids,receiver,
-                ROOT/'outputs/mojia/right_camera_tracking/control_status.json',lap,args.repeat)
-            print(f'ROUND {lap}/{args.repeat} START',flush=True)
-            result=play(profile,ids,trajectory,fps,args.audio,directory/'playback_log.json',stop_file,gaze_override=override)
-            summary['rounds'].append(dict(round=lap,completed=result['completed'],
-                full_clip_requested=result['full_clip_requested'],audio_seconds_at_stop=result['audio_seconds_at_stop'],
-                sent_frames=result['sent_frames'],skipped_source_frames=result['skipped_source_frames']))
+            startup=dict(completed=False,error=None,tongue_disabled_after=False)
+            summary['active_round']=lap
+            summary['tongue_disabled_after']=False;summary['cleanup_attempted']=False
+            publish('preparing')
+            print(f'ROUND {lap}/{args.repeat} PREPARE',flush=True)
+            try:
+                prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,telemetry_policy,
+                              guard,startup,directory,publish)
+                # Preserve top-level startup diagnostics for existing consumers.
+                summary['homing']=startup['homing']
+                guard();receiver=TargetReceiver(config);receiver.wait_ready()
+                override=MojiaPlaybackGaze(config,profile,ids,receiver,
+                    ROOT/'outputs/mojia/right_camera_tracking/control_status.json',lap,args.repeat)
+                print(f'ROUND {lap}/{args.repeat} START',flush=True)
+                result=play(profile,ids,trajectory,fps,args.audio,directory/'playback_log.json',stop_file,gaze_override=override)
+                if not result['completed'] or not result['full_clip_requested']:
+                    raise RuntimeError('Independent round did not complete the full clip')
+                round_result=dict(round=lap,completed=result['completed'],
+                    full_clip_requested=result['full_clip_requested'],audio_seconds_at_stop=result['audio_seconds_at_stop'],
+                    sent_frames=result['sent_frames'],skipped_source_frames=result['skipped_source_frames'],
+                    preparation=str(directory/'preparation.json'))
+                startup['playback_completed']=True
+                del result
+            except BaseException as exc:
+                startup['error']=str(exc)
+                raise
+            finally:
+                if receiver is not None:
+                    try:receiver.close()
+                    except Exception as exc:startup['cleanup_error']='Vision receiver: '+str(exc)
+                    finally:receiver=None
+                if args.authorized_tongue_observation:
+                    summary['cleanup_attempted']=True
+                    try:unload_tongue(profile,startup)
+                    except Exception as exc:
+                        startup['cleanup_error']=str(exc)
+                summary['tongue_disabled_after']=startup['tongue_disabled_after']
+                startup['completed']=startup.get('playback_completed',False) and not startup.get('error') and not startup.get('cleanup_error')
+                (directory/'preparation.json').write_text(json.dumps(startup,ensure_ascii=False,indent=2)+'\n')
+            if startup.get('cleanup_error'):raise RuntimeError(startup['cleanup_error'])
+            summary['rounds'].append(round_result)
             (args.output/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
             print(f'ROUND {lap}/{args.repeat} COMPLETE',flush=True)
-            del result
         summary['completed']=True
     except BaseException as exc:
         summary['error']=str(exc)
         raise
     finally:
-        if bus is not None:bus.close()
         if receiver is not None:receiver.close()
         # Established tongue stop policy: unload only ID29 after the show;
         # preserve the supported neck's torque and its final bounded goal.
-        if args.authorized_tongue_observation:
-            try:
-                from xiaobai_runtime.feetech_sdk import OfficialSDKBus
-                cleanup=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20)
-                try:
-                    result,status=cleanup.sdk.write1ByteTxRx(29,40,0)
-                    summary['tongue_disabled_after']=cleanup.read(29,40,1)==b'\x00'
-                    summary['tongue_disable_result']=[result,status]
-                finally:cleanup.close()
+        if args.authorized_tongue_observation and not summary.get('cleanup_attempted'):
+            try:unload_tongue(profile,summary)
             except Exception as exc:summary['cleanup_error']=str(exc)
         for sig,handler in handlers.items():signal.signal(sig,handler)
         (args.output/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')

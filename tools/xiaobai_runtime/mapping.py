@@ -182,6 +182,14 @@ def live_preflight(profile,ids):
         temperature_ceiling=m.get('device_max_temperature_c',60)
         if not isinstance(temperature_ceiling,(int,float)) or not 1<=temperature_ceiling<=100:
             missing.append(f'{sid}:device_temperature')
+        elif m.get('telemetry_policy'):
+            from .telemetry_policy import validate_policy
+            try:validate_policy(m['telemetry_policy'])
+            except ValueError:missing.append(f'{sid}:telemetry_policy')
+            else:
+                if (m['max_temperature_c']!=m['telemetry_policy']['temperature_stop_c']
+                        or m['max_load_raw']!=m['telemetry_policy']['load_warning_raw']):
+                    missing.append(f'{sid}:telemetry_thresholds')
         elif m['max_temperature_c'] is not None and not 1<=m['max_temperature_c']<=temperature_ceiling:
             missing.append(f'{sid}:temperature')
         if m['max_load_raw'] is not None and not 1<=m['max_load_raw']<=1023:missing.append(f'{sid}:load')

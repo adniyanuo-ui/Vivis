@@ -141,7 +141,7 @@ def remove_ordinary_pulses(original, ids, weights, order, shapes, profile, candi
     return result
 
 
-def adjust_blinks(payload, profile, weights, order, shapes, speed=1200, audio_energy=None, keep_fraction=1.):
+def adjust_blinks(payload, profile, weights, order, shapes, speed=1000, audio_energy=None, keep_fraction=1.):
     if type(speed) is not int or not 1 <= speed <= 32767:
         raise ValueError('Invalid eyelid speed')
     ids = payload['motor_ids']; original = np.asarray(payload['positions'], dtype=float)
@@ -237,7 +237,7 @@ def main():
     parser.add_argument('--clip', type=Path, required=True)
     parser.add_argument('--audio', type=Path, default=ROOT/'exmple/0001.wav')
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--speed', type=int, default=1200)
+    parser.add_argument('--speed', type=int, default=1000)
     parser.add_argument('--keep-fraction', type=float, default=.7)
     args = parser.parse_args()
     profile = read_json(args.profile); payload = read_json(args.targets)

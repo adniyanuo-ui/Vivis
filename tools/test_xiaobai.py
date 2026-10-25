@@ -390,6 +390,69 @@ class AudioClockTests(unittest.TestCase):
                 clock.close()
 
 class PlaybackTests(unittest.TestCase):
+    def test_playback_rechecks_isolated_high_temperature_and_continues(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.playback import play
+        from xiaobai_runtime.telemetry_policy import apply_policy
+        profile,bus,clock=self.fixture()
+        policy=json.loads((ROOT/'mojia/telemetry_policy.json').read_text());apply_policy(profile,policy)
+        cold=dict(position=2047,temperature_c=43,load_raw=0,status_register=0)
+        samples=iter([{**cold,'temperature_c':165},cold])
+        bus.feedback.side_effect=lambda sid:next(samples,cold)
+        with tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.playback.Bus',return_value=bus),\
+                patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
+            result=play(profile,[2],np.full((3,1),2047.),60,'fake.wav',Path(directory)/'log.json',Path(directory)/'STOP')
+        self.assertTrue(result['completed']);record=result['sensor_confirmations'][0]
+        self.assertEqual(record['samples'][0]['state']['temperature_c'],165);self.assertTrue(record['recovered'])
+
+    def test_playback_stops_on_four_consecutive_hot_samples(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.playback import play
+        from xiaobai_runtime.telemetry_policy import apply_policy,CriticalTemperatureError
+        profile,bus,clock=self.fixture()
+        apply_policy(profile,json.loads((ROOT/'mojia/telemetry_policy.json').read_text()))
+        bus.feedback.side_effect=None
+        bus.feedback.return_value=dict(position=2047,temperature_c=165,load_raw=0,status_register=0)
+        with tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.playback.Bus',return_value=bus),\
+                patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
+            with self.assertRaisesRegex(CriticalTemperatureError,'4 consecutive'):
+                play(profile,[2],np.full((3,1),2047.),60,'fake.wav',Path(directory)/'log.json',Path(directory)/'STOP')
+            result=json.loads((Path(directory)/'log.json').read_text())
+        self.assertEqual(bus.feedback.call_count,4);self.assertEqual(result['sensor_confirmations'][0]['consecutive_high_samples'],4)
+
+    def test_explicit_load_and_temperature_warnings_allow_playback(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.playback import play
+        from xiaobai_runtime.telemetry_policy import apply_policy
+        profile,bus,clock=self.fixture()
+        apply_policy(profile,dict(schema_version='mojia-telemetry-policy-1.0',load_warning_raw=800,
+                     temperature_warning_c=80,temperature_stop_c=100,hardware_protection='preserve'))
+        bus.feedback.side_effect=None
+        bus.feedback.return_value=dict(position=2047,temperature_c=90,load_raw=900,status_register=0)
+        with tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.playback.Bus',return_value=bus),\
+                patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
+            result=play(profile,[2],np.full((3,1),2047.),60,'fake.wav',Path(directory)/'log.json',Path(directory)/'STOP')
+        self.assertTrue(result['completed'])
+        self.assertEqual({r['kind'] for r in result['telemetry_warnings']},{'load','temperature'})
+        self.assertTrue(all(r['count']>=1 for r in result['telemetry_warnings']))
+
+    def test_explicit_critical_temperature_stops_without_confirmation_or_record_only_bypass(self):
+        from unittest.mock import patch
+        from xiaobai_runtime.playback import play
+        from xiaobai_runtime.telemetry_policy import apply_policy,CriticalTemperatureError
+        for mode in ('stop_on_fault','record_only'):
+            profile,bus,clock=self.fixture();profile['feedback_policy']=mode
+            profile['confirm_sensor_transients']=True
+            apply_policy(profile,dict(schema_version='mojia-telemetry-policy-1.0',load_warning_raw=800,
+                         temperature_warning_c=80,temperature_stop_c=100,hardware_protection='preserve'))
+            bus.feedback.side_effect=None
+            bus.feedback.return_value=dict(position=2047,temperature_c=101,load_raw=0,status_register=0)
+            with tempfile.TemporaryDirectory() as directory,patch('xiaobai_runtime.playback.Bus',return_value=bus),\
+                    patch('xiaobai_runtime.playback.AudioClock',return_value=clock):
+                with self.assertRaises(CriticalTemperatureError):
+                    play(profile,[2],np.full((3,1),2047.),60,'fake.wav',Path(directory)/'log.json',Path(directory)/'STOP')
+            self.assertEqual(bus.feedback.call_count,1)
+
     def test_software_acceleration_is_applied_to_final_playback_commands(self):
         from unittest.mock import patch
         from xiaobai_runtime.playback import play
