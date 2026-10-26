@@ -34,7 +34,11 @@ class DeveloperConfigurationTests(unittest.TestCase):
         startup=robot.startup()['axes']
         neck=next(a for a in startup if a['id']==32)
         self.assertEqual(neck['device_limits'],[0,4095])
+        # User replaced ID32 and requested the same PID/deadband as its peers.
+        self.assertEqual(neck['pid_raw'],[32,32,0])
+        self.assertEqual(neck['deadband_raw'],[0,0])
         neck['device_limits']=[1600,2600]
+        neck.update(pid_raw=[16,26,0],deadband_raw=[5,5])
         self.assertEqual(digest(startup),baseline['startup_sha256'])
         self.assertEqual(digest(robot.home()['axes']),baseline['home_sha256'])
         self.assertEqual(robot.calibration_sha256,baseline['calibration_sha256'])

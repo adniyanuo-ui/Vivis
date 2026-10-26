@@ -890,13 +890,13 @@
       "playback_enabled": true,
       "acceleration_raw": 0,
       "pid_raw": [
-        16,
-        26,
+        32,
+        32,
         0
       ],
       "deadband_raw": [
-        5,
-        5
+        0,
+        0
       ]
     },
     {
