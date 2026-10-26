@@ -22,9 +22,13 @@ def camera_axes(config):
 
 def neck_command_limits(config,profile=None):
     n=config['neck'];mode=n.get('range_mode','offset')
-    if mode=='device':
-        if profile is None:raise ValueError('Device neck range requires the hardware profile')
+    if mode in ('device','configured'):
+        if profile is None:raise ValueError('Configured/device neck range requires the hardware profile')
         motor=next(m for m in profile['motors'] if m['id']==n['id'])
+        if mode=='configured':
+            if any(type(motor.get(key)) is not int for key in ('tracking_min','tracking_max')):
+                raise ValueError('Configured neck range requires integer tracking_min/tracking_max')
+            return motor['tracking_min'],motor['tracking_max']
         return motor['device_min'],motor['device_max']
     if mode!='offset':raise ValueError('Unknown neck range mode')
     return 2047-n['offset_counts'],2047+n['offset_counts']

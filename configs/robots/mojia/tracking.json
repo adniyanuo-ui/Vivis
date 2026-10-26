@@ -76,7 +76,7 @@
   "neck": {
     "id": 32,
     "sign": 1,
-    "range_mode": "device",
+    "range_mode": "configured",
     "direction_confirmed": false,
     "gain_counts_s": 120,
     "deadband": 0.14,

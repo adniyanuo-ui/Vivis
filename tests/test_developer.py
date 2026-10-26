@@ -24,8 +24,18 @@ class DeveloperConfigurationTests(unittest.TestCase):
         robot=Robot()
         baseline=json.loads((ROOT/'tests/fixtures/baseline.json').read_text())
         digest=lambda data:hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest()
-        self.assertEqual(digest({m['id']:m for m in robot.profile('0001')['motors']}),baseline['motors_sha256'])
-        self.assertEqual(digest(robot.startup()['axes']),baseline['startup_sha256'])
+        motors={m['id']:m for m in robot.profile('0001')['motors']}
+        # The cold-start readback is 0..4095. Only device identity metadata
+        # changed; the accepted tracking stroke remains 1600..2600.
+        self.assertEqual((motors[32]['device_min'],motors[32]['device_max']),(0,4095))
+        self.assertEqual((motors[32].pop('tracking_min'),motors[32].pop('tracking_max')),(1600,2600))
+        motors[32].update(device_min=1600,device_max=2600)
+        self.assertEqual(digest(motors),baseline['motors_sha256'])
+        startup=robot.startup()['axes']
+        neck=next(a for a in startup if a['id']==32)
+        self.assertEqual(neck['device_limits'],[0,4095])
+        neck['device_limits']=[1600,2600]
+        self.assertEqual(digest(startup),baseline['startup_sha256'])
         self.assertEqual(digest(robot.home()['axes']),baseline['home_sha256'])
         self.assertEqual(robot.calibration_sha256,baseline['calibration_sha256'])
 

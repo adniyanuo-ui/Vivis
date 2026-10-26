@@ -121,6 +121,43 @@ class MojiaGazeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'requires the hardware profile'):
             MojiaPursuit(c,[8,23,32],[300,300,900],True)
 
+    def test_cold_start_device_range_does_not_expand_tracking_or_change_other_modes(self):
+        from vivis.vision.pursuit import neck_command_limits
+        from vivis.runtime.show import prepare
+        from vivis.runtime.startup import startup_plan
+        robot=Robot();c=robot.tracking();p=robot.profile('wz2')
+        motor=next(m for m in p['motors'] if m['id']==32)
+        self.assertEqual((motor['device_min'],motor['device_max']),(0,4095))
+        self.assertEqual(neck_command_limits(c,p),(1600,2600))
+        ids=p['diagnostic_command_ids']
+        for mode in ('face','eyes','eyes-neck'):
+            runtime,_,_=prepare(c,p,ids,np.full((2,len(ids)),2047.),True,1.,robot.telemetry(),mode)
+            neck=next(m for m in runtime['motors'] if m['id']==32)
+            expected=(2027,2067) if mode=='face' else (1600,2600)
+            self.assertEqual((neck['safe_min'],neck['safe_max']),expected)
+            self.assertEqual(32 in runtime['gaze_owner_ids'],mode=='eyes-neck')
+        # The old device-limit mismatch is accepted only after explicitly
+        # updating the hardware definition, never by disabling verification.
+        preset=robot.startup();axis=next(a for a in preset['axes'] if a['id']==32)
+        preset.update(axes=[axis],excluded_ids=[])
+        raw=bytearray(40);raw[18]=4;ram=bytearray(31)
+        snapshot=dict(id=32,model_raw=10760,mode=0,status_register=0,
+            configured_min=0,configured_max=4095,config_0_39_hex=raw.hex(),state_40_70_hex=ram.hex())
+        _,plan=startup_plan(preset,[snapshot],60)
+        self.assertFalse(any(row['address'] in (9,10,11,12) for row in plan))
+        snapshot['configured_max']=3000
+        with self.assertRaisesRegex(RuntimeError,'limits/status mismatch'):
+            startup_plan(preset,[snapshot],60)
+
+    def test_configured_tracking_range_cannot_escape_device_bounds(self):
+        robot=Robot();c=robot.tracking();p=robot.profile('wz2')
+        motor=next(m for m in p['motors'] if m['id']==32)
+        for low,high in ((-1,2600),(1600,4096),(2050,2600),(2600,1600),(1600.5,2600)):
+            with self.subTest(low=low,high=high):
+                motor.update(tracking_min=low,tracking_max=high)
+                with self.assertRaises(ValueError):
+                    validate_mojia(c,p,robot.calibration,True,True)
+
     def test_final_count_at_device_limit_is_sent_and_return_window_scales(self):
         scheduler=NeckCommandScheduler(1601,10,900,False,endpoints=(1600,2600))
         self.assertEqual(scheduler.step(1600,10.05),(1600,900))

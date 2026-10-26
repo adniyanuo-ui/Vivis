@@ -218,7 +218,9 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
             m=motors[sid]
             recovery=sid==29 and s['torque_enable']==0 and args.authorized_tongue_observation
             if (s['configured_min'],s['configured_max'])!=(m['device_min'],m['device_max']):
-                raise RuntimeError(f'ID{sid}: device limits changed; review home/task configuration')
+                raise RuntimeError(f'ID{sid}: device limits changed; '
+                    f'actual=[{s["configured_min"]},{s["configured_max"]}] '
+                    f'expected=[{m["device_min"]},{m["device_max"]}]; review home/task configuration')
             if recovery:startup_target(s,m,False,True)
             if not recovery:
                 # The explicitly requested all-axis home primes disabled axes
