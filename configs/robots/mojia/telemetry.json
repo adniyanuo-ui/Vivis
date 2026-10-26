@@ -1,0 +1,8 @@
+{
+  "schema_version": "mojia-telemetry-policy-1.0",
+  "load_warning_raw": 800,
+  "temperature_warning_c": 80,
+  "temperature_stop_c": 100,
+  "temperature_stop_consecutive_samples": 4,
+  "hardware_protection": "preserve"
+}

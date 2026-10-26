@@ -1,0 +1,73 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>墨甲开发者平台｜语音与表情架构</title><style>body{font:17px system-ui,sans-serif;color:#1b3348;background:#eef2f6;margin:0}main{max-width:1280px;margin:30px auto;padding:24px;background:white;border-radius:14px}h1{font-size:30px}p{line-height:1.8}svg{width:100%;height:auto}a{color:#165dab}</style><main><h1>墨甲机电仿生头开发平台</h1><p>版本0.1 · 2026-10-26。客户负责上游AI与应用，本开发包提供表情映射、视觉跟踪示例及机电执行链路。Jetson为可选主控；本轮示例回放已有表情和音频，三个新入口待现场验收。</p><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 1120" role="img" aria-labelledby="title desc">
+<title id="title">墨甲开发平台整体数据链路</title><desc id="desc">客户上游经表情适配和标定，与视觉跟踪统一仲裁，由音频时间轴调度飞特驱动及35轴。上游AI为可选，现有示例回放已有数据。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#486783"/></marker></defs>
+<rect width="1280" height="1120" rx="16" fill="#f8fafc"/>
+<rect x="10" y="10" width="1260" height="310" rx="14" fill="#eaf2fb"/><text x="28" y="37" font-size="18" font-family="sans-serif" fill="#3d556b">客户上游／可选AI</text>
+<rect x="10" y="330" width="1260" height="315" rx="14" fill="#eaf6f0"/><text x="28" y="357" font-size="18" font-family="sans-serif" fill="#3d556b">表情中间层与视觉行为</text>
+<rect x="10" y="650" width="1260" height="455" rx="14" fill="#fff4e5"/><text x="28" y="677" font-size="18" font-family="sans-serif" fill="#3d556b">统一执行与机电本体</text>
+<path d="M610 105V130" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M610 195V215H360V240" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M610 195V215H880V240" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M360 305V350" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M360 415V450" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M360 515V550" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M540 582H650V660" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1070 415V450" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1070 515V550" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M1070 615V692H850" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M650 725V760" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M650 825V860" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M650 925V960" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M410 73H15V482H180" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="100" y="440" font-size="14" font-family="sans-serif" fill="#486783">情绪／显式表情</text>
+<path d="M880 305V325H1250V792H850" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="1050" y="778" font-size="14" font-family="sans-serif" fill="#486783">音频DAC时间轴</text>
+<path d="M200 382H220" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<path d="M850 992H1040V892H850" fill="none" stroke="#486783" stroke-width="2" marker-end="url(#arrow)"/>
+<text x="1010" y="1045" font-size="14" font-family="sans-serif" fill="#486783">位置／状态反馈</text>
+<rect x="410" y="40" width="400" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="610.0" y="67" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">客户应用／LLM</text>
+<text x="610.0" y="90" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">文本、情绪与行为意图</text>
+<rect x="410" y="130" width="400" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="610.0" y="157" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">TTS</text>
+<text x="610.0" y="180" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">产生实际播放音频</text>
+<rect x="180" y="240" width="360" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="360.0" y="267" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">A2F／其他表情生成器</text>
+<text x="360.0" y="290" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">可选；算力与授权独立确认</text>
+<rect x="700" y="240" width="360" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="880.0" y="267" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">音频播放</text>
+<text x="880.0" y="290" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">示例使用已有PCM16 WAV</text>
+<rect x="20" y="350" width="180" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="110.0" y="377" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">已有表情文件</text>
+<text x="110.0" y="400" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">示例直接输入</text>
+<rect x="220" y="350" width="320" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="380.0" y="377" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">通道语义适配</text>
+<text x="380.0" y="400" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">52基础表情／61文件约定</text>
+<rect x="180" y="450" width="360" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="360.0" y="477" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">显式表情融合</text>
+<text x="360.0" y="500" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">通道、强度与优先级</text>
+<rect x="180" y="550" width="360" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="360.0" y="577" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">最终标定映射</text>
+<text x="360.0" y="600" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">表情权重 → 名义轴位置</text>
+<rect x="920" y="350" width="300" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="1070.0" y="377" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">眼内USB相机</text>
+<text x="1070.0" y="400" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">左／右择一；默认右眼</text>
+<rect x="920" y="450" width="300" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="1070.0" y="477" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">人脸检测</text>
+<text x="1070.0" y="500" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">图像偏差及目标有效期</text>
+<rect x="920" y="550" width="300" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="1070.0" y="577" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">眼球／可选颈部协调</text>
+<text x="1070.0" y="600" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">反馈参与，无固定等待时间</text>
+<rect x="450" y="660" width="400" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="650.0" y="687" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">统一目标合成与控制权</text>
+<text x="650.0" y="710" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">示例1面部／2眼球／3眼颈</text>
+<rect x="450" y="760" width="400" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="650.0" y="787" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">运动调度与约束</text>
+<text x="650.0" y="810" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">音频同步、限幅限速、反馈检查</text>
+<rect x="450" y="860" width="400" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="650.0" y="887" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">飞特硬件驱动</text>
+<text x="650.0" y="910" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">唯一串口拥有者；广播同步写／短读</text>
+<rect x="450" y="960" width="400" height="65" rx="10" fill="#fff" stroke="#9aafc1"/>
+<text x="650.0" y="987" text-anchor="middle" font-size="18" font-family="sans-serif" fill="#172b40">USB串口 → 本体通信 → 35舵机</text>
+<text x="650.0" y="1010" text-anchor="middle" font-size="14" font-family="sans-serif" fill="#53687b">传动、仿生皮肤及实际表情</text>
+<text x="34" y="1085" font-size="15" font-family="sans-serif" fill="#53687b">当前已实现：标定映射与约束播放；自模型逆解、ROS2和完整AI交互为扩展方向。</text></svg><p>源码：motion → runtime → hardware/feetech；视觉模块不连接舵机串口。<a href="ARCHITECTURE.md">完整架构说明</a> · <a href="HARDWARE_AND_CALIBRATION.md">本体与标定</a> · <a href="QUICKSTART.md">快速上手</a></p></main></html>

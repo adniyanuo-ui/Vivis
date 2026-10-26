@@ -1,0 +1,89 @@
+{
+  "schema_version": "mojia-person-gaze-1.0",
+  "camera": {
+    "device": "/dev/v4l/by-id/usb-HHWei_Technology_Co.__Ltd._USB_Camera_HHW000-video-index0",
+    "width": 640,
+    "height": 480,
+    "fps": 30,
+    "rotation_deg": 0,
+    "mirror_x": false
+  },
+  "detector": {
+    "model": "assets/models/yunet/face_detection_yunet_2023mar.onnx",
+    "score_threshold": 0.8,
+    "min_face_area_ratio": 0.002,
+    "max_width": 640,
+    "hz": 20
+  },
+  "transport": {
+    "host": "127.0.0.1",
+    "port": 14787,
+    "max_age_s": 0.3
+  },
+  "control": {
+    "camera_mount": "eye",
+    "camera_eye": "right",
+    "mount_confirmed": true,
+    "calibration_confirmed": true,
+    "direction_confirmation_source": "2026-10-23 user confirmed real eyes follow face in the correct direction",
+    "deadband": 0.035,
+    "filter_tau_s": 0.06,
+    "fixed_gain": 1.0,
+    "eye_velocity_gain": 3.2,
+    "max_axis_speed": 5.0,
+    "acquire_s": 0.12,
+    "lost_hold_s": 0.4,
+    "release_s": 0.8,
+    "axes": [
+      {
+        "name": "left_yaw",
+        "coordinate": "x",
+        "id": 8,
+        "negative": 1987,
+        "neutral": 2047,
+        "positive": 2107
+      },
+      {
+        "name": "right_yaw",
+        "coordinate": "x",
+        "id": 23,
+        "negative": 1987,
+        "neutral": 2047,
+        "positive": 2107
+      },
+      {
+        "name": "left_pitch",
+        "coordinate": "y",
+        "id": 7,
+        "negative": 2067,
+        "neutral": 2047,
+        "positive": 2027
+      },
+      {
+        "name": "right_pitch",
+        "coordinate": "y",
+        "id": 22,
+        "negative": 2027,
+        "neutral": 2047,
+        "positive": 2067
+      }
+    ],
+    "mount_confirmation_source": "2026-10-24 user switched back to the right-eye camera; moving camera reference is right yaw ID23",
+    "vertical_enabled": true,
+    "vertical_direction_confirmed": true,
+    "validated_source": "2026-10-23 user accepted horizontal and vertical eye parameters; freeze these values during neck tuning"
+  },
+  "neck": {
+    "id": 32,
+    "sign": 1,
+    "range_mode": "device",
+    "direction_confirmed": false,
+    "gain_counts_s": 120,
+    "deadband": 0.14,
+    "stop_deadband": 0.07,
+    "filter_tau_s": 0.12,
+    "adaptive_speed": false,
+    "coordination_mode": "visual_error_assist"
+  },
+  "parameter_revision_source": "2026-10-24 user removed software acceleration limits31/35/36; neck32/33/34 retain64; face-loss neutral return, hardware parameters, speeds and ranges unchanged;2026-10-25 all mapped hardware/software speed caps1000, all other settings unchanged"
+}

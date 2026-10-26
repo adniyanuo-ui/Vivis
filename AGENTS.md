@@ -1,32 +1,33 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Structure
 
-This repository currently contains one engineering design document: `EVA_AUDIO2FACE_PIPELINE_V1.1.md`. It describes the EVA robot’s speech-driven facial animation pipeline, calibration, learned adaptation, synchronization, and acceptance criteria. There are no source-code, test, or asset directories yet. Keep related documentation at the repository root until a larger structure is needed.
+Vivis is a Mojia electromechanical head developer platform. Current entry points and installation instructions are in `README.md`; historical experiments are documented in `docs/history/` and `docs/CODE_REVIEW.md`.
 
-## Build, Test, and Development Commands
+- `src/vivis/motion/`: channel semantics, calibration mapping, optional expression composition and actuator ownership.
+- `src/vivis/runtime/`: robot configuration, startup/homing, audio synchronization, feedback scheduling and sessions.
+- `src/vivis/hardware/feetech/`: protocol and verified model-specific transport.
+- `src/vivis/vision/`: camera-only detection, preview and eye/neck coordination.
+- `configs/robots/mojia/`: canonical hardware, final calibration, tracking, homing and telemetry configuration.
+- `examples/`: three independently runnable examples and their Chinese tutorials.
+- `tools/`: diagnostics, upstream experiments, tests and compatibility entry points.
 
-No build system, dependency manifest, application runtime, or automated test suite is present. Review changes in a Markdown preview that supports Mermaid diagrams and display mathematics.
+Legacy imports alias the same implementation; do not copy motion algorithms back into compatibility wrappers. Work manifests contain media paths/hashes, not hardware parameter copies. Media and external SDK/model assets are supplied separately.
 
-Useful inspection commands:
+## Validation
 
-- `rg --files --hidden`: list repository files, including hidden files.
-- `rg -n '^##|^###' EVA_AUDIO2FACE_PIPELINE_V1.1.md`: inspect the document’s section hierarchy.
+```bash
+.venv/bin/python -m unittest discover -s tools -p 'test_*.py'
+./examples/01_face_control/run.sh --check
+./examples/02_face_eye_tracking/run.sh --check
+./examples/03_face_eye_neck_tracking/run.sh --check
+git diff --check
+```
 
-When working in a valid Git checkout, use `git diff --check` to check whitespace and `git diff` to review edits before committing.
+Tests use mocks/PTYs; offline checks do not open hardware. Treat actual motion as a separate onsite acceptance step and do not describe it as validated without evidence. Preserve the established limits, startup recovery and stop/holding-torque behavior when refactoring. Do not silently commission baud rates or alter protected device registers as part of code cleanup.
 
-## Coding Style & Naming Conventions
+## Style and review
 
-Preserve the main document’s Chinese prose, numbered sections, concise paragraphs, tables, and numbered reference list. Use fenced blocks for Mermaid diagrams, backticks for interface fields, and the existing mathematical notation for equations. Preserve identifiers such as `FaceMotion-52`, `schema_version`, and `timestamp_ms` consistently.
+Preserve Chinese technical prose, numbered sections, clear tables and repository-local Markdown links. Keep original upstream expression/media files unchanged, apart from explicitly requested transformations to derived artifacts. Keep engineering targets distinct from measurements and distinguish nominal targets, transmitted commands, encoder feedback and observed skin motion.
 
-Follow the existing descriptive, uppercase, underscore-separated filename pattern for versioned pipeline documents. Update version metadata and the change summary together when publishing a new revision.
-
-## Testing & Technical Review
-
-Documentation review is the current validation process; no testing framework or coverage threshold is configured. Check heading order, table rendering, equations, Mermaid syntax, and reference numbering. Verify changed technical claims against the cited primary sources. Keep engineering targets distinct from measured results, and distinguish predicted shape error from observed hardware error. Preserve calibration, actuator arbitration, and safety constraints when revising the pipeline.
-
-## Commit & Pull Request Guidelines
-
-Git history is unavailable in this workspace, so no established commit convention can be confirmed. Use short, imperative messages, for example `docs: clarify calibration acceptance criteria`.
-
-Pull requests should summarize the affected sections, explain the engineering rationale, identify supporting references or related issues, and state what was reviewed. Include preview screenshots when changing diagrams or complex formatting. Do not describe proposed hardware behavior as validated without measurement evidence.
+Use one active configuration source per kind of parameter, name units explicitly, and keep device-specific tuning out of example programs. Review diffs and whitespace before saving a local commit; do not push without user instruction. Use concise commit messages and identify offline versus onsite validation in change descriptions.
