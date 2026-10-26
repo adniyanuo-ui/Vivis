@@ -408,6 +408,20 @@ class PlaybackTests(unittest.TestCase):
                 play(profile,[2],np.full((3,1),2047.),60,'unused','unused','unused',gaze_override=Mock())
             audio.assert_not_called();bus.assert_not_called()
 
+    def test_cleanup_failure_is_logged_and_does_not_report_a_completed_round(self):
+        from unittest.mock import patch
+        from vivis.runtime.playback import play
+        profile,bus,clock=self.fixture()
+        bus.close.side_effect=RuntimeError('Serial close failed')
+        with tempfile.TemporaryDirectory() as directory,patch('vivis.runtime.playback.Bus',return_value=bus),\
+                patch('vivis.runtime.playback.AudioClock',return_value=clock):
+            log=Path(directory)/'log.json'
+            result=play(profile,[2],np.full((3,1),2047.),60,'fake.wav',log,Path(directory)/'STOP')
+            self.assertFalse(result['completed'])
+            self.assertIn('Serial close failed',result['error'])
+            self.assertFalse(json.loads(log.read_text())['completed'])
+        clock.close.assert_called_once();bus.close.assert_called_once()
+
     def test_merged_audio_latency_fields_and_cli_precedence(self):
         from unittest.mock import patch
         from vivis.runtime.playback import play

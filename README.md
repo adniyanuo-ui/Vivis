@@ -8,7 +8,7 @@
 
 ```bash
 # 新Ubuntu主机缺少系统依赖时先安装；已有环境不必重复执行。
-sudo apt-get install python3-venv libportaudio2
+sudo apt-get install python3-venv libportaudio2 alsa-utils
 ./tools/setup.sh
 ```
 
@@ -32,7 +32,7 @@ sudo apt-get install python3-venv libportaudio2
 | 2 | [面部＋眼球](examples/02_face_eye_tracking/README.md) | 增加横向双眼ID8/23跟踪，颈部保持 |
 | 3 | [面部＋眼球＋颈部](examples/03_face_eye_neck_tracking/README.md) | 增加ID32协同；7/22/33/34保持 |
 
-准备/回中会涉及35轴，“保持”指正式播放阶段。一次只运行一个示例。示例自行启动的视觉服务在结束/异常后关闭，仅复用配置哈希相同的外部服务。
+准备/回中会涉及35轴，“保持”指正式播放阶段。一次只运行一个示例。示例自行启动的视觉服务在结束/异常后关闭；复用外部视觉服务需配置、目标协议、相机方向一致，且图像仍新鲜。
 
 ## 3. 干净的目录
 
@@ -66,15 +66,14 @@ Vivis/
 - 核验素材：`.venv/bin/python tools/check_assets.py`；核验标定覆盖：`.venv/bin/python tools/check_calibration.py`。
 - 扩展上游：客户可以接入LLM、TTS、A2F等；已有示例不依赖CUDA，也不等于实时A2F推理已验收。
 
-默认仍60Hz/1Mbps，保留已接受的运动配置；500kbps候选尚未启用。设备节点、相机侧和音箱按实际本体核对，其他主机/操作系统及新入口仍需[现场验收](docs/developer/ACCEPTANCE.md)。
+默认仍60Hz/1Mbps；500kbps候选尚未启用。设备节点、相机侧和音箱按实际本体核对。示例3已完成wz2一遍真机运行，用户反馈成功；随后用户更换ID32并恢复同款PID，颈部抖动尚未解决。示例1/2及新参数的表现仍需[现场验收](docs/developer/ACCEPTANCE.md)。
 
 ## 5. 回归与交接
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
-git diff --check
+./tools/check_delivery.sh
 ```
 
 测试使用模拟设备、PTY和合成图像，不驱动真机。运行日志写入被忽略的`outputs/`。不得将控制频率或离线通过描述为机械每帧到位。第三方源码、模型和许可证位置见[素材与依赖](assets/README.md)及`assets/third_party.json`。
 
-本版已从本地Git提交重新clone到空目录，使用新建`.venv`安装，六组“示例/作品”离线检查通过，151项测试全部通过；源码、SDK、模型和素材路径均位于新克隆中，无旧工程依赖。未进行本轮真机播放，现场验收仍由开发者逐例完成。
+离线自检覆盖依赖、资源哈希、标定、六组“示例/作品”入口及模拟设备回归，不打开机器头。已完成从本地Git重新clone、新建`.venv`安装和独立运行核验，源码、SDK、模型和素材均位于新克隆内。最新审查结论及待验收项见[交付自检](docs/developer/DELIVERY_REVIEW.md)；对外交付前须推送相应提交并从GitHub重新clone核对，原Git历史仍保留。

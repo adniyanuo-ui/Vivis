@@ -97,9 +97,10 @@ class DeveloperPlaybackTests(unittest.TestCase):
         from vivis.motion.ownership import MojiaPlaybackGaze
         from vivis.runtime.playback import play
         from vivis.vision.policy import VERSION
-        for mode in ('face','eyes','eyes-neck'):
-            with self.subTest(mode=mode):
+        for mode,adaptive in (('face',False),('eyes',False),('eyes-neck',False),('eyes-neck',True)):
+            with self.subTest(mode=mode,adaptive=adaptive):
                 robot=Robot();c=robot.tracking();c['control']['vertical_enabled']=False
+                c['neck']['adaptive_speed']=adaptive
                 c['control']['axes']=[a for a in c['control']['axes'] if a['id'] not in (7,22)]
                 c['control']['held_eye_ids']=[7,22]
                 original=robot.profile('wz2');source_ids=original['diagnostic_command_ids']
@@ -139,10 +140,58 @@ class DeveloperPlaybackTests(unittest.TestCase):
                     self.assertEqual(event['goals'][31],round(trajectory[event['frame'],ids.index(31)]))
                 self.assertEqual(result['runtime_feedback_schedule']['priority_ids'],
                                  [] if mode=='face' else [23] if mode=='eyes' else [23,32])
+                if mode=='eyes-neck':
+                    sent=bus.goals.call_args_list[-len(result['events']):]
+                    for event,call in zip(result['events'],sent):
+                        speed=call.args[1][32]
+                        self.assertEqual(speed,event['person_gaze']['neck_speed_command'])
+                        self.assertEqual(speed,event['speed_overrides'][32])
+                        self.assertTrue(1<=speed<=1000)
+                    self.assertEqual(any(call.args[1][32]<1000 for call in sent),adaptive)
                 bus.close.assert_called_once();clock.close.assert_called_once()
 
 
 class DeveloperResourcesTests(unittest.TestCase):
+    def ready_state(self,config,digest):
+        import time
+        from vivis.vision.policy import VERSION
+        return dict(config_sha256=digest,target_protocol_version=VERSION,
+            camera_device=config['camera']['device'],camera_eye=config['control']['camera_eye'],
+            camera_transform={k:config['camera'][k] for k in ('rotation_deg','mirror_x')},
+            _updated_at=time.monotonic(),frame_age_ms=10,status='idle')
+
+    def test_vision_identity_rejects_old_protocol_stale_frames_and_orientation_mismatch(self):
+        import time
+        from vivis.runtime.developer import compatible_vision
+        config=Robot().tracking();good=self.ready_state(config,'hash')
+        now=time.monotonic()
+        self.assertTrue(compatible_vision(good,config,'hash',now))
+        for patch_values in (dict(target_protocol_version='old'),dict(camera_transform={}),
+                dict(camera_device='/dev/wrong'),dict(camera_eye='left'),dict(status='camera_stale'),
+                dict(frame_age_ms=400),dict(_updated_at=now-2),dict(_updated_at=now+1)):
+            with self.subTest(patch_values=patch_values):
+                self.assertFalse(compatible_vision({**good,**patch_values},config,'hash',now))
+
+    def test_camera_only_service_publishes_the_identity_expected_by_the_launcher(self):
+        import hashlib,time
+        from vivis.vision import service
+        from vivis.vision.policy import VERSION
+        from vivis.runtime.developer import compatible_vision
+        config=Robot().tracking();states=[]
+        camera=Mock();camera.actual={};camera.get.side_effect=lambda:(1,time.monotonic(),None)
+        detector=Mock();detector.detect.side_effect=lambda sample:(dict(schema_version=VERSION,
+            sequence=1,timestamp_monotonic=sample[1],target=None),b'jpeg',dict(processing_ms=1.))
+        preview=Mock();preview.update.side_effect=lambda state,jpeg=None:states.append({**state,'_updated_at':time.monotonic()})
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);path=root/'config.json';path.write_text(json.dumps(config))
+            with patch.object(service,'ROOT',root),patch.object(service,'LatestCamera',return_value=camera),\
+                    patch.object(service,'FaceVision',return_value=detector),patch.object(service,'Preview',return_value=preview),\
+                    patch.object(service.socket,'socket'),redirect_stdout(io.StringIO()):
+                service.main(['--config',str(path),'--output',str(root/'vision'),'--seconds','.04'])
+            self.assertTrue(states)
+            digest=hashlib.sha256(path.read_bytes()).hexdigest()
+            self.assertTrue(compatible_vision(states[0],config,digest))
+        camera.close.assert_called_once();preview.close.assert_called_once()
     def test_face_mode_never_starts_or_connects_to_vision(self):
         from vivis.runtime.developer import vision_service
         with patch('vivis.runtime.developer.preview_state',side_effect=AssertionError('preview accessed')), \
@@ -153,10 +202,10 @@ class DeveloperResourcesTests(unittest.TestCase):
         import hashlib
         from vivis.runtime.developer import vision_service
         with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp);config=root/'config.json';config.write_text('{}')
+            root=Path(tmp);config=root/'config.json';data=Robot().tracking();config.write_text(json.dumps(data))
             digest=hashlib.sha256(config.read_bytes()).hexdigest()
             child=Mock();child.poll.return_value=None
-            with patch('vivis.runtime.developer.preview_state',side_effect=[None,{'config_sha256':digest}]), \
+            with patch('vivis.runtime.developer.preview_state',side_effect=[None,self.ready_state(data,digest)]), \
                  patch('vivis.runtime.developer.subprocess.Popen',return_value=child):
                 with self.assertRaisesRegex(RuntimeError,'motion failed'):
                     with vision_service(config,root,True):raise RuntimeError('motion failed')
@@ -165,7 +214,7 @@ class DeveloperResourcesTests(unittest.TestCase):
     def test_different_existing_camera_config_is_rejected_without_stopping_it(self):
         from vivis.runtime.developer import vision_service
         with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp);config=root/'config.json';config.write_text('{}')
+            root=Path(tmp);config=root/'config.json';config.write_text(json.dumps(Robot().tracking()))
             with patch('vivis.runtime.developer.preview_state',return_value={'config_sha256':'other'}), \
                  patch('vivis.runtime.developer.subprocess.Popen') as spawn:
                 with self.assertRaisesRegex(RuntimeError,'不同配置'):

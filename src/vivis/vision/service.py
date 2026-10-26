@@ -16,7 +16,7 @@ import time
 import numpy as np
 
 from vivis.motion.mapping import ROOT, read_json
-from vivis.vision.policy import GazePolicy, validate_config
+from vivis.vision.policy import GazePolicy, validate_config, VERSION
 from vivis.vision.detection import FaceVision, LatestCamera
 from vivis.vision.preview import Preview
 
@@ -43,6 +43,9 @@ def main(argv=None):
         camera_config['rotation_deg'] = args.rotation
     if args.mirror_x is not None:
         camera_config['mirror_x'] = args.mirror_x
+    identity=dict(config_sha256=config_digest,target_protocol_version=VERSION,
+        camera_device=camera_config['device'],camera_eye=config['control'].get('camera_eye'),
+        camera_transform={k:camera_config[k] for k in ('rotation_deg','mirror_x')})
     if (camera_config['rotation_deg'] not in (0, 90, 180, 270)
             or type(camera_config['mirror_x']) is not bool
             or any(type(camera_config[k]) is not int or not 64 <= camera_config[k] <= 1920
@@ -94,7 +97,7 @@ def main(argv=None):
                 sample = camera.get()
                 now = time.monotonic()
                 if sample is None or now - sample[1] > config['transport']['max_age_s']:
-                    preview.update({'status': 'camera_stale', 'camera_error': camera.error,
+                    preview.update({**identity,'status': 'camera_stale', 'camera_error': camera.error,
                                     'actuators_opened': False})
                     if frames == 0 and now - begin > 5:
                         raise RuntimeError('Camera did not provide a fresh frame within five seconds')
@@ -119,7 +122,7 @@ def main(argv=None):
                 with_face += packet['target'] is not None
                 processing.append(metrics['processing_ms'])
                 ages.append(age * 1000)
-                current = {'status': state if fresh else 'inference_stale', **metrics,
+                current = {**identity,'status': state if fresh else 'inference_stale', **metrics,
                            'config_sha256':config_digest,
                            'camera_device':camera_config['device'],
                            'frame_age_ms': age * 1000, 'target': packet['target'],

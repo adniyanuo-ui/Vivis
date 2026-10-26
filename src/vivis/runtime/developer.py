@@ -16,6 +16,24 @@ from urllib.request import urlopen
 
 from vivis.paths import ROOT
 from vivis.runtime.robot import Robot
+from vivis.vision.policy import VERSION
+
+
+def compatible_vision(state, config, digest, now=None):
+    """A matching file hash alone does not prove a usable target stream."""
+    now=time.monotonic() if now is None else now
+    if not isinstance(state,dict):return False
+    updated=state.get('_updated_at')
+    age=state.get('frame_age_ms')
+    maximum=config['transport']['max_age_s']
+    return (state.get('config_sha256')==digest and state.get('target_protocol_version')==VERSION
+        and state.get('camera_transform')=={k:config['camera'][k] for k in ('rotation_deg','mirror_x')}
+        and state.get('camera_device')==config['camera']['device']
+        and state.get('camera_eye')==config['control'].get('camera_eye')
+        and type(updated) in (int,float) and 0<=now-updated<=maximum
+        and type(age) in (int,float) and 0<=age<=maximum*1000
+        and age/1000+now-updated<=maximum
+        and state.get('status') not in ('camera_stale','inference_stale'))
 
 
 def preview_state():
@@ -33,23 +51,24 @@ def vision_service(config_path, output, required):
     try:
         if required:
             wanted = hashlib.sha256(config_path.read_bytes()).hexdigest()
+            config=json.loads(config_path.read_text())
             current = preview_state()
             if current is not None:
-                if current.get('config_sha256') != wanted:
-                    raise RuntimeError('127.0.0.1:8765已有不同配置的视觉服务；请先关闭旧视觉服务再启动本示例')
+                if not compatible_vision(current,config,wanted):
+                    raise RuntimeError('127.0.0.1:8765已有不同配置、旧协议或画面过期的视觉服务；请先关闭旧视觉服务再启动本示例')
             else:
                 log = (output / 'vision.log').open('w')
                 child = subprocess.Popen([sys.executable, '-m', 'vivis.vision.service',
                                           '--config', str(config_path), '--output', str(output / 'vision')],
                                          cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-                                         env={**os.environ, 'PYTHONPATH': str(ROOT / 'src') + os.pathsep + os.environ.get('PYTHONPATH', '')},
+                                         env={**os.environ, 'PYTHONPATH': str(ROOT / 'src'),'PYTHONNOUSERSITE':'1'},
                                          start_new_session=True)
                 deadline = time.monotonic() + 20
                 while time.monotonic() < deadline:
                     if child.poll() is not None:
                         raise RuntimeError('视觉服务启动失败，查看 ' + str(output / 'vision.log'))
                     current = preview_state()
-                    if current and current.get('config_sha256') == wanted:
+                    if compatible_vision(current,config,wanted):
                         break
                     time.sleep(.1)
                 else:
@@ -57,15 +76,17 @@ def vision_service(config_path, output, required):
             print('监控：http://127.0.0.1:8765/', flush=True)
         yield
     finally:
-        if child is not None and child.poll() is None:
-            child.terminate()
-            try:
-                child.wait(timeout=4)
-            except subprocess.TimeoutExpired:
-                child.kill()
-                child.wait(timeout=2)
-        if log is not None:
-            log.close()
+        try:
+            if child is not None and child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=4)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=2)
+        finally:
+            if log is not None:
+                log.close()
 
 
 def check_competitors(camera_required):

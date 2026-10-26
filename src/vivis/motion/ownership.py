@@ -83,7 +83,7 @@ class MojiaPlaybackGaze:
                                      neck_bounds=(motors[32]['safe_min'],motors[32]['safe_max']))
         self.acceleration_limited_ids={config['neck']['id']} if neck else set()
         self.camera_eye_id=self.controller.camera_eye_id
-        self.previous=None;self.scheduler=None;self.last_diagnostic={}
+        self.previous=None;self.scheduler=None;self.last_diagnostic={};self.speed_overrides={}
         self.status_path=status_path;self.last_publish=0.;self.round=round_number;self.repeat=repeat
         self.publisher=PreviewPublisher(status_path) if status_path is not None else None
         self.audio_seconds=0.;self.duration=0.;self.feedback=None
@@ -129,6 +129,7 @@ class MojiaPlaybackGaze:
             goal,speed=self.scheduler.step(self.previous[-1],now,returning=d['returning_to_center'])
             result[neck_column]=goal
         d['neck_speed_command']=speed
+        self.speed_overrides={self.config['neck']['id']:speed} if self.neck else {}
         self.last_diagnostic=d
         if now-self.last_publish>=.2:
             self.publish(dict(active=True,state=d['state'],command_ids=self.command_ids,

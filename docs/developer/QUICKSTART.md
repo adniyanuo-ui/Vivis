@@ -1,6 +1,6 @@
 # 墨甲开发者快速上手
 
-版本0.2｜2026-10-26｜三个新入口待现场逐例验收。
+版本0.2｜2026-10-26｜示例3已完成wz2一遍运行；新ID32抖动及其他验收项见[验收表](ACCEPTANCE.md)。
 
 ## 1. 准备环境
 
@@ -13,11 +13,13 @@
 仓库根目录执行。新Ubuntu主机缺少系统依赖时先安装；已有环境不必重装驱动、CUDA或系统软件。
 
 ```bash
-sudo apt-get install python3-venv libportaudio2
+sudo apt-get install python3-venv libportaudio2 alsa-utils
 ./tools/setup.sh
 ```
 
 脚本只建立`.venv`、用pip安装Python依赖、核验随包资源并做离线检查，不访问串口或相机，不修改系统服务、USB驱动或舵机参数。模型和SDK已随Git提供，不另行下载。普通Linux主机不要求CUDA；Windows尚未验证。
+
+启动脚本只将本仓库`src/`加入`PYTHONPATH`，不继承全局ROS或旧工程的Python路径，并禁用用户site-packages注入。额外依赖应安装进本项目`.venv`；该处理不删除系统ROS，也不修改用户的登录环境。
 
 手动安装等价操作：
 
@@ -37,12 +39,18 @@ python3 -m venv .venv
 
 默认右眼参考ID23，相机640×480/30FPS、检测目标20Hz、运动60Hz，各频率相互独立。横向双眼1987–2107，颈部32跟踪指令范围1600–2600。ID32当前设备限位寄存器读回0–4095，跟踪范围独立保存在`hardware.json`的`tracking_min/max`，不会随设备范围扩大。500kbps候选未启用，默认仍1Mbps。启动器只提示占用服务，不自行停服务、重启USB或切驱动。
 
+音频设备名保存在`hardware.json`的`runtime.audio_device`。默认音量操作针对已核验的USB Audio Device；客户改用其他音箱/声卡时，应在`robot.json`中将`defaults.usb_volume_times_three`设为`false`，配置实际输出后自行设音量。不能把本机USB音箱的固定档位套用到其他声卡。
+
+串口权限可由管理员按实际适配器核对`tools/99-vivis-servo-access.rules`后安装；其中仅匹配当前适配器的厂商/产品ID。使用`dialout`组访问时，将用户加入该组后重新登录，USB重插仍需核验节点及权限。一次性授权可按报错中的`setfacl`命令处理。
+
 ## 5. 离线检查
 
 ```bash
 ./examples/01_face_control/run.sh --check
 ./examples/02_face_eye_tracking/run.sh --check
 ./examples/03_face_eye_neck_tracking/run.sh --check
+# 完整离线交付检查（包含上述六组入口、素材及回归测试）：
+./tools/check_delivery.sh
 ```
 
 检查素材/标定哈希、目标范围、回中清单、速度及轴控制权；不打开串口，不启动音频或相机。通过不代表设备在线或机械动作已验收。

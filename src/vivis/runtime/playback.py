@@ -442,10 +442,19 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             gaze_done=time.monotonic() if mojia_gaze else None
             last=motion_limiter.step(last,target,max(dt,1e-6));last_tick=now
             goals={sid:int(round(v)) for sid,v in zip(ids,last) if sid in command_ids}
-            bus.goals(goals,speeds);last_sent=goals
+            command_speeds=speeds
+            overrides=gaze_override.speed_overrides if mojia_gaze else {}
+            if overrides:
+                if any(sid not in gaze_override.owned or sid not in command_ids
+                       or type(speed) is not int or not 1<=speed<=speeds[sid]
+                       for sid,speed in overrides.items()):
+                    raise ValueError('Live gaze speed exceeds owned-axis speed limits')
+                command_speeds={**speeds,**overrides}
+            bus.goals(goals,command_speeds);last_sent=goals
             command_done=time.monotonic() if mojia_gaze else None
             if previous_index>=0:skipped+=max(0,index-previous_index-1)
             events.append({'audio_seconds':t,'frame':index,'sent_monotonic':now,'goals':goals})
+            if overrides:events[-1]['speed_overrides']=dict(overrides)
             if motion_limiter.axes:
                 events[-1]['software_motion']={sid:dict(requested=float(target[j]),
                     planned=float(last[j]),velocity=motion_limiter.velocity[sid])
@@ -508,7 +517,10 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             if resource is not None:
                 try:resource.close()
                 except Exception as exc:cleanup_errors.append(str(exc))
-        if cleanup_errors:result['cleanup_errors']=cleanup_errors
+        if cleanup_errors:
+            result['cleanup_errors']=cleanup_errors
+            if result['completed']:
+                result.update(completed=False,error='Playback resource cleanup failed: '+'; '.join(cleanup_errors))
         if gc_suspended:gc.enable()
         for sig,handler in previous_handlers.items():signal.signal(sig,handler)
         result['events']=events;result['sent_frames']=len(events)
