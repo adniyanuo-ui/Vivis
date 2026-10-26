@@ -17,6 +17,7 @@ class ColdAxis:
         self.position=position;self.enabled=enabled;self.jammed=jammed
         self.target=0;self.speed=0;self.events=[];self.bad_prime=False
         self.read_positions=None;self.snapshot_position=None
+        self.auto_enable=False;self.settle_offset=0
         self.sdk=SimpleNamespace(write1ByteTxRx=self.write1,write2ByteTxRx=self.write2)
 
     def snapshot(self,sid):
@@ -44,13 +45,14 @@ class ColdAxis:
         if not self.low<=self.target<=self.high:raise AssertionError('out-of-range goal sent')
         if not 1<=self.speed<=60:raise AssertionError('uncapped homing speed sent')
         self.events.append(('goal',self.target,self.speed))
-        if self.enabled and not self.jammed:self.position=self.target
+        if self.auto_enable:self.enabled=1
+        if self.enabled and not self.jammed:self.position=self.target+self.settle_offset
 
     def write1(self,sid,address,value):
         self.events.append(('write',address,value))
         if address!=40:raise AssertionError('unexpected configuration write')
         self.enabled=value
-        if value and not self.jammed:self.position=self.target
+        if value and not self.jammed:self.position=self.target+self.settle_offset
         return 0,0
 
     def write2(self,sid,address,value):
@@ -99,6 +101,33 @@ class ColdStartTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):self.run_home(bus,axis,motor,policy,clock,telemetry)
         self.assertFalse(any(e[0]=='goal' for e in bus.events))
 
+    def test_goal_update_auto_enable_is_accepted_for_both_models(self):
+        for kwargs in ({},{'sid':35,'low':2040,'high':2247,'model':10760,'position':1904}):
+            with self.subTest(kwargs=kwargs):
+                bus,axis,motor,policy,clock,telemetry=self.fixture(**kwargs);bus.auto_enable=True
+                report=self.run_home(bus,axis,motor,policy,clock,telemetry)
+                self.assertTrue(report['completed']);self.assertEqual(bus.position,2047)
+                self.assertEqual(report['startup_primes'][0]['enable_source'],'goal_update')
+                self.assertNotIn(('write',40,1),bus.events)
+                first_goal=next(i for i,e in enumerate(bus.events) if e[0]=='goal')
+                self.assertIn(('read',40),bus.events[:first_goal])
+                self.assertIn(('read',42),bus.events[first_goal:])
+                self.assertIn(('read',46),bus.events[first_goal:])
+
+    def test_external_enable_before_prime_still_prevents_any_goal(self):
+        bus,axis,motor,policy,clock,telemetry=self.fixture()
+        read=bus.read;torque_reads=0
+        def external_enable(sid,address,width):
+            nonlocal torque_reads
+            if address==40:
+                torque_reads+=1
+                if torque_reads>policy['confirmation_samples']:bus.enabled=1
+            return read(sid,address,width)
+        bus.read=external_enable
+        with self.assertRaisesRegex(RuntimeError,'before startup target was sent'):
+            self.run_home(bus,axis,motor,policy,clock,telemetry)
+        self.assertFalse(any(e[0]=='goal' for e in bus.events))
+
     def test_large_offset_and_invalid_encoder_are_not_recovered(self):
         for position in (2111,5000,-1):
             with self.subTest(position=position):
@@ -136,10 +165,38 @@ class ColdStartTests(unittest.TestCase):
 
     def test_jammed_axis_has_a_bounded_reentry_window(self):
         bus,axis,motor,policy,clock,telemetry=self.fixture(jammed=True);policy['timeout_s']=1.
-        with self.assertRaisesRegex(RuntimeError,'did not reenter'):
+        with self.assertRaisesRegex(RuntimeError,'did not reenter|did not settle at neutral'):
             self.run_home(bus,axis,motor,policy,clock,telemetry)
-        self.assertLess(clock.now,11.1)
+        self.assertLess(clock.now,10+1.875*59/60+1.1)
         self.assertNotIn(('write',46,1000),bus.events)
+
+    def test_unused_id9_can_finish_with_existing_neutral_encoder_tolerance(self):
+        robot=Robot();axis=next(a for a in robot.home()['axes'] if a['id']==9)
+        bus=ColdAxis(sid=9,position=2056,low=1900,high=2050)
+        bus.auto_enable=True;bus.settle_offset=5
+        clock=SimpleNamespace(now=10.)
+        clock.monotonic=lambda:clock.now
+        clock.sleep=lambda delay:setattr(clock,'now',clock.now+max(delay,.00001))
+        report={}
+        with patch('vivis.runtime.homing.time',clock):
+            home_all(bus,[axis],{},lambda:None,report,max_speed=60,
+                restore_speeds={9:0},telemetry_policy=robot.telemetry(),
+                position_recovery=robot.home()['disabled_position_recovery'])
+        self.assertTrue(report['completed']);self.assertEqual(bus.position,2052)
+        self.assertEqual(bus.target,2047);self.assertEqual(bus.enabled,0)
+        self.assertEqual(report['startup_neutral_residuals'][0]['id'],9)
+        self.assertTrue(all(1900<=e[1]<=2050 for e in bus.events if e[0]=='goal'))
+
+    def test_reentry_grace_includes_the_common_smooth_home_duration(self):
+        bus,axis,motor,policy,clock,telemetry=self.fixture()
+        bus.settle_offset=5
+        # A long shared trajectory may still be holding the boundary target
+        # when the old one-second-from-enable timer would have expired.
+        from vivis.runtime.homing import smooth_home_targets
+        duration,_=smooth_home_targets({21:2106},{21:2047},60)
+        policy['timeout_s']=1.
+        report=self.run_home(bus,axis,motor,policy,clock,telemetry)
+        self.assertTrue(report['completed']);self.assertGreater(clock.now,10+duration)
 
     def test_snapshot_outlier_uses_confirmed_actual_position_for_priming(self):
         bus,axis,motor,policy,clock,telemetry=self.fixture(position=2047);bus.snapshot_position=2106
@@ -166,6 +223,12 @@ class ColdStartTests(unittest.TestCase):
         self.assertFalse(any(e[0]=='goal' for e in other.events))
 
     def test_full_35_axis_preparation_recovers_the_observed_cold_start(self):
+        self.full_preparation(set())
+
+    def test_full_preparation_with_goal_enabled_id9_and_mixed_firmware(self):
+        self.full_preparation({9,21,24,35})
+
+    def full_preparation(self,auto_enable_ids):
         import numpy as np
         from vivis.runtime import show
         from vivis.hardware.feetech.protocol import Bus
@@ -203,6 +266,7 @@ class ColdStartTests(unittest.TestCase):
                 self.assertTrue(lo<=target<=hi);self.assertLessEqual(speeds[sid],60)
                 events.append(('goal',sid,target,speeds[sid]))
                 r[2:4]=target.to_bytes(2,'little');r[6:8]=speeds[sid].to_bytes(2,'little')
+                if sid in auto_enable_ids:r[0]=1
                 if r[0]:positions[sid]=target
         bus=SimpleNamespace(read=read,goals=goals,close=Mock())
         bus.snapshot=lambda sid:Bus.snapshot(bus,sid)
@@ -229,6 +293,9 @@ class ColdStartTests(unittest.TestCase):
         for sid,first_goal in ((21,2100),(35,2040)):
             self.assertEqual(next(e for e in events if e[:2]==('goal',sid)),('goal',sid,first_goal,60))
         self.assertFalse(any(e[0]=='write' and e[2] in (9,10,11,12,18) for e in events))
+        for row in report['homing']['startup_primes']:
+            self.assertEqual(row['enable_source'],'goal_update' if row['id'] in auto_enable_ids else 'explicit_write')
+        for sid in (9,24):self.assertEqual(memory[sid][1][0],0)
 
 
 if __name__=='__main__':unittest.main()

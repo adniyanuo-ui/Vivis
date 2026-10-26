@@ -198,7 +198,7 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
                   neutral_targets=neutral,initial_positions={s['id']:s['position_raw'] for s in snapshots},
                   samples=[],communication_recoveries=recoveries,ram_writes=[],restored_speeds=False)
     warning_recorder=WarningRecorder(report.setdefault('telemetry_warnings',[]))
-    recovery_deadlines={};reentered=set()
+    recovery_deadlines={};reentered=set();neutral_sent=set()
     def check(sid,state):
         tolerance=task_motors.get(sid,{}).get('initial_settle_tolerance_counts',20)
         def validate(sample):
@@ -206,8 +206,17 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
             if plan is not None:
                 if states[sid]['configured_min']<=sample['position']<=states[sid]['configured_max']:
                     reentered.add(sid);plan=None
+                elif (sid in neutral_sent and abs(sample['position']-neutral[sid])<=tolerance
+                        and int.from_bytes(bus.read(sid,42,2),'little')==neutral[sid]):
+                    # Preserve the established neutral encoder tolerance. It
+                    # applies only after the actual neutral goal is verified,
+                    # never to a clipped boundary goal or playback feedback.
+                    reentered.add(sid);plan=None
+                    report.setdefault('startup_neutral_residuals',[]).append(dict(
+                        id=sid,position=sample['position'],target=neutral[sid],tolerance=tolerance))
                 elif sid in recovery_deadlines and time.monotonic()>recovery_deadlines[sid]:
-                    raise RuntimeError(f'ID{sid}: startup recovery did not reenter device limits')
+                    raise RuntimeError(f'ID{sid}: startup recovery did not reenter device limits or settle at neutral; '
+                        f'position={sample["position"]} neutral={neutral[sid]} tolerance={tolerance}')
             warnings=home_check(sample,states[sid],neutral[sid],tolerance,telemetry_policy,plan)
             if sid in task_motors:warnings=check_feedback(sid,sample,homing_feedback_motor(task_motors[sid],states[sid],plan))
             return warnings
@@ -224,18 +233,31 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
     restored=[];motion_complete=False;begin=None
     try:
         # Prime each disabled axis at its measured position before enabling it.
-        # This prevents an old goal from becoming active on torque enable.
+        # A goal update can itself enable some firmware. Check disabled torque
+        # BEFORE sending the bounded target, then verify its goal/speed and
+        # accept either automatic enable or the explicit enable path.
         for sid in sorted(disabled):
             initial=max(states[sid]['configured_min'],min(states[sid]['configured_max'],start[sid]))
-            guard();bus.goals({sid:initial},{sid:speed})
+            guard()
+            if bus.read(sid,40,1)!=b'\x00':
+                raise RuntimeError(f'ID{sid}: torque changed before startup target was sent')
             if sid in plans:
-                if (int.from_bytes(bus.read(sid,42,2),'little')!=initial
-                        or int.from_bytes(bus.read(sid,46,2),'little')!=speed):
-                    raise RuntimeError(f'ID{sid}: bounded startup target/speed readback failed')
-                if bus.read(sid,40,1)!=b'\x00':
-                    raise RuntimeError(f'ID{sid}: torque changed before bounded startup recovery')
-                recovery_deadlines[sid]=time.monotonic()+plans[sid]['timeout_s']
-            if bus.read(sid,40,1)==b'\x00':
+                # The common smooth curve can keep an axis at a clipped
+                # boundary for seconds. Budget its whole planned motion before
+                # the configured reentry grace; the global timeout still applies.
+                recovery_deadlines[sid]=time.monotonic()+duration+plans[sid]['timeout_s']
+            guard();bus.goals({sid:initial},{sid:speed})
+            goal_readback=int.from_bytes(bus.read(sid,42,2),'little')
+            speed_readback=int.from_bytes(bus.read(sid,46,2),'little')
+            if goal_readback!=initial or speed_readback!=speed:
+                raise RuntimeError(f'ID{sid}: bounded startup target/speed readback failed')
+            torque=bus.read(sid,40,1)
+            if torque not in (b'\x00',b'\x01'):
+                raise RuntimeError(f'ID{sid}: unexpected torque mode after startup target')
+            report.setdefault('startup_primes',[]).append(dict(id=sid,target=initial,speed=speed,
+                goal_readback=goal_readback,speed_readback=speed_readback,torque_before=0,
+                torque_after_goal=torque[0],enable_source='goal_update' if torque==b'\x01' else 'explicit_write'))
+            if torque==b'\x00':
                 report['ram_writes'].append(write_ram_verified(bus,sid,40,1))
             if bus.read(sid,40,1)!=b'\x01':raise RuntimeError(f'ID{sid}: home torque readback failed')
         begin=last_tick=time.monotonic();poll=0;progress=0.
@@ -250,6 +272,7 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
             goals={sid:max(states[sid]['configured_min'],min(states[sid]['configured_max'],int(round(p))))
                    for sid,p in planned.items()}
             bus.goals(goals,{sid:speed for sid in goals});last_tick=now
+            neutral_sent.update(sid for sid,goal in goals.items() if goal==neutral[sid])
             sid=axes[poll%len(axes)]['id'];poll+=1
             state=startup_feedback(read,sid,deadline,report['communication_recoveries'])
             report['samples'].append(dict(id=sid,elapsed_s=elapsed,**state))
