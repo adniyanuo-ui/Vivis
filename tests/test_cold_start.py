@@ -118,6 +118,16 @@ class ColdStartTests(unittest.TestCase):
             self.run_home(bus,axis,motor,policy,clock,telemetry)
         self.assertFalse(any(e[0] in ('goal','write') for e in bus.events))
 
+    def test_stable_small_recheck_jitter_uses_only_the_observed_corridor(self):
+        for positions in ([2106,2107],[2105,2106]):
+            with self.subTest(positions=positions):
+                bus,axis,motor,policy,clock,telemetry=self.fixture()
+                snapshot=bus.snapshot(21);bus.read_positions=iter(positions)
+                plans,_=confirm_home_recoveries(bus,[snapshot],policy,lambda:None,[],telemetry)
+                self.assertEqual(plans[21]['feedback_max'],max(2100,*positions))
+                self.assertEqual(plans[21]['start_position'],positions[-1])
+                self.assertFalse(any(e[0] in ('goal','write') for e in bus.events))
+
     def test_stale_goal_readback_never_enables_torque(self):
         bus,axis,motor,policy,clock,telemetry=self.fixture();bus.bad_prime=True
         with self.assertRaisesRegex(RuntimeError,'readback failed'):

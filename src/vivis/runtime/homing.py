@@ -110,7 +110,8 @@ def confirm_home_recoveries(bus,snapshots,policy,guard,records,telemetry_policy=
         if (snapshot['torque_enable']!=0 or not 0<=position<=4095
                 or not 0<distance<=selected['max_outside_counts']):continue
         plan=dict(id=sid,initial_position=position,device_min=low,device_max=high,
-                  feedback_min=min(low,position),feedback_max=max(high,position),
+                  feedback_min=max(0,low-selected['max_outside_counts']),
+                  feedback_max=min(4095,high+selected['max_outside_counts']),
                   max_speed_counts_s=selected['max_speed_counts_s'],timeout_s=selected['timeout_s'])
         record={**plan,'confirmed':False,'samples':[]};records.append(record)
         positions=[]
@@ -126,9 +127,14 @@ def confirm_home_recoveries(bus,snapshots,policy,guard,records,telemetry_policy=
             positions.append(sample['position']);record['samples'].append(dict(sample))
         if max(positions)-min(positions)>policy['max_sample_spread_counts']:
             raise RuntimeError(f'ID{sid}: inconsistent startup position rechecks {positions}')
+        # Rechecks may jitter on either side of the first sample. After they
+        # agree, retain only the observed interval, not the policy-wide margin.
+        plan['feedback_min']=min(low,*positions)
+        plan['feedback_max']=max(high,*positions)
         plan['start_position']=positions[-1]
         plan['prime_goal']=max(low,min(high,positions[-1]))
-        record.update(confirmed=True,start_position=positions[-1],prime_goal=plan['prime_goal'])
+        record.update(confirmed=True,start_position=positions[-1],prime_goal=plan['prime_goal'],
+                      feedback_min=plan['feedback_min'],feedback_max=plan['feedback_max'])
         confirmed[sid]=sample;plans[sid]=plan
     return plans,confirmed
 
