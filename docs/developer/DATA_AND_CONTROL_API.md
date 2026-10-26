@@ -61,7 +61,7 @@ PYTHONPATH=src .venv/bin/python -m vivis.motion.export \
 | `calibration.json` | 最终52基础表情到轴端点的关系 |
 | `hardware.json` | 完整35轴清单、型号、中位、设备/软件范围、速度、软件加减速与硬件调参值 |
 | `tracking.json` | 图像误差控制、眼球端点、滤波、丢脸和协调参数，不再保存第二套速度/PID |
-| `homing.json` | 回中速度及已验证的机构恢复规则 |
+| `homing.json` | 回中速度、未使能位置复核与逐轴被动偏移恢复规则 |
 | `telemetry.json` | 软件负载/温度告警和连续高温停止策略 |
 | `assets/works.json` | 音频及派生轨迹的路径和来源哈希，无硬件配置副本 |
 

@@ -15,7 +15,8 @@ from vivis.motion.mapping import ROOT, read_json, live_preflight
 from vivis.runtime.playback import play, check_feedback,startup_feedback
 from vivis.vision.policy import TargetReceiver
 from vivis.motion.ownership import tracking_profile, MojiaPlaybackGaze
-from vivis.runtime.homing import home_all,validate_home_axes,home_check,homing_feedback_motor,write_ram_verified
+from vivis.runtime.homing import (home_all,validate_home_axes,home_check,homing_feedback_motor,
+                                 write_ram_verified,confirm_home_recoveries,recovery_policy)
 from vivis.runtime.startup import startup_plan,restore_startup_settings
 from vivis.runtime.telemetry import apply_policy,WarningRecorder,verify_sample
 
@@ -162,7 +163,7 @@ def recovery_clearance_plan(inventory,motors):
     return c,axis,{**m,'neutral':position,'initial_settle_tolerance_counts':tolerance}
 
 
-def prepare_recovery_clearance(bus,plan,snapshots,motors,guard,report,home_speed):
+def prepare_recovery_clearance(bus,plan,snapshots,motors,guard,report,home_speed,position_recovery=None):
     if plan is None:return
     c,axis,motor=plan;states={s['id']:s for s in snapshots}
     recovering=states[c['recovering_id']];m=motors[c['recovering_id']]
@@ -172,7 +173,7 @@ def prepare_recovery_clearance(bus,plan,snapshots,motors,guard,report,home_speed
     report.update(required=True,reason='Disabled recovery axis requires the configured mechanical clearance')
     print(f'RECOVERY CLEARANCE ID{axis["id"]} -> {axis["neutral"]} before ID{c["recovering_id"]} recovery',flush=True)
     home_all(bus,[axis],{axis['id']:motor},guard,report,min(home_speed,c['max_speed_counts_s']),
-             keep_enabled=[axis['id']],telemetry_policy=motor.get('telemetry_policy'))
+             keep_enabled=[axis['id']],telemetry_policy=motor.get('telemetry_policy'),position_recovery=position_recovery)
 
 
 def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,telemetry_policy,guard,report,directory,publish):
@@ -202,12 +203,15 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
         validate_home_axes(home_axes,snapshots)
         original_speeds={s['id']:int.from_bytes(bytes.fromhex(s['state_40_70_hex'])[6:8],'little') for s in snapshots}
         report['startup_snapshots']=snapshots
+        position_policy=getattr(args,'home_position_recovery',None)
+        position_plans,confirmed=confirm_home_recoveries(bus,snapshots,position_policy,guard,
+            report.setdefault('disabled_position_recoveries',[]),telemetry_policy)
         # Review every axis before making any startup write.
         for s in snapshots:
             sid=s['id']
             if sid not in motors:
-                fresh,alerts=verify_sample(bus.feedback,sid,feedback(s),
-                    lambda sample:home_check(sample,s,home_neutrals[sid],20,telemetry_policy),telemetry_policy,
+                fresh,alerts=verify_sample(bus.feedback,sid,confirmed.get(sid,feedback(s)),
+                    lambda sample:home_check(sample,s,home_neutrals[sid],20,telemetry_policy,position_plans.get(sid)),telemetry_policy,
                     report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
                 warning_recorder.observe(sid,fresh,alerts)
                 continue
@@ -220,9 +224,9 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
                 # The explicitly requested all-axis home primes disabled axes
                 # at measured positions before enabling; playback still requires torque.
                 def validate(sample):
-                    home_check(sample,s,m['neutral'],m.get('initial_settle_tolerance_counts',20),telemetry_policy)
-                    return check_feedback(sid,sample,homing_feedback_motor(m,s))
-                fresh,alerts=verify_sample(bus.feedback,sid,feedback(s),validate,telemetry_policy,
+                    home_check(sample,s,m['neutral'],m.get('initial_settle_tolerance_counts',20),telemetry_policy,position_plans.get(sid))
+                    return check_feedback(sid,sample,homing_feedback_motor(m,s,position_plans.get(sid)))
+                fresh,alerts=verify_sample(bus.feedback,sid,confirmed.get(sid,feedback(s)),validate,telemetry_policy,
                     report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
                 warning_recorder.observe(sid,fresh,alerts)
         if hardware_preset is not None:
@@ -233,12 +237,12 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
             print('STARTUP hardware tuning restored and verified; homing speed remains capped',flush=True)
         if args.authorized_tongue_observation:
             prepare_recovery_clearance(bus,clearance_plan,snapshots,motors,guard,
-                report.setdefault('recovery_clearance',{}),args.home_speed)
+                report.setdefault('recovery_clearance',{}),args.home_speed,position_policy)
             recover_tongue(bus,motors[29],guard,report['startup_events'],speed=min(args.home_speed,motors[29]['max_speed_counts_s']))
         publish('homing')
         print(f'HOME {len(home_axes)} AXES START speed_cap={args.home_speed}',flush=True)
         home_all(bus,home_axes,motors,guard,report['homing'],args.home_speed,original_speeds,keep_enabled=ids,
-                 telemetry_policy=telemetry_policy)
+                 telemetry_policy=telemetry_policy,position_recovery=position_policy)
         print('HOME COMPLETE; original speed settings restored',flush=True)
         bus.close();bus=None
     finally:
@@ -303,6 +307,7 @@ def main(argv=None):
     profile['snapshot_chunk_bytes']=2
     if args.baud is not None:profile['baud']=args.baud
     home_inventory=robot.home()
+    args.home_position_recovery=recovery_policy(home_inventory.get('disabled_position_recovery'))
     home_axes=home_inventory['axes'];home_ids=[a['id'] for a in home_axes]
     if (len(set(home_ids))!=len(home_ids) or not set(ids)<=set(home_ids)
             or any(type(a.get('neutral')) is not int or a.get('neutral_confirmed') is not True for a in home_axes)):
@@ -323,6 +328,7 @@ def main(argv=None):
                              snapshot_chunk_bytes=profile['snapshot_chunk_bytes'],
                              scheduled_feedback=profile['scheduled_feedback'],
                              home_ids=home_ids,home_speed=args.home_speed,home_only=args.home_only,
+                             disabled_position_recovery=args.home_position_recovery,
                              hardware_preset=str(robot.resolve('hardware')) if hardware_preset is not None else None,
                              telemetry_policy=telemetry_policy,
                              repeat_mode='independent_full_cycle',preparation_each_round=True,

@@ -95,7 +95,8 @@ class Robot:
         return dict(schema_version='actuator-neutral-inventory-1.0',
                     axes=[{k: a[k] for k in ('id', 'neutral', 'neutral_confirmed', 'model_raw_expected')}
                           for a in self.axes.values()],
-                    recovery_clearance=data.get('recovery_clearance'))
+                    recovery_clearance=data.get('recovery_clearance'),
+                    disabled_position_recovery=data.get('disabled_position_recovery'))
 
     def startup(self):
         axes = []

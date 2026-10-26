@@ -36,12 +36,38 @@ def validate_home_axes(axes,snapshots):
             raise RuntimeError(f'ID{sid}: home speed unit has not been commissioned')
 
 
-def home_check(state,snapshot,neutral=None,tolerance=0,telemetry_policy=None):
+def recovery_policy(policy):
+    if policy is None:return None
+    if (not isinstance(policy,dict) or type(policy.get('max_outside_counts')) is not int or not 0<=policy['max_outside_counts']<=20
+            or type(policy.get('confirmation_samples')) is not int or not 2<=policy['confirmation_samples']<=3
+            or type(policy.get('max_speed_counts_s')) is not int or not 1<=policy['max_speed_counts_s']<=60
+            or type(policy.get('max_sample_spread_counts')) is not int or not 0<=policy['max_sample_spread_counts']<=2
+            or type(policy.get('timeout_s')) not in (int,float) or not 1<=policy['timeout_s']<=5):
+        raise ValueError('Invalid disabled startup position recovery policy')
+    overrides=policy.get('axis_overrides',{})
+    if not isinstance(overrides,dict):raise ValueError('Invalid startup recovery axis overrides')
+    for sid,values in overrides.items():
+        if (not isinstance(sid,str) or not sid.isdecimal() or not 0<=int(sid)<=253
+                or not isinstance(values,dict) or not set(values)<={'max_outside_counts','timeout_s'}):
+            raise ValueError('Invalid startup recovery axis override')
+        if ('max_outside_counts' in values and (type(values['max_outside_counts']) is not int
+                or not 0<=values['max_outside_counts']<=200)):
+            raise ValueError('Invalid per-axis startup recovery margin')
+        if 'timeout_s' in values and (type(values['timeout_s']) not in (int,float) or not 1<=values['timeout_s']<=10):
+            raise ValueError('Invalid per-axis startup recovery timeout')
+    return policy
+
+
+def home_check(state,snapshot,neutral=None,tolerance=0,telemetry_policy=None,position_recovery=None):
     sid=snapshot['id']
     position=state['position']
     near_home=neutral is not None and abs(position-neutral)<=tolerance
-    if not 0<=position<=4095 or (not snapshot['configured_min']<=position<=snapshot['configured_max'] and not near_home):
-        raise RuntimeError(f'ID{sid}: home position outside device limits')
+    recovering=(position_recovery is not None and
+                position_recovery['feedback_min']<=position<=position_recovery['feedback_max'])
+    if not 0<=position<=4095 or (not snapshot['configured_min']<=position<=snapshot['configured_max'] and not near_home and not recovering):
+        raise RuntimeError(f'ID{sid}: home position outside device limits; position={position} '
+                           f'limits=[{snapshot["configured_min"]},{snapshot["configured_max"]}] '
+                           f'initial_torque={snapshot["torque_enable"]}')
     if state['status_register']:raise RuntimeError(f'ID{sid}: home servo alarm {state["status_register"]}')
     if not telemetry_policy and state['temperature_c']>=snapshot['configured_max_temperature']:
         raise RuntimeError(f'ID{sid}: home hardware temperature threshold reached')
@@ -50,16 +76,61 @@ def home_check(state,snapshot,neutral=None,tolerance=0,telemetry_policy=None):
     return evaluate(sid,state,telemetry_policy) if telemetry_policy else []
 
 
-def homing_feedback_motor(motor,snapshot):
+def homing_feedback_motor(motor,snapshot,position_recovery=None):
     """Neutral recovery has a device-wide corridor, independent of tracking stroke.
 
     Keep task temperature/load checks. This changes only the homing feedback
     position domain; the playback/following command and feedback limits stay intact.
     """
     tolerance=motor.get('initial_settle_tolerance_counts',20);neutral=motor['neutral']
-    return {**motor,'safe_min':snapshot['configured_min'],'safe_max':snapshot['configured_max'],
+    result={**motor,'safe_min':snapshot['configured_min'],'safe_max':snapshot['configured_max'],
             'feedback_min':max(0,min(snapshot['configured_min'],neutral-tolerance)),
             'feedback_max':min(4095,max(snapshot['configured_max'],neutral+tolerance))}
+    if position_recovery is not None:
+        result['feedback_min']=min(result['feedback_min'],position_recovery['feedback_min'])
+        result['feedback_max']=max(result['feedback_max'],position_recovery['feedback_max'])
+    return result
+
+
+def confirm_home_recoveries(bus,snapshots,policy,guard,records,telemetry_policy=None):
+    """Read-only confirmation of small passive offsets on disabled axes.
+
+    This never changes a device/command limit. The temporary feedback corridor
+    is bounded by observed startup positions, and may be used only for homing.
+    """
+    from vivis.runtime.playback import startup_feedback
+    policy=recovery_policy(policy);plans={};confirmed={}
+    if policy is None:return plans,confirmed
+    deadline=time.monotonic()+10
+    for snapshot in snapshots:
+        sid=snapshot['id'];position=snapshot['position_raw']
+        selected={**policy,**policy.get('axis_overrides',{}).get(str(sid),{})}
+        low,high=snapshot['configured_min'],snapshot['configured_max']
+        distance=max(low-position,position-high,0)
+        if (snapshot['torque_enable']!=0 or not 0<=position<=4095
+                or not 0<distance<=selected['max_outside_counts']):continue
+        plan=dict(id=sid,initial_position=position,device_min=low,device_max=high,
+                  feedback_min=min(low,position),feedback_max=max(high,position),
+                  max_speed_counts_s=selected['max_speed_counts_s'],timeout_s=selected['timeout_s'])
+        record={**plan,'confirmed':False,'samples':[]};records.append(record)
+        positions=[]
+        for _ in range(policy['confirmation_samples']):
+            guard()
+            if bus.read(sid,40,1)!=b'\x00':
+                raise RuntimeError(f'ID{sid}: startup position recovery requires disabled torque')
+            sample=startup_feedback(bus.feedback,sid,deadline,record.setdefault('communication_recoveries',[]),
+                                    should_stop=lambda:guard() or False)
+            sample,_=verify_sample(bus.feedback,sid,sample,
+                lambda fresh:home_check(fresh,snapshot,telemetry_policy=telemetry_policy,position_recovery=plan),
+                telemetry_policy,record.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
+            positions.append(sample['position']);record['samples'].append(dict(sample))
+        if max(positions)-min(positions)>policy['max_sample_spread_counts']:
+            raise RuntimeError(f'ID{sid}: inconsistent startup position rechecks {positions}')
+        plan['start_position']=positions[-1]
+        plan['prime_goal']=max(low,min(high,positions[-1]))
+        record.update(confirmed=True,start_position=positions[-1],prime_goal=plan['prime_goal'])
+        confirmed[sid]=sample;plans[sid]=plan
+    return plans,confirmed
 
 
 def smooth_home_targets(start,neutral,speed,accelerations=None):
@@ -79,7 +150,7 @@ def smooth_home_targets(start,neutral,speed,accelerations=None):
     return duration,at
 
 
-def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,keep_enabled=(),telemetry_policy=None):
+def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,keep_enabled=(),telemetry_policy=None,position_recovery=None):
     """Home the configured inventory; restore speed RAM and temporary enables.
 
     Hardware acceleration/PID/deadband are preserved. Existing task protection
@@ -92,10 +163,14 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
     snapshots=[startup_feedback(bus.snapshot,a['id'],snapshot_deadline,recoveries,
                 should_stop=lambda:guard() or False) for a in axes]
     validate_home_axes(axes,snapshots)
+    plans,confirmed=confirm_home_recoveries(bus,snapshots,position_recovery,guard,
+                                          report.setdefault('disabled_position_recoveries',[]),telemetry_policy)
     states={s['id']:s for s in snapshots};neutral={a['id']:a['neutral'] for a in axes}
     speed=int(max_speed)
     if speed!=max_speed or not 1<=speed<=32767:raise ValueError('Invalid integer home speed')
+    if plans:speed=min(speed,min(plan['max_speed_counts_s'] for plan in plans.values()))
     start={s['id']:s['position_raw'] for s in snapshots}
+    start.update({sid:plan['start_position'] for sid,plan in plans.items()})
     for sid,motor in task_motors.items():
         if sid in start:
             if not motor['safe_min']<=neutral[sid]<=motor['safe_max']:
@@ -117,11 +192,18 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
                   neutral_targets=neutral,initial_positions={s['id']:s['position_raw'] for s in snapshots},
                   samples=[],communication_recoveries=recoveries,ram_writes=[],restored_speeds=False)
     warning_recorder=WarningRecorder(report.setdefault('telemetry_warnings',[]))
+    recovery_deadlines={};reentered=set()
     def check(sid,state):
         tolerance=task_motors.get(sid,{}).get('initial_settle_tolerance_counts',20)
         def validate(sample):
-            warnings=home_check(sample,states[sid],neutral[sid],tolerance,telemetry_policy)
-            if sid in task_motors:warnings=check_feedback(sid,sample,homing_feedback_motor(task_motors[sid],states[sid]))
+            plan=plans.get(sid) if sid not in reentered else None
+            if plan is not None:
+                if states[sid]['configured_min']<=sample['position']<=states[sid]['configured_max']:
+                    reentered.add(sid);plan=None
+                elif sid in recovery_deadlines and time.monotonic()>recovery_deadlines[sid]:
+                    raise RuntimeError(f'ID{sid}: startup recovery did not reenter device limits')
+            warnings=home_check(sample,states[sid],neutral[sid],tolerance,telemetry_policy,plan)
+            if sid in task_motors:warnings=check_feedback(sid,sample,homing_feedback_motor(task_motors[sid],states[sid],plan))
             return warnings
         state,warnings=verify_sample(bus.feedback,sid,state,validate,telemetry_policy,
             report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
@@ -131,7 +213,7 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
         guard()
         return check(sid,bus.feedback(sid))
     for s in snapshots:
-        check(s['id'],dict(position=s['position_raw'],**{k:s[k] for k in ('load_raw','temperature_c','voltage_raw','status_register')}))
+        check(s['id'],confirmed.get(s['id'],dict(position=s['position_raw'],**{k:s[k] for k in ('load_raw','temperature_c','voltage_raw','status_register')})))
     deadline=time.monotonic()+duration+10
     restored=[];motion_complete=False;begin=None
     try:
@@ -140,6 +222,13 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
         for sid in sorted(disabled):
             initial=max(states[sid]['configured_min'],min(states[sid]['configured_max'],start[sid]))
             guard();bus.goals({sid:initial},{sid:speed})
+            if sid in plans:
+                if (int.from_bytes(bus.read(sid,42,2),'little')!=initial
+                        or int.from_bytes(bus.read(sid,46,2),'little')!=speed):
+                    raise RuntimeError(f'ID{sid}: bounded startup target/speed readback failed')
+                if bus.read(sid,40,1)!=b'\x00':
+                    raise RuntimeError(f'ID{sid}: torque changed before bounded startup recovery')
+                recovery_deadlines[sid]=time.monotonic()+plans[sid]['timeout_s']
             if bus.read(sid,40,1)==b'\x00':
                 report['ram_writes'].append(write_ram_verified(bus,sid,40,1))
             if bus.read(sid,40,1)!=b'\x01':raise RuntimeError(f'ID{sid}: home torque readback failed')
@@ -182,3 +271,4 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
                 restored.append(sid)
         report['restored_speeds']=len(restored)==len(original)
         report['completed']=motion_complete and report['restored_speeds']
+        report['startup_reentered_ids']=sorted(reentered)

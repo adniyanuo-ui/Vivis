@@ -8,5 +8,18 @@
     "settle_tolerance_counts": 20,
     "basis": "2026-10-25 controlled jaw coupling test: opening ID31 to1900 reduced ID29 residual from44 to3 counts, closure left11 counts; original position and load guards retained",
     "evidence": "outputs/mojia/id29_jaw_coupling_20261025_104602.json"
+  },
+  "disabled_position_recovery": {
+    "max_outside_counts": 10,
+    "confirmation_samples": 2,
+    "max_sample_spread_counts": 2,
+    "max_speed_counts_s": 60,
+    "timeout_s": 2.0,
+    "axis_overrides": {
+      "35": {
+        "max_outside_counts": 160,
+        "timeout_s": 5.0
+      }
+    }
   }
 }
