@@ -99,6 +99,9 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     if mode not in ('face', 'eyes', 'eyes-neck'):
         parser.error('Unknown example mode')
     robot = Robot(args.robot)
+    if mode != 'face' and not args.home_only:
+        from vivis.runtime.assets import verify_model
+        verify_model()
     defaults = robot.definition['defaults']
     output = args.output or ROOT / 'outputs/developer' / (datetime.now().strftime('%Y%m%d_%H%M%S_%f') + '_' + mode)
     command = ['--robot', str(robot.path), '--work', args.work, '--mode', mode,

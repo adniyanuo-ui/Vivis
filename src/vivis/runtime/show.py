@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 import numpy as np
 
-from vivis.runtime.player import load_targets, startup_target, feedback
+from vivis.runtime.trajectory import load_targets, startup_target, feedback
 from vivis.motion.mapping import ROOT, read_json, live_preflight
 from vivis.runtime.playback import play, check_feedback,startup_feedback
 from vivis.vision.policy import TargetReceiver
@@ -260,10 +260,6 @@ def unload_tongue(profile,report):
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config',type=Path,default=ROOT/'mojia/person_gaze.json')
-    parser.add_argument('--profile',type=Path)
-    parser.add_argument('--targets',type=Path)
-    parser.add_argument('--audio',type=Path)
     parser.add_argument('--robot',type=Path,help='Developer robot definition; resolves canonical hardware and work assets')
     parser.add_argument('--work',default='wz2')
     parser.add_argument('--mode',choices=('face','eyes','eyes-neck'),default='eyes-neck')
@@ -272,9 +268,6 @@ def main(argv=None):
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--repeat',type=int,default=3)
     parser.add_argument('--mouth-gain',type=float,default=1.,help='Mouth displacement multiplier, clipped to existing command limits')
-    parser.add_argument('--home-inventory',type=Path,default=ROOT/'mojia/homing_axes.json')
-    parser.add_argument('--hardware-preset',type=Path,default=ROOT/'mojia/startup_hardware.json')
-    parser.add_argument('--telemetry-policy',type=Path,default=ROOT/'mojia/telemetry_policy.json')
     parser.add_argument('--home-speed',type=int,default=60,help='Temporary neutral homing speed cap in counts/s')
     parser.add_argument('--home-only',action='store_true',help='Home all inventory axes; no camera, audio or task execution')
     parser.add_argument('--face-fps',type=int,choices=(30,60),default=60,
@@ -290,25 +283,14 @@ def main(argv=None):
     args=parser.parse_args(argv)
     if not 1<=args.repeat<=20:parser.error('Repeat must be 1..20')
     if not 1<=args.home_speed<=32767:parser.error('Home speed must be within 1..32767')
-    robot=None
-    if args.robot:
-        from vivis.runtime.robot import Robot
-        robot=Robot(args.robot)
-        if args.profile or args.targets or args.audio:
-            parser.error('Use a work manifest with --robot; custom legacy assets use --profile/--targets instead')
-        work=robot.work(args.work)
-        args.targets,args.audio=work['targets'],work['audio']
-        original=robot.profile(args.work)
-        # Face-only does not require a physical camera configuration.
-        config=robot.tracking(args.camera,args.camera_device or ('unused' if args.mode=='face' else None))
-        telemetry_policy=robot.telemetry()
-        calibration=robot.calibration
-    else:
-        if not args.profile or not args.targets:parser.error('Specify --robot or both --profile and --targets')
-        args.audio=args.audio or ROOT/'exmple/0001.wav'
-        config,original=read_json(args.config),read_json(args.profile)
-        telemetry_policy=read_json(args.telemetry_policy)
-        calibration=ROOT/'mojia/墨甲9.23.json'
+    from vivis.runtime.robot import Robot
+    robot=Robot(args.robot)
+    work=robot.work(args.work)
+    args.targets,args.audio=work['targets'],work['audio']
+    original=robot.profile(args.work)
+    config=robot.tracking(args.camera,args.camera_device or ('unused' if args.mode=='face' else None))
+    telemetry_policy=robot.telemetry()
+    calibration=robot.calibration
     if args.hold_vertical_eyes:
         config['control']['vertical_enabled']=False
         config['control']['axes']=[a for a in config['control']['axes'] if a['id'] not in (7,22)]
@@ -320,14 +302,14 @@ def main(argv=None):
     profile['control_hz']=args.control_fps
     profile['snapshot_chunk_bytes']=2
     if args.baud is not None:profile['baud']=args.baud
-    home_inventory=robot.home() if robot else read_json(args.home_inventory)
+    home_inventory=robot.home()
     home_axes=home_inventory['axes'];home_ids=[a['id'] for a in home_axes]
     if (len(set(home_ids))!=len(home_ids) or not set(ids)<=set(home_ids)
             or any(type(a.get('neutral')) is not int or a.get('neutral_confirmed') is not True for a in home_axes)):
         parser.error('Home inventory must cover every task axis with confirmed neutrals')
     motors={m['id']:m for m in profile['motors']}
     clearance_plan=recovery_clearance_plan(home_inventory,motors)
-    hardware_preset=(robot.startup() if robot else read_json(args.hardware_preset)) if not args.home_only else None
+    hardware_preset=robot.startup() if not args.home_only else None
     if hardware_preset is not None:
         expected={a['id']:a for a in hardware_preset['axes']}
         if set(expected)!=set(motors) or any(expected[sid]['speed_raw']!=m['max_speed_counts_s'] for sid,m in motors.items()):
@@ -341,7 +323,7 @@ def main(argv=None):
                              snapshot_chunk_bytes=profile['snapshot_chunk_bytes'],
                              scheduled_feedback=profile['scheduled_feedback'],
                              home_ids=home_ids,home_speed=args.home_speed,home_only=args.home_only,
-                             hardware_preset=str(robot.resolve('hardware') if robot else args.hardware_preset) if hardware_preset is not None else None,
+                             hardware_preset=str(robot.resolve('hardware')) if hardware_preset is not None else None,
                              telemetry_policy=telemetry_policy,
                              repeat_mode='independent_full_cycle',preparation_each_round=True,
                              developer_mode=args.mode,camera_required=args.mode!='face' and not args.home_only,
@@ -356,7 +338,7 @@ def main(argv=None):
     if hardware_preset is not None:
         (args.output/'hardware_preset.json').write_text(json.dumps(hardware_preset,ensure_ascii=False,indent=2)+'\n')
     (args.output/'mouth_gain_report.json').write_text(json.dumps(profile['mouth_gain_report'],indent=2)+'\n')
-    stop_file=ROOT/'outputs/mojia/STOP';stopped=False
+    stop_file=ROOT/'outputs/STOP';stopped=False
     def stop(*_):
         nonlocal stopped
         stopped=True
@@ -367,7 +349,7 @@ def main(argv=None):
     summary.update(repeat_mode='independent_full_cycle',requested_rounds=args.repeat,cleanup_attempted=False,
                    control_hz=args.control_fps,baud=profile['baud'],source_fps=fps,developer_mode=args.mode)
     summary['homing']={}
-    status_path=ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
+    status_path=ROOT/'outputs/runtime/control_status.json'
     status_path.parent.mkdir(parents=True,exist_ok=True)
     def publish(state, error=None):
         temporary=status_path.with_suffix('.tmp')
@@ -398,7 +380,7 @@ def main(argv=None):
                 if args.mode!='face':
                     receiver=TargetReceiver(config);receiver.wait_ready()
                     override=MojiaPlaybackGaze(config,profile,ids,receiver,
-                        ROOT/'outputs/mojia/right_camera_tracking/control_status.json',lap,args.repeat,
+                        ROOT/'outputs/runtime/control_status.json',lap,args.repeat,
                         neck=args.mode=='eyes-neck')
                 print(f'ROUND {lap}/{args.repeat} START',flush=True)
                 result=play(profile,ids,trajectory,fps,args.audio,directory/'playback_log.json',stop_file,gaze_override=override)

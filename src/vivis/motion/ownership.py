@@ -40,7 +40,7 @@ class PreviewPublisher:
 
 
 def tracking_profile(config, profile, ids, neck=True):
-    validate_mojia(config,profile,Path(profile.get('calibration_path',ROOT/'mojia/墨甲9.23.json')),True,True)
+    validate_mojia(config,profile,Path(profile.get('calibration_path',ROOT/'configs/robots/mojia/calibration.json')),True,True)
     p=copy.deepcopy(profile)
     motors={m['id']:m for m in p['motors']}
     owned=[a['id'] for a in config['control']['axes']]+([32] if neck else [])
@@ -64,7 +64,7 @@ def tracking_profile(config, profile, ids, neck=True):
 class MojiaPlaybackGaze:
     """Own only IDs8/23/7/22/32; preserve every other prerecorded target."""
     def __init__(self, config, profile, ids, receiver, status_path=None, round_number=1, repeat=1, neck=True):
-        validate_mojia(config,profile,Path(profile.get('calibration_path',ROOT/'mojia/墨甲9.23.json')),True,True)
+        validate_mojia(config,profile,Path(profile.get('calibration_path',ROOT/'configs/robots/mojia/calibration.json')),True,True)
         self.config=config;self.ids=list(ids);self.receiver=receiver
         self.command_ids=list(profile['diagnostic_command_ids'])
         self.neck=neck

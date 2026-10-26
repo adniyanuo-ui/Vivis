@@ -1,3 +1,2 @@
-# Jetson Mojia deployment: grant only james access to this commissioned adapter.
-# Keep the normal root:dialout ownership and mode; reapply ACL after enumeration.
-ACTION=="add|change", SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", ATTRS{serial}=="5B79076878", RUN+="/usr/bin/setfacl -m u:james:rw $env{DEVNAME}"
+# Optional Linux permission rule. Review vendor/product against your adapter.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", GROUP="dialout", MODE="0660"

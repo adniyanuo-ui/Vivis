@@ -1,9 +1,8 @@
-"""Official FTServo_Python transport, retaining the Xiaobai motion/feedback guards.
+"""Official FTServo_Python transport, retaining the runtime motion/feedback guards.
 
-Pinned source: xiaobai/reference/FTServo_Python (MIT, see its LICENSE).
+Pinned SDK subset: _vendor/scservo_sdk (MIT; see its LICENSE).
 Only RAM 41..47 is written; acceleration is preserved from the initial readback.
 """
-import sys
 import struct
 import time
 import os
@@ -14,9 +13,8 @@ from types import SimpleNamespace
 from vivis.hardware.feetech.protocol import Bus, ProtocolError, CorruptResponse, ReadTimeout, ServoStatusError, goal_packet
 
 from vivis.paths import ROOT
-SDK_ROOT = ROOT / 'xiaobai/reference/FTServo_Python'
-sys.path.insert(0, str(SDK_ROOT))
-from scservo_sdk import PortHandler, sms_sts, GroupSyncWrite, COMM_SUCCESS, COMM_RX_TIMEOUT, COMM_RX_CORRUPT
+from ._vendor.scservo_sdk import (PortHandler, sms_sts, GroupSyncWrite,
+                                  COMM_SUCCESS, COMM_RX_TIMEOUT, COMM_RX_CORRUPT)
 
 
 class OfficialSDKBus(Bus):

@@ -1,33 +1,28 @@
 # Repository Guidelines
 
-## Structure
+This branch is the standalone Mojia developer delivery. Keep only active source, configuration, examples, bundled runtime assets, developer documentation, minimal tools and relevant tests.
 
-Vivis is a Mojia electromechanical head developer platform. Current entry points and installation instructions are in `README.md`; historical experiments are documented in `docs/history/` and `docs/CODE_REVIEW.md`.
+## Structure and sources
 
-- `src/vivis/motion/`: channel semantics, calibration mapping, optional expression composition and actuator ownership.
-- `src/vivis/runtime/`: robot configuration, startup/homing, audio synchronization, feedback scheduling and sessions.
-- `src/vivis/hardware/feetech/`: protocol and verified model-specific transport.
-- `src/vivis/vision/`: camera-only detection, preview and eye/neck coordination.
-- `configs/robots/mojia/`: canonical hardware, final calibration, tracking, homing and telemetry configuration.
-- `examples/`: three independently runnable examples and their Chinese tutorials.
-- `tools/`: diagnostics, upstream experiments, tests and compatibility entry points.
+- `src/vivis/`: shared motion/runtime/vision/Feetech implementation; never copy algorithms into examples.
+- `configs/robots/mojia/`: canonical hardware, final calibration, tracking, homing and telemetry.
+- `assets/works/` and `assets/models/`: actual tracked media/model files, not external pointers.
+- `src/vivis/hardware/feetech/_vendor/`: required pinned SDK subset with its license.
+- `tests/`: regression tests using mocks and PTYs.
 
-Legacy imports alias the same implementation; do not copy motion algorithms back into compatibility wrappers. Work manifests contain media paths/hashes, not hardware parameter copies. Media and external SDK/model assets are supplied separately.
+Do not reintroduce legacy project paths, compatibility modules, experimental upstream tools or dependence on another checkout. Preserve original expression/audio/calibration bytes and accepted hardware parameters unless explicitly changed by the user. Configuration is the unique source of device parameters.
 
 ## Validation
 
 ```bash
-.venv/bin/python -m unittest discover -s tools -p 'test_*.py'
+.venv/bin/python -m unittest discover -s tests -p 'test_*.py'
+.venv/bin/python tools/check_assets.py
 ./examples/01_face_control/run.sh --check
 ./examples/02_face_eye_tracking/run.sh --check
 ./examples/03_face_eye_neck_tracking/run.sh --check
 git diff --check
 ```
 
-Tests use mocks/PTYs; offline checks do not open hardware. Treat actual motion as a separate onsite acceptance step and do not describe it as validated without evidence. Preserve the established limits, startup recovery and stop/holding-torque behavior when refactoring. Do not silently commission baud rates or alter protected device registers as part of code cleanup.
+Installation and offline checks must not open real hardware. Preserve startup recovery, constraints and stop/holding-torque behavior. Do not commission baud rates, switch drivers or alter protected registers during cleanup. Validate standalone installation and checks from a fresh clone; do not use the old checkout as a hidden runtime dependency.
 
-## Style and review
-
-Preserve Chinese technical prose, numbered sections, clear tables and repository-local Markdown links. Keep original upstream expression/media files unchanged, apart from explicitly requested transformations to derived artifacts. Keep engineering targets distinct from measurements and distinguish nominal targets, transmitted commands, encoder feedback and observed skin motion.
-
-Use one active configuration source per kind of parameter, name units explicitly, and keep device-specific tuning out of example programs. Review diffs and whitespace before saving a local commit; do not push without user instruction. Use concise commit messages and identify offline versus onsite validation in change descriptions.
+Use clear Chinese documentation and local links. Distinguish source targets, transmitted positions, encoder feedback and observed skin motion. Record offline versus onsite validation accurately. Keep third-party licenses/provenance with redistributed components. Review diffs before a local commit; do not push without user instruction.

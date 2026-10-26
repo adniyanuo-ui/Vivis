@@ -1,0 +1,22 @@
+{
+  "components": [
+    {
+      "name": "FTServo_Python SMS/STS subset",
+      "source": "https://gitee.com/ftservo/FTServo_Python.git",
+      "revision": "cbcfa64674d592f7e5028ae72af42580f60500b4",
+      "license": "MIT",
+      "location": "src/vivis/hardware/feetech/_vendor/scservo_sdk",
+      "license_file": "src/vivis/hardware/feetech/_vendor/scservo_sdk/LICENSE",
+      "changes": "Only required modules included; __init__.py exports the used classes/constants. Six implementation modules unchanged."
+    },
+    {
+      "name": "OpenCV YuNet",
+      "source": "https://github.com/opencv/opencv_zoo",
+      "revision": "47534e27c9851bb1128ccc0102f1145e27f23f98",
+      "license": "MIT",
+      "location": "assets/models/yunet",
+      "license_file": "assets/models/yunet/LICENSE",
+      "manifest": "assets/models/yunet/manifest.json"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
-"""Verify/import the separately distributed example media, without hardware I/O."""
+"""Verify the bundled example media and models, without hardware I/O."""
 import argparse
 import hashlib
+import json
 from pathlib import Path
 import shutil
 
@@ -33,6 +34,16 @@ def verify_assets(robot, source=None):
     return report
 
 
+def verify_model(root=ROOT):
+    """Check the bundled CPU face detector without opening a camera."""
+    manifest = json.loads((root / 'assets/models/yunet/manifest.json').read_text())
+    target = root / manifest['destination']
+    if (not target.is_file() or target.stat().st_size != manifest['size']
+            or hashlib.sha256(target.read_bytes()).hexdigest() != manifest['sha256']):
+        raise ValueError('Bundled YuNet model missing or changed: ' + str(target))
+    return target
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--robot', type=Path)
@@ -40,6 +51,7 @@ def main():
     args = parser.parse_args()
     for row in verify_assets(Robot(args.robot), args.from_dir):
         print('Verified ' + row['path'])
+    print('Verified ' + str(verify_model()))
 
 
 if __name__ == '__main__':

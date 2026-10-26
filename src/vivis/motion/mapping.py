@@ -8,10 +8,6 @@ from pathlib import Path
 import numpy as np
 
 from vivis.paths import ROOT
-ROLES=['左眉中','左眉头','左眉尾','左上眼皮','左下眼皮','左眼上下看','左眼左右看','左脸颊',
- '左上唇','左上嘴角运动','左下唇','左下嘴角运动','左鼻','上唇中央','右鼻','右眉中','右眉头','右眉尾',
- '右上眼皮','右下眼皮','右眼上下看','右眼左右看','右脸颊','右上唇','右上嘴角运动','右下唇','右下嘴角运动',
- '下唇中央','下巴左右','下巴张合','颈部旋转','颈部前后','颈部左右']
 
 def read_json(path):
     def pairs(items):
@@ -24,7 +20,7 @@ def read_json(path):
                       parse_constant=lambda x:(_ for _ in ()).throw(ValueError('Nonfinite '+x)))
 
 def inputs(clip,calibration,header,allowed_motor_ids=None):
-    allowed_motor_ids=set(range(2,35)) if allowed_motor_ids is None else set(allowed_motor_ids)
+    allowed_motor_ids=set(range(2,37)) if allowed_motor_ids is None else set(allowed_motor_ids)
     if not allowed_motor_ids or any(type(sid) is not int or not 0<=sid<=253 for sid in allowed_motor_ids):
         raise ValueError('Invalid allowed calibration motor IDs')
     payload=read_json(clip)
@@ -49,33 +45,7 @@ def inputs(clip,calibration,header,allowed_motor_ids=None):
     if len(shapes)!=52 or data['shapeSize']!=52:raise ValueError('Need 52 calibration shapes')
     return values,fps,order,shapes
 
-def audit(clip,calibration,header):
-    values,fps,order,shapes=inputs(clip,calibration,header)
-    inventory=[]
-    for sid,role in zip(range(2,35),ROLES):
-        points={name:p[sid] for name,p in shapes.items() if sid in p}
-        inventory.append({'id':sid,'role':role,'reported_model':'STS3032' if sid<=30 else 'SM85BLHV',
-           'calibration_endpoints':points,'endpoint_envelope_not_safe_limits':[min([2047]+list(points.values())),max([2047]+list(points.values()))],
-           'safe_min':None,'safe_max':None,'neutral':2047,'neutral_confirmed':False,
-           'max_speed_counts_s':None,'max_temperature_c':None,'max_load_raw':None,
-           'model_raw_expected':None,'register_layout_confirmed':False})
-    return {'frames':len(values),'fps':fps,'duration_seconds':len(values)/fps,'inventory':inventory,
-       'unmapped_ids':[s['id'] for s in inventory if not s['calibration_endpoints']],
-       'empty_shapes':[n for n,p in shapes.items() if not p],
-       'jaw_2050_entries':sum(p.get(31)==2050 for p in shapes.values()),
-       'nonzero_rotation_channels':[n for i,n in enumerate(order) if i>=52 and np.max(abs(values[:,i]))>1e-8],
-       'calibration_below_2047':sum(p<2047 for s in shapes.values() for p in s.values()),
-       'warning':'2047 treated as unconfirmed neutral, not minimum; individual endpoints do not prove combined-pose safety'}
 
-def draft_profile(report):
-    return {'schema_version':'xiaobai-playback-0.1','port':'/dev/serial/by-id/usb-1a86_USB_Single_Serial_5B79033160-if00',
-      'baud':1000000,'mixing':'sum_deltas','mixing_confirmed':False,
-      'jaw_owner':'JawOpen','jaw_owner_confirmed':False,
-      'paired_eye_look_is_already_in_lids':True,
-      'eye_angle_endpoints_rad':None,'neck_angle_position_maps':None,
-      'audio_device':None,'physical_audio_output_confirmed':False,'actuator_latency_ms':0,
-      'stop_method':'stop sending; last bounded goal may finish; hardware power stop must remain available',
-      'hardware_stop_description':None,'motors':report['inventory']}
 
 def compile_trajectory(values,order,shapes,profile,scope='full',draft=False):
     if profile['mixing'] not in ['sum_deltas','bounded_weighted_deltas'] or profile['jaw_owner'] not in ['JawOpen','all_calibrated']:raise ValueError('Unsupported composition rule')

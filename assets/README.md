@@ -1,28 +1,26 @@
-# 示例素材交接
+# 随包素材与依赖
 
-Git仅保存`works.json`及来源哈希，不包含大媒体、目标轨迹或第三方模型。仓库源码不是完整素材备份。
+本目录内容随Git提供，clone后无需从其他工程恢复文件。
 
-## 1. 当前四个必需运行文件
+## 1. 两份可直接播放的作品
 
-| 作品 | 音频 | 电机目标 |
+| 作品 | 音频 | 派生目标 |
 |---|---|---|
-| 0001 | `exmple/0001.wav` | `mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000.json` |
-| wz2 | `mojia/wz2_expression15.wav` | `mojia/wz2_expression15_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000.json` |
+| 0001 | `assets/works/0001/audio.wav` | `assets/works/0001/targets.json` |
+| wz2 | `assets/works/wz2/audio.wav` | `assets/works/wz2/targets.json` |
 
-文件名保留历史命名，NATURAL1000不是当前所有轴速度。权威速度在`configs/robots/mojia/hardware.json`，当前14个口型相关轴1200、其余映射轴1000。
-
-交付时另外提供上述4文件的素材包。保留目录结构，或放在同一素材目录中，再执行：
+四个文件总计约9MB，内容及哈希与已接受版本一致。`works.json`记录来源哈希、帧数和位置；电机参数只在`configs/robots/mojia/hardware.json`。素材不是Git LFS指针，普通clone即可取得实际文件。
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m vivis.runtime.assets --from-dir /path/to/supplied-assets
+.venv/bin/python tools/check_assets.py
 ```
 
-已存在文件只核验不覆盖，复制前核验来源SHA256。当前机器可不带`--from-dir`直接检查。
+编辑输入、重新导出或替换素材时同步维护作品清单，不修改哈希来冒充已经验收。作品导入生成到`outputs/imported_works/`；新作品要交给别人时同时纳入其音频/轨迹，不能只交清单。
 
-## 2. 可恢复的交付
+## 2. 必要第三方组件
 
-交接包含源码提交、`configs/`、示例教程、本素材包、固定版本第三方SDK和YuNet安装/许可说明。音频与原始表情素材使用权单独确认；第三方组件按其实际许可分发。
+- 飞特SMS/STS SDK：`src/vivis/hardware/feetech/_vendor/scservo_sdk/`。保留固定提交的6个实现模块及MIT许可证，精简`__init__.py`为实际使用的导出；无额外SDK下载或全局路径注入。
+- YuNet人脸模型：`assets/models/yunet/face_detection_yunet_2023mar.onnx`，约228KB，附MIT许可证与固定版本/哈希清单。示例2/3按哈希核验后加载，不访问网络下载。
+- 完整来源和版本：`assets/third_party.json`。Python依赖由`pyproject.toml`安装，不把虚拟环境提交到Git。
 
-原始61通道数据不是预制回放的必需输入，但客户重新编译作品或复现制作过程时需同时取得匹配原始数据。上游A2F模型和CUDA/TensorRT不是三个回放示例的必要依赖；若交接A2F能力，另行提供其权重、环境及许可证。
-
-舵机SDK按`tools/external-sources.json`恢复，YuNet按`tools/model-manifests/yunet.json`下载并核验。离线环境应预先准备相应目录及Python依赖包。不要将私有合同、账号凭据或整个实验输出目录打入开发者交付包。
+原始上游61通道制作数据和A2F权重不属于预制回放的运行依赖。客户接入自己的素材时可按教程生成新作品。完整AI产品、训练平台和相关模型的分发另行约定。

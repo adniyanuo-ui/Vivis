@@ -124,10 +124,10 @@ class FaceVision:
         cv2.setNumThreads(1)
         detector = config['detector']
         model_path = root / detector['model']
-        manifest = json.loads((root / 'tools/model-manifests/yunet.json').read_text())
+        manifest = json.loads((root / 'assets/models/yunet/manifest.json').read_text())
         if (not model_path.is_file()
                 or hashlib.sha256(model_path.read_bytes()).hexdigest() != manifest['sha256']):
-            raise RuntimeError('YuNet model missing or changed; run tools/download_yunet.py')
+            raise RuntimeError('YuNet model missing or changed; restore the tracked assets/models/yunet files')
         self.detector = cv2.FaceDetectorYN.create(
             str(model_path), '', (320, 320), detector['score_threshold'], .3, 5000)
 

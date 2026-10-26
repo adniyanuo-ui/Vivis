@@ -23,7 +23,7 @@ from vivis.vision.preview import Preview
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, default=ROOT / 'xiaobai/person_gaze.json')
+    parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--host', default='127.0.0.1', help='Preview HTTP bind address')
     parser.add_argument('--port', type=int, default=8765, help='Preview HTTP port')
     parser.add_argument('--seconds', type=float, help='Exit after this many seconds; default runs until Ctrl+C')
@@ -52,7 +52,7 @@ def main(argv=None):
             or not 0 < detector['score_threshold'] <= 1
             or not 0 < detector['min_face_area_ratio'] <= 1):
         raise ValueError('Invalid camera/detector settings')
-    output = args.output or ROOT / 'outputs/xiaobai' / ('person_tracking_' + datetime.now().strftime('%Y%m%d_%H%M%S_%f'))
+    output = args.output or ROOT / 'outputs/vision' / ('person_tracking_' + datetime.now().strftime('%Y%m%d_%H%M%S_%f'))
     if output.exists():
         raise ValueError('Use a new output directory')
     stop = threading.Event()
@@ -65,7 +65,7 @@ def main(argv=None):
                'preview_url': f'http://{args.host}:{args.port}/', 'output': str(output)}
     try:
         with ExitStack() as resources:
-            lock_path = ROOT / 'outputs/xiaobai/person_tracking.lock'
+            lock_path = ROOT / 'outputs/vision/service.lock'
             lock_path.parent.mkdir(parents=True, exist_ok=True)
             lock = resources.enter_context(lock_path.open('a'))
             try:
@@ -131,7 +131,7 @@ def main(argv=None):
                     # The camera service has no actuator feedback; show image direction,
                     # not an integrator pretending the eye moved with its commands.
                     current['simulated_xy']=[packet['target']['x'],packet['target']['y'] if config['control'].get('vertical_enabled') else 0.] if fresh and packet['target'] else [0.,0.]
-                    status_path=ROOT/'outputs/mojia/right_camera_tracking/control_status.json'
+                    status_path=ROOT/'outputs/runtime/control_status.json'
                     try:
                         control=json.loads(status_path.read_text())
                         control['active']=control.get('active',False) and now-control['updated_monotonic']<1

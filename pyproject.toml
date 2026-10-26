@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vivis-head"
-version = "0.1.0"
+version = "0.2.0"
 description = "Mojia electromechanical head developer examples and shared control runtime"
 requires-python = ">=3.10,<3.13"
 dependencies = [
   "numpy==1.23.5; python_version < '3.12'",
   "numpy==1.26.4; python_version >= '3.12'",
-  "scipy==1.11.4", "jsonschema==4.26.0", "pyserial==3.5", "sounddevice==0.5.3"
+  "scipy==1.11.4", "pyserial==3.5", "sounddevice==0.5.3"
 ]
 
 [project.optional-dependencies]
@@ -18,3 +18,6 @@ vision = ["opencv-python-headless==4.10.0.84"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"vivis.hardware.feetech._vendor.scservo_sdk" = ["LICENSE"]

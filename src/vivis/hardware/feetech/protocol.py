@@ -1,5 +1,5 @@
 """Feetech magnetic-encoder packet transport. No EEPROM or torque-enable writes.
-References: xiaobai/reference/SMS_STS.{h,cpp}, official magnetic protocol manual.
+References: Feetech FT-SCS protocol and the pinned SMS/STS SDK.
 """
 import struct
 import time

@@ -3,8 +3,8 @@
   "works": {
     "0001": {
       "name": "0001",
-      "targets": "mojia/0001_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000.json",
-      "audio": "exmple/0001.wav",
+      "targets": "assets/works/0001/targets.json",
+      "audio": "assets/works/0001/audio.wav",
       "targets_sha256": "ae6fecde34404f227ff7070410b93c7a779e8c1942a5403570af9413cddc3e79",
       "audio_sha256": "cbd18a1080ce5c1830df8c4e1cbc3cacbcbee37f5075e18ab344549e0a36e3a6",
       "calibration_sha256": "b3b0321ac804d89cc131749890fe031035654ce07644a594bcad47ec4eb67943",
@@ -45,8 +45,8 @@
     },
     "wz2": {
       "name": "wz2",
-      "targets": "mojia/wz2_expression15_MOJIA_MOTOR_TARGETS_60fps_BLINK_NATURAL1000.json",
-      "audio": "mojia/wz2_expression15.wav",
+      "targets": "assets/works/wz2/targets.json",
+      "audio": "assets/works/wz2/audio.wav",
       "targets_sha256": "4cfd5d6428fbf52aa19cb6990c9466b19371f8eaba0266f0622be6d950f98114",
       "audio_sha256": "639a020f5742de3bd60e87a1f357d2567dc24e363139e7b22824335c951cc923",
       "calibration_sha256": "b3b0321ac804d89cc131749890fe031035654ce07644a594bcad47ec4eb67943",
