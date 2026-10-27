@@ -41,11 +41,13 @@ class RotaryParallelNeck:
         if geometry.get('schema_version')!='vivis-rotary-parallel-neck-1.0':
             raise ValueError('Unsupported parallel neck geometry')
         self.pivot=_vector(geometry['pivot_base_mm'],'pivot_base_mm')
-        limits=geometry['pose_limits_rad']
-        if not isinstance(limits,list) or len(limits)!=2 or any(not isinstance(row,list) or len(row)!=2 for row in limits):
-            raise ValueError('Need two pitch/roll intervals')
-        self.pose_limits=np.array([[_number(v,'pose limit') for v in row] for row in limits])
-        if (self.pose_limits.shape!=(2,2) or not np.isfinite(self.pose_limits).all()
+        limits=geometry.get('pose_limits_rad')
+        self.pose_limits=None
+        if limits is not None:
+            if not isinstance(limits,list) or len(limits)!=2 or any(not isinstance(row,list) or len(row)!=2 for row in limits):
+                raise ValueError('Need two pitch/roll intervals')
+            self.pose_limits=np.array([[_number(v,'pose limit') for v in row] for row in limits])
+        if self.pose_limits is not None and (self.pose_limits.shape!=(2,2) or not np.isfinite(self.pose_limits).all()
                 or not np.all(self.pose_limits[:,0]<0) or not np.all(self.pose_limits[:,1]>0)
                 or np.max(np.abs(self.pose_limits))>=math.pi/2):
             raise ValueError('Need bounded pitch/roll intervals around neutral')
@@ -84,7 +86,7 @@ class RotaryParallelNeck:
 
     def _solve(self,pitch,roll,check_joint_limits=True):
         pose=np.array([_number(pitch,'pitch'),_number(roll,'roll')])
-        if np.any(pose<self.pose_limits[:,0]) or np.any(pose>self.pose_limits[:,1]):
+        if self.pose_limits is not None and (np.any(pose<self.pose_limits[:,0]) or np.any(pose>self.pose_limits[:,1])):
             raise UnreachablePose('Pitch/roll outside measured pose envelope')
         matrix=rotation(*pose);angles=[];counts={}
         for b in self.branches:
@@ -131,13 +133,13 @@ class RotaryParallelNeck:
         tips=[]
         for b in self.branches:
             count=_number(counts[b['id']],'encoder count')
-            if not b['low']-tolerance<=count<=b['high']+tolerance:
+            if not b['low']-tolerance-1e-7<=count<=b['high']+tolerance+1e-7:
                 raise UnreachablePose('Measured joints outside reviewed envelope')
             angle=b['q0']+b['sign']*(count-b['neutral'])/b['scale']
             tips.append(b['pivot']+b['radius']*(b['u']*math.cos(angle)+b['v']*math.sin(angle)))
         pose=np.array([_number(v,'initial pose') for v in initial])
         if pose.shape!=(2,):raise ValueError('Need two initial platform angles')
-        pose=np.clip(pose,self.pose_limits[:,0],self.pose_limits[:,1])
+        if self.pose_limits is not None:pose=np.clip(pose,self.pose_limits[:,0],self.pose_limits[:,1])
         for _ in range(20):
             matrix=rotation(*pose)
             rods=[self.pivot+matrix@b['anchor']-tip for b,tip in zip(self.branches,tips)]
@@ -150,7 +152,8 @@ class RotaryParallelNeck:
             if np.linalg.cond(jac)>self.condition_limit:raise UnreachablePose('Forward Jacobian is ill-conditioned')
             delta=np.linalg.solve(jac,error)
             delta*=min(1.,.2/max(1e-12,float(np.max(np.abs(delta)))))
-            pose=np.clip(pose-delta,self.pose_limits[:,0],self.pose_limits[:,1])
+            pose-=delta
+            if self.pose_limits is not None:pose=np.clip(pose,self.pose_limits[:,0],self.pose_limits[:,1])
         else:
             raise UnreachablePose('Parallel forward solve did not close both rods')
         _,angles,check=self._solve(*map(float,pose),check_joint_limits=False)

@@ -11,16 +11,6 @@
       0.0,
       0.0
     ],
-    "pose_limits_rad": [
-      [
-        -0.20943951023931956,
-        0.20943951023931956
-      ],
-      [
-        -0.13962634015954636,
-        0.13962634015954636
-      ]
-    ],
     "jacobian_condition_limit": 30.0,
     "branches": [
       {
@@ -50,9 +40,7 @@
         "neutral_crank_angle_rad": 0.0,
         "encoder_sign": 1,
         "neutral_count": 2047,
-        "counts_per_revolution": 4096,
-        "minimum_count": 1967,
-        "maximum_count": 2127
+        "counts_per_revolution": 4096
       },
       {
         "id": 34,
@@ -81,9 +69,7 @@
         "neutral_crank_angle_rad": 0.0,
         "encoder_sign": -1,
         "neutral_count": 2047,
-        "counts_per_revolution": 4096,
-        "minimum_count": 1967,
-        "maximum_count": 2127
+        "counts_per_revolution": 4096
       }
     ]
   },
@@ -96,9 +82,7 @@
   "control": {
     "camera_mount_yaw_rad": 3.141592653589793,
     "pitch_gain_rad_s": 0.18,
-    "pitch_limit_rad": 0.05235987755982989,
     "roll_follow_ratio": 0.25,
-    "roll_limit_rad": 0.03490658503988659,
     "roll_gain_s": 1.0,
     "image_deadband": 0.04,
     "filter_tau_s": 0.15
@@ -113,6 +97,8 @@
     ],
     "source": "CAD pin axes; neutral closure; user confirmed33 short/up positive,34 long/up negative,2047 level,32 above platform",
     "workspace_samples": 289,
-    "live_acceptance": "pending bounded onsite trial; encoder limits are not a collision certificate"
-  }
+    "live_acceptance": "User accepted pitch/roll directions and confirmed previously commissioned combined workspace at hardware limits; enlarged tracking pending observation",
+    "workspace_sample_domain": "ID33 hardware1447..2647; ID34 hardware1647..2647; kinematic17x17 samples, not new onsite motion"
+  },
+  "range_mode": "device"
 }

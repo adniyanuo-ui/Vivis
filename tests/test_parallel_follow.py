@@ -24,8 +24,10 @@ class ParallelFollowTests(unittest.TestCase):
         pitch=k.inverse(.01,0.);roll=k.inverse(0.,.01)
         self.assertGreater(pitch[33],2047);self.assertLess(pitch[34],2047)
         self.assertGreater(roll[33],2047);self.assertGreater(roll[34],2047)
-        for a in np.linspace(1967,2127,9):
-            for b in np.linspace(1967,2127,9):
+        self.assertIsNone(k.pose_limits)
+        self.assertEqual([(b['low'],b['high']) for b in k.branches],[(1447,2647),(1647,2647)])
+        for a in np.linspace(1447,2647,17):
+            for b in np.linspace(1647,2647,17):
                 pose=k.forward({33:float(a),34:float(b)})
                 check=k.inverse(*pose)
                 np.testing.assert_allclose([check[33],check[34]],[a,b],atol=1e-4)
@@ -37,7 +39,7 @@ class ParallelFollowTests(unittest.TestCase):
         np.testing.assert_allclose(camera_axes((0.,0.),0.)[0],np.eye(2),atol=1e-12)
 
     def test_rear_facing_camera_mount_reverses_both_platform_axes_and_feedback(self):
-        c,_=configuration();mount=c['parallel_neck']['control']['camera_mount_yaw_rad']
+        c,p=configuration();mount=c['parallel_neck']['control']['camera_mount_yaw_rad']
         self.assertAlmostEqual(mount,math.pi)
         matrix,_,_=camera_axes((0.,0.),0.,mount)
         np.testing.assert_allclose(matrix,-np.eye(2),atol=1e-12)
@@ -46,7 +48,7 @@ class ParallelFollowTests(unittest.TestCase):
         self.assertAlmostEqual(camera_axes((0.,.02),0.,mount)[2],-.02)
         # Field report: upward face must now decrease33/increase34, and a
         # positive eye-line tilt must decrease both, unlike the first trial.
-        k=RotaryParallelNeck(c['parallel_neck']['geometry'])
+        k=validate(c,p)
         for y,tilt,signs in ((-.6,0.,(-1,1)),(.6,0.,(1,-1)),
                              (0.,.12,(-1,-1)),(0.,-.12,(1,1))):
             f,measured=self.run_face(y=y,human_roll=tilt,ticks=60)
@@ -70,7 +72,7 @@ class ParallelFollowTests(unittest.TestCase):
         c,p=configuration();k=validate(c,p);r=CoupledJointReference(k,c['parallel_neck']['motion'])
         for tick in range(900):
             old=r.a.copy();goals=r.step([70.*math.sin(tick/30),-60.*math.cos(tick/40)],1/60)
-            self.assertTrue(all(1967-1e-6<=v<=2127+1e-6 for v in goals.values()))
+            self.assertTrue(all(b['low']-1e-6<=goals[b['id']]<=b['high']+1e-6 for b in k.branches))
             self.assertLessEqual(np.max(np.abs(r.v)),100+1e-6)
             self.assertLessEqual(np.max(np.abs(r.a)),400+1e-6)
             self.assertLessEqual(np.max(np.abs(r.a-old)),4000/60+1e-5)
@@ -98,13 +100,54 @@ class ParallelFollowTests(unittest.TestCase):
             for yaw in (0.,math.pi/6,-math.pi/6):
                 f,_=self.run_face(y=y,yaw=yaw)
                 self.assertGreater(-math.copysign(1,y)*f.diagnostic['camera_pitch_rad'],math.radians(.7))
-                self.assertLess(abs(f.diagnostic['camera_pitch_rad']),math.radians(4.5))
-                self.assertLess(abs(f.diagnostic['camera_roll_rad']),math.radians(.4))
+                self.assertGreater(abs(f.diagnostic['camera_pitch_rad']),math.radians(5.))
+                # During continuous large pitch motion, the roll servo loop
+                # may have transient cross-axis error; it must remain small.
+                self.assertLess(abs(f.diagnostic['camera_roll_rad']),math.radians(1.))
 
     def test_roll_is_small_fraction_of_human_tilt_not_horizontal_face_error(self):
         f,_=self.run_face(y=0.,human_roll=math.radians(4.))
         self.assertAlmostEqual(math.degrees(f.diagnostic['camera_roll_rad']),1.,delta=.2)
         self.assertLess(abs(f.diagnostic['camera_pitch_rad']),math.radians(.2))
+
+    def test_roll_target_has_no_two_degree_cap_and_uses_same_follow_ratio(self):
+        f,_=self.run_face(y=0.,human_roll=math.radians(20.))
+        self.assertAlmostEqual(math.degrees(f.diagnostic['roll_target_rad']),5.,delta=.2)
+        self.assertAlmostEqual(math.degrees(f.diagnostic['camera_roll_rad']),5.,delta=.6)
+
+    def test_device_limits_are_single_source_for_model_and_command_owner(self):
+        c,p=configuration();motor=next(m for m in p['motors'] if m['id']==33)
+        motor['device_max']=2500
+        k=validate(c,p)
+        self.assertEqual(k.branches[0]['high'],2500)
+        active=tracking_profile(c,p,[m['id'] for m in p['motors']])
+        for sid in (33,34):
+            m=next(m for m in active['motors'] if m['id']==sid)
+            self.assertEqual((m['safe_min'],m['safe_max']),(m['device_min'],m['device_max']))
+
+    def test_full_range_brakes_at_device_stop_and_has_enough_time_to_return(self):
+        c,p=configuration();k=validate(c,p);r=CoupledJointReference(k,c['parallel_neck']['motion'])
+        for _ in range(480):r.step([100.,100.],1/60)
+        self.assertGreater(r.p[0],2500)
+        self.assertLessEqual(max(r.p),2647+1e-6)
+        self.assertLess(np.max(np.abs(r.v)),1e-5)
+        window=r.return_window()
+        self.assertGreater(window,6.)
+        for _ in range(math.ceil(window*60)):r.step([0.,0.],1/60,returning=True)
+        np.testing.assert_allclose(r.p,[2047,2047],atol=1e-6)
+
+    def test_platform_can_start_song_end_return_without_changing_yaw_return_time(self):
+        c,p=configuration();ids=[m['id'] for m in p['motors']]
+        active=tracking_profile(c,p,ids);f=MojiaPlaybackGaze(c,active,ids,SimpleNamespace(poll=lambda now:packet(now,0.)))
+        measured=np.full(len(ids),2047.);base=measured.copy()
+        f.prepare(np.array([base]),measured,[],10.)
+        far={33:2600.,34:2600.}
+        f.platform.reference.reset(list(far.values()))
+        for sid,pos in {32:2047.,**far}.items():f.observe(sid,{'position':pos},10.)
+        f.set_audio_time(106.5,113.)
+        f.apply(base,measured,1/60,10.01)
+        self.assertTrue(f.platform_returning)
+        self.assertFalse(f.returning)
 
     def test_stale_feedback_brakes_and_target_loss_returns_both_axes(self):
         f,measured=self.run_face(ticks=90)

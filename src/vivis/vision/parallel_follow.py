@@ -34,16 +34,20 @@ def validate(config,profile):
             or plan.get('geometry_confirmed') is not True or plan.get('directions_confirmed') is not True
             or plan.get('yaw_above_platform') is not True):
         raise ValueError('Need confirmed CAD, encoder directions and above-platform yaw layout')
-    k=RotaryParallelNeck(plan['geometry']);motors={m['id']:m for m in profile['motors']}
-    for b in k.branches:
+    geometry=copy.deepcopy(plan['geometry']);motors={m['id']:m for m in profile['motors']}
+    if plan.get('range_mode')!='device' or 'pose_limits_rad' in geometry:
+        raise ValueError('Parallel tracking uses the hardware device limits without extra pose limits')
+    for b in geometry['branches']:
         m=motors[b['id']]
-        if m['model_raw_expected']!=10760 or not m['device_min']<=b['low']<2047<b['high']<=m['device_max']:
-            raise ValueError('Parallel tracking window exceeds configured device envelope')
+        if (m['model_raw_expected']!=10760 or not 0<=m['device_min']<2047<m['device_max']<=4095
+                or any(key in b for key in ('minimum_count','maximum_count'))):
+            raise ValueError('Parallel limits must come from the hardware device envelope')
+        b.update(minimum_count=m['device_min'],maximum_count=m['device_max'])
+    k=RotaryParallelNeck(geometry)
     for section,limits in [('motion',{'max_speed_counts_s':(1,1000),'max_acceleration_counts_s2':(1,10000),
                                       'max_jerk_counts_s3':(1,1e6),'return_duration_s':(1,10)}),
                            ('control',{'camera_mount_yaw_rad':(-math.pi,math.pi),
-                                       'pitch_gain_rad_s':(.01,1),'pitch_limit_rad':(.001,.3),
-                                       'roll_follow_ratio':(0,.5),'roll_limit_rad':(.001,.15),
+                                       'pitch_gain_rad_s':(.01,1),'roll_follow_ratio':(0,.5),
                                        'roll_gain_s':(.1,5),'image_deadband':(0,.2),'filter_tau_s':(.01,1)})]:
         for key,(low,high) in limits.items():
             value=plan[section][key]
@@ -104,6 +108,17 @@ class CoupledJointReference:
 
     @staticmethod
     def sample(trajectory,dt):return tuple(np.array(x,dtype=float) for x in trajectory.at_time(dt))
+
+    def return_window(self):
+        home=self.profile(home=True,minimum=self.motion['return_duration_s'])
+        duration=home.duration
+        if not self.bounded(home):
+            brake=self.profile()
+            saved=self.p,self.v,self.a
+            self.p,self.v,self.a=self.sample(brake,brake.duration)
+            try:duration=brake.duration+self.profile(home=True,minimum=self.motion['return_duration_s']).duration
+            finally:self.p,self.v,self.a=saved
+        return max(5.,duration+1.)
 
     def step(self,velocity,dt,returning=False):
         old_a=self.a.copy();speed=self.motion['max_speed_counts_s']
@@ -184,12 +199,10 @@ class ParallelFaceFollower:
                     self.filtered_y+=alpha*(float(target['y'])-self.filtered_y)
                     line=target.get('eye_line_roll_rad')
                     valid=type(line) in (int,float) and math.isfinite(line) and abs(line)<=math.pi/2
-                    desired_roll=float(np.clip(c['roll_follow_ratio']*(line+roll),-c['roll_limit_rad'],c['roll_limit_rad'])) if valid else 0.
+                    desired_roll=c['roll_follow_ratio']*(line+roll) if valid else 0.
                     self.filtered_roll+=alpha*(desired_roll-self.filtered_roll);self.stamp=stamp
                 error=math.copysign(max(0.,abs(self.filtered_y)-c['image_deadband']),self.filtered_y)
                 vp=-c['pitch_gain_rad_s']*error
-                if pitch*vp>0:
-                    vp*=float(np.clip((c['pitch_limit_rad']-abs(pitch))/math.radians(.75),0.,1.))
                 vr=c['roll_gain_s']*(self.filtered_roll-roll)
                 pose_velocity=np.linalg.solve(interaction,np.array([vp,vr]))
                 velocity=self.k.jacobian(*self.reference.pose)@pose_velocity

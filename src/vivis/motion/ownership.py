@@ -68,7 +68,7 @@ def tracking_profile(config, profile, ids, neck=True):
 
 
 class MojiaPlaybackGaze:
-    """Own only IDs8/23/7/22/32; preserve every other prerecorded target."""
+    """Own eye/yaw axes and the optional33/34 platform; preserve other targets."""
     def __init__(self, config, profile, ids, receiver, status_path=None, round_number=1, repeat=1, neck=True):
         validate_mojia(config,profile,Path(profile.get('calibration_path',ROOT/'configs/robots/mojia/calibration.json')),True,True)
         self.config=config;self.ids=list(ids);self.receiver=receiver
@@ -96,7 +96,7 @@ class MojiaPlaybackGaze:
         self.status_path=status_path;self.last_publish=0.;self.round=round_number;self.repeat=repeat
         self.publisher=PreviewPublisher(status_path) if status_path is not None else None
         self.audio_seconds=0.;self.duration=0.;self.feedback=None
-        self.returning=False;self.telemetry_warnings=[]
+        self.returning=False;self.platform_returning=False;self.telemetry_warnings=[]
 
     def prepare(self, trajectory, measured, snapshots, now):
         for s in snapshots:
@@ -140,7 +140,10 @@ class MojiaPlaybackGaze:
                                              returning=returning,applied_neck=applied_neck)
         result=np.array(base,copy=True);result[self.controller_columns]=self.previous
         if self.platform is not None:
-            goals=self.platform.step(packet,d['state'],dt,now,returning=d['returning_to_center'])
+            self.platform_returning=self.platform_returning or self.audio_seconds>=max(0.,
+                self.duration-self.platform.reference.return_window())
+            goals=self.platform.step(packet,d['state'],dt,now,
+                                     returning=self.platform_returning or d['returning_to_center'])
             for sid,value in goals.items():result[self.ids.index(sid)]=value
             d['parallel_neck']=self.platform.diagnostic
         speed=None
