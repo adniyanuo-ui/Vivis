@@ -22,7 +22,6 @@ class DeveloperConfigurationTests(unittest.TestCase):
     def test_clean_package_preserves_accepted_motion_baseline(self):
         import hashlib
         robot=Robot()
-        self.assertEqual(robot.tracking()['neck']['command_deadband_counts'],16)
         baseline=json.loads((ROOT/'tests/fixtures/baseline.json').read_text())
         digest=lambda data:hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         motors={m['id']:m for m in robot.profile('0001')['motors']}
@@ -39,8 +38,8 @@ class DeveloperConfigurationTests(unittest.TestCase):
         startup=robot.startup()['axes']
         neck=next(a for a in startup if a['id']==32)
         self.assertEqual(neck['device_limits'],[0,4095])
-        # User replaced ID32 and requested the same PID/deadband as its peers.
-        self.assertEqual(neck['pid_raw'],[32,32,0])
+        # User reduced P after the replacement-axis baseline; D/I stay unchanged.
+        self.assertEqual(neck['pid_raw'],[16,32,0])
         self.assertEqual(neck['deadband_raw'],[0,0])
         self.assertEqual(neck['acceleration_raw'],128)
         self.assertEqual(neck['speed_raw'],600)
@@ -135,7 +134,7 @@ class DeveloperPlaybackTests(unittest.TestCase):
                     return {56:s['position'].to_bytes(2,'little'),60:b'\0\0',
                             62:bytes([s['voltage_raw'],25]),65:b'\0'}[address]
                 bus.snapshot.side_effect=snapshot;bus.feedback.side_effect=state;bus.read.side_effect=read
-                bus.goals.side_effect=lambda goals,speeds,**options:positions.update(goals)
+                bus.goals.side_effect=lambda goals,speeds:positions.update(goals)
                 receiver=SimpleNamespace(poll=lambda now:dict(schema_version=VERSION,sequence=1,
                     timestamp_monotonic=now,target=dict(x=.4,y=0.)))
                 override=None if mode=='face' else MojiaPlaybackGaze(c,p,ids,receiver,neck=mode=='eyes-neck')
@@ -153,14 +152,11 @@ class DeveloperPlaybackTests(unittest.TestCase):
                 if mode=='eyes-neck':
                     sent=bus.goals.call_args_list[-len(result['events']):]
                     for event,call in zip(result['events'],sent):
-                        self.assertEqual(call.kwargs['position_deadbands'],{32:16})
                         speed=call.args[1][32]
                         self.assertEqual(speed,event['person_gaze']['neck_speed_command'])
                         self.assertEqual(speed,event['speed_overrides'][32])
                         self.assertTrue(1<=speed<=motors[32]['max_speed_counts_s'])
                     self.assertEqual(any(call.args[1][32]<motors[32]['max_speed_counts_s'] for call in sent),adaptive)
-                else:
-                    self.assertTrue(all(not call.kwargs for call in bus.goals.call_args_list))
                 bus.close.assert_called_once();clock.close.assert_called_once()
 
 

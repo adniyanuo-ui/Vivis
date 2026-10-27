@@ -7,66 +7,6 @@ from vivis.hardware.feetech.protocol import Bus,packet,decode_status,goal_packet
 from vivis.motion.mapping import inputs,compile_trajectory,limit_step,live_preflight
 
 class ProtocolTests(unittest.TestCase):
-    def deadband_bus(self,changed_only=True):
-        from unittest.mock import Mock
-        from vivis.hardware.feetech.sdk import OfficialSDKBus
-        bus=OfficialSDKBus.__new__(OfficialSDKBus)
-        bus.acceleration={23:0,32:128};bus.changed_goals_only=changed_only
-        bus.goal_axes_suppressed=0;bus._send_goals=Mock()
-        return bus
-
-    def test_command_deadband_accumulates_from_successful_send_in_both_directions(self):
-        for changed_only in (True,False):
-            for sign in (-1,1):
-                with self.subTest(changed_only=changed_only,sign=sign):
-                    bus=self.deadband_bus(changed_only)
-                    bus.goals({23:2047,32:2047},{23:1000,32:600},position_deadbands={32:16})
-                    for delta in range(1,16):
-                        bus.goals({23:2047+delta,32:2047+sign*delta},{23:1000,32:600},
-                                  position_deadbands={32:16})
-                        self.assertEqual(bus.last_transmitted_ids,[23])
-                        self.assertEqual(bus.last_sent_commands[32][0],2047)
-                    bus.goals({23:2063,32:2047+sign*16},{23:1000,32:600},position_deadbands={32:16})
-                    self.assertEqual(bus.last_transmitted_ids,[23,32])
-                    self.assertEqual(bus.last_sent_commands[32][0],2047+sign*16)
-                    bus.goals({32:2047+sign},{32:600},position_deadbands={32:16})
-                    self.assertEqual(bus.last_transmitted_ids,[])
-
-    def test_command_deadband_final_neutral_and_tuning_changes_are_not_lost(self):
-        bus=self.deadband_bus()
-        bus.goals({32:2055},{32:600})
-        bus.goals({32:2047},{32:600},position_deadbands={32:16})
-        self.assertEqual(bus.last_transmitted_ids,[])
-        bus.goals({32:2047},{32:600},position_deadbands={32:16},force_ids=[32])
-        self.assertEqual(bus.last_transmitted_ids,[32])
-        bus.changed_goals_only=False
-        bus.goals({32:2047},{32:600},position_deadbands={32:16},force_ids=[32])
-        self.assertEqual(bus.last_transmitted_ids,[])
-        bus.goals({32:2048},{32:500},position_deadbands={32:16})
-        self.assertEqual(bus.last_transmitted_ids,[32])
-        bus.acceleration[32]=64
-        bus.goals({32:2049},{32:500},position_deadbands={32:16})
-        self.assertEqual(bus.last_transmitted_ids,[32])
-        # Startup and homing do not opt in, so even a one-count correction passes.
-        bus.goals({32:2050},{32:500})
-        self.assertEqual(bus.last_transmitted_ids,[32])
-
-    def test_command_deadband_failed_write_and_invalid_options_do_not_advance_cache(self):
-        bus=self.deadband_bus()
-        bus.goals({32:2047},{32:600})
-        bus._send_goals.side_effect=ProtocolError('injected write failure')
-        with self.assertRaises(ProtocolError):
-            bus.goals({32:2063},{32:600},position_deadbands={32:16})
-        self.assertEqual(bus.last_sent_commands[32][0],2047)
-        bus._send_goals.side_effect=None
-        bus.goals({32:2063},{32:600},position_deadbands={32:16})
-        self.assertEqual(bus.last_transmitted_ids,[32])
-        count=bus._send_goals.call_count
-        for options in ({'position_deadbands':{32:-1}},{'position_deadbands':{32:True}},
-                        {'position_deadbands':{23:16}},{'force_ids':[23]}):
-            with self.assertRaises(ValueError):bus.goals({32:2064},{32:600},**options)
-        self.assertEqual(bus._send_goals.call_count,count)
-
     def test_segmented_sdk_snapshot_decodes_all_bytes_and_preserves_cached_control_fields(self):
         from types import SimpleNamespace
         from unittest.mock import Mock

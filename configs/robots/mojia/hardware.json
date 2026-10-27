@@ -889,7 +889,7 @@
       "playback_enabled": true,
       "acceleration_raw": 128,
       "pid_raw": [
-        32,
+        16,
         32,
         0
       ],
