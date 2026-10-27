@@ -1,0 +1,225 @@
+{
+  "source_file": "墨甲10.27（19.04）.json",
+  "calibration_sha256": "e07ceb22c9eee566fcc925c2273a9b104adc7981bb293d45c0e5b6fa9187df28",
+  "previous_calibration_sha256": "b3b0321ac804d89cc131749890fe031035654ce07644a594bcad47ec4eb67943",
+  "hardware_updates": {
+    "5": {
+      "endpoint_envelope_not_safe_limits": {
+        "before": [
+          1850,
+          2320
+        ],
+        "after": [
+          1850,
+          2400
+        ]
+      },
+      "safe_max": {
+        "before": 2320,
+        "after": 2400
+      },
+      "device_max": {
+        "before": 2320,
+        "after": 2400
+      },
+      "feedback_max": {
+        "before": 2320,
+        "after": 2400
+      }
+    },
+    "7": {
+      "safe_min": {
+        "before": 1880,
+        "after": 1920
+      },
+      "safe_max": {
+        "before": 2247,
+        "after": 2150
+      },
+      "device_min": {
+        "before": 1880,
+        "after": 1920
+      },
+      "device_max": {
+        "before": 2250,
+        "after": 2150
+      },
+      "feedback_min": {
+        "before": 1880,
+        "after": 1920
+      },
+      "feedback_max": {
+        "before": 2250,
+        "after": 2150
+      }
+    },
+    "20": {
+      "endpoint_envelope_not_safe_limits": {
+        "before": [
+          1803,
+          2200
+        ],
+        "after": [
+          1747,
+          2200
+        ]
+      },
+      "safe_min": {
+        "before": 1803,
+        "after": 1747
+      },
+      "device_min": {
+        "before": 1803,
+        "after": 1747
+      },
+      "feedback_min": {
+        "before": 1803,
+        "after": 1747
+      }
+    },
+    "22": {
+      "safe_min": {
+        "before": 1860,
+        "after": 1930
+      },
+      "safe_max": {
+        "before": 2214,
+        "after": 2170
+      },
+      "device_min": {
+        "before": 1860,
+        "after": 1930
+      },
+      "device_max": {
+        "before": 2214,
+        "after": 2170
+      },
+      "feedback_min": {
+        "before": 1860,
+        "after": 1930
+      },
+      "feedback_max": {
+        "before": 2214,
+        "after": 2170
+      }
+    },
+    "23": {
+      "endpoint_envelope_not_safe_limits": {
+        "before": [
+          1947,
+          2200
+        ],
+        "after": [
+          1940,
+          2200
+        ]
+      },
+      "safe_min": {
+        "before": 1947,
+        "after": 1940
+      },
+      "safe_max": {
+        "before": 2200,
+        "after": 2180
+      },
+      "device_min": {
+        "before": 1947,
+        "after": 1940
+      },
+      "device_max": {
+        "before": 2200,
+        "after": 2180
+      },
+      "feedback_min": {
+        "before": 1947,
+        "after": 1940
+      },
+      "feedback_max": {
+        "before": 2200,
+        "after": 2180
+      }
+    },
+    "31": {
+      "endpoint_envelope_not_safe_limits": {
+        "before": [
+          1380,
+          2048
+        ],
+        "after": [
+          1380,
+          2047
+        ]
+      }
+    }
+  },
+  "works": {
+    "0001": {
+      "frames": 6774,
+      "audio_sha256": "cbd18a1080ce5c1830df8c4e1cbc3cacbcbee37f5075e18ab344549e0a36e3a6",
+      "unchanged_axes": [
+        2,
+        3,
+        4,
+        6,
+        7,
+        8,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        21,
+        22,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        35,
+        36
+      ],
+      "unchanged_axes_sha256": "c8008ec1fcbc280c85887812305c9184774b361b3e0347b27f4cdeab46e0dbd7",
+      "blink_timeline_sha256": "80ed06891cb04262aeae0a84ef7b85fa257ebcec53f7502e403bbbebb6172edd"
+    },
+    "wz2": {
+      "frames": 1646,
+      "audio_sha256": "639a020f5742de3bd60e87a1f357d2567dc24e363139e7b22824335c951cc923",
+      "unchanged_axes": [
+        2,
+        3,
+        4,
+        6,
+        7,
+        8,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        21,
+        22,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        35,
+        36
+      ],
+      "unchanged_axes_sha256": "9bb549ee1daf6a62330e9edf9cda8493648efb7383a92ba52d383388f7e097ae",
+      "blink_timeline_sha256": "7c91d03e753cfea3343018878ca3f3fe2b50a428ed21c1e9d08872735543f76d"
+    }
+  }
+}

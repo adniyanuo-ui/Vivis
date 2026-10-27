@@ -9,7 +9,7 @@
 | 0001 | `assets/works/0001/audio.wav` | `assets/works/0001/targets.json` |
 | wz2 | `assets/works/wz2/audio.wav` | `assets/works/wz2/targets.json` |
 
-四个文件总计约9MB，内容及哈希与已接受版本一致。`works.json`记录来源哈希、帧数和位置；电机参数只在`configs/robots/mojia/hardware.json`。素材不是Git LFS指针，普通clone即可取得实际文件。
+四个文件总计约9MB。两份音频保留原始哈希；当前目标轨迹已按`墨甲10.27（19.04）.json`重新生成，保留原帧数、已接受的眨眼时序及增益，现场效果待复验。`works.json`记录来源哈希、帧数和位置；电机参数只在`configs/robots/mojia/hardware.json`。素材不是Git LFS指针，普通clone即可取得实际文件。
 
 ```bash
 .venv/bin/python tools/check_assets.py

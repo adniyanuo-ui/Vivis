@@ -26,6 +26,13 @@ class DeveloperConfigurationTests(unittest.TestCase):
         baseline=json.loads((ROOT/'tests/fixtures/baseline.json').read_text())
         digest=lambda data:hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         motors={m['id']:m for m in robot.profile('0001')['motors']}
+        revision=json.loads((ROOT/'tests/fixtures/calibration_1027_1904.json').read_text())
+        # Explicit calibration/EPROM changes are audited separately; preserve
+        # the frozen historical hash for every other hardware field.
+        for sid,changes in revision['hardware_updates'].items():
+            for key,change in changes.items():
+                self.assertEqual(motors[int(sid)][key],change['after'])
+                motors[int(sid)][key]=change['before']
         # User confirmed new EPROM stops; tracking is contained by these stops.
         self.assertEqual((motors[32]['device_min'],motors[32]['device_max']),(1706,2388))
         self.assertEqual((motors[32].pop('tracking_min'),motors[32].pop('tracking_max')),(1706,2388))
@@ -43,11 +50,35 @@ class DeveloperConfigurationTests(unittest.TestCase):
         self.assertEqual(neck['deadband_raw'],[0,0])
         self.assertEqual(neck['acceleration_raw'],128)
         self.assertEqual(neck['speed_raw'],600)
+        for axis in startup:
+            changes=revision['hardware_updates'].get(str(axis['id']),{})
+            if 'device_min' in changes or 'device_max' in changes:
+                axis['device_limits']=[changes.get(key,{'before':axis['device_limits'][j]})['before']
+                                       for j,key in enumerate(('device_min','device_max'))]
         neck['device_limits']=[1600,2600]
         neck.update(pid_raw=[16,26,0],deadband_raw=[5,5],acceleration_raw=0,speed_raw=1000)
         self.assertEqual(digest(startup),baseline['startup_sha256'])
         self.assertEqual(digest(robot.home()['axes']),baseline['home_sha256'])
-        self.assertEqual(robot.calibration_sha256,baseline['calibration_sha256'])
+        self.assertEqual(robot.calibration_sha256,revision['calibration_sha256'])
+        self.assertEqual(revision['previous_calibration_sha256'],baseline['calibration_sha256'])
+
+    def test_calibration_revision_preserves_work_timing_audio_and_unaffected_axes(self):
+        import hashlib
+        robot=Robot();revision=json.loads((ROOT/'tests/fixtures/calibration_1027_1904.json').read_text())
+        digest=lambda value:hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        for name,baseline in revision['works'].items():
+            work=robot.work(name);target=json.loads(work['targets'].read_text())
+            self.assertEqual(target['frames'],baseline['frames'])
+            self.assertEqual(target['fps'],dict(num=60,den=1))
+            self.assertEqual(target['audio_sha256'],baseline['audio_sha256'])
+            self.assertEqual(hashlib.sha256(work['audio'].read_bytes()).hexdigest(),baseline['audio_sha256'])
+            self.assertEqual(target['calibration_sha256'],robot.calibration_sha256)
+            self.assertEqual(target['calibration_update']['accepted_previous_render_max_error'],0.)
+            matrix=np.asarray(target['positions'])
+            unchanged=matrix[:,[target['motor_ids'].index(sid) for sid in baseline['unchanged_axes']]]
+            self.assertEqual(digest(unchanged.tolist()),baseline['unchanged_axes_sha256'])
+            timeline=[{k:v for k,v in e.items() if k!='endpoints'} for e in target['blink_adjustment']['events']]
+            self.assertEqual(digest(timeline),baseline['blink_timeline_sha256'])
 
     def test_new_hardware_value_is_used_by_all_runtime_views(self):
         robot = Robot()

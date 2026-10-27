@@ -5,9 +5,9 @@
       "name": "0001",
       "targets": "assets/works/0001/targets.json",
       "audio": "assets/works/0001/audio.wav",
-      "targets_sha256": "ae6fecde34404f227ff7070410b93c7a779e8c1942a5403570af9413cddc3e79",
+      "targets_sha256": "8d15e930fba76e60fbbeb6885fb645c05288b0e0e21e141b225b839029e182e0",
       "audio_sha256": "cbd18a1080ce5c1830df8c4e1cbc3cacbcbee37f5075e18ab344549e0a36e3a6",
-      "calibration_sha256": "b3b0321ac804d89cc131749890fe031035654ce07644a594bcad47ec4eb67943",
+      "calibration_sha256": "e07ceb22c9eee566fcc925c2273a9b104adc7981bb293d45c0e5b6fa9187df28",
       "fps": 60,
       "frames": 6774,
       "motor_ids": [
@@ -47,9 +47,9 @@
       "name": "wz2",
       "targets": "assets/works/wz2/targets.json",
       "audio": "assets/works/wz2/audio.wav",
-      "targets_sha256": "4cfd5d6428fbf52aa19cb6990c9466b19371f8eaba0266f0622be6d950f98114",
+      "targets_sha256": "19bb19111ff64d64ea08ddad4a304f7c456a13ec7a6b7ba45215e11cd01e10e7",
       "audio_sha256": "639a020f5742de3bd60e87a1f357d2567dc24e363139e7b22824335c951cc923",
-      "calibration_sha256": "b3b0321ac804d89cc131749890fe031035654ce07644a594bcad47ec4eb67943",
+      "calibration_sha256": "e07ceb22c9eee566fcc925c2273a9b104adc7981bb293d45c0e5b6fa9187df28",
       "fps": 60,
       "frames": 1646,
       "motor_ids": [

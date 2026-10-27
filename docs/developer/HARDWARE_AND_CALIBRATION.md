@@ -38,7 +38,7 @@
 
 ## 3. 标定文件和参数文件分别做什么
 
-`configs/robots/mojia/calibration.json`为唯一最终标定文件。结构示例：
+`configs/robots/mojia/calibration.json`为唯一最终标定文件，当前原样使用用户提供的`墨甲10.27（19.04）.json`；来源记录在`robot.json.calibration_source`，对应作品已重新生成，见[本次标定更新](CALIBRATION_UPDATE_20261027.md)。结构示例：
 
 ```json
 {"shape":"BrowDownLeft","posSize":3,"positions":[{"id":2,"position":2300},{"id":3,"position":2098},{"id":4,"position":1954}]}

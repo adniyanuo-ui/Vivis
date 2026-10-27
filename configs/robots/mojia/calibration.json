@@ -99,7 +99,7 @@
             "positions": [
                 {
                     "id": 5,
-                    "position": 2320
+                    "position": 2400
                 },
                 {
                     "id": 6,
@@ -185,7 +185,7 @@
             "positions": [
                 {
                     "id": 20,
-                    "position": 1803
+                    "position": 1747
                 },
                 {
                     "id": 21,
@@ -217,7 +217,7 @@
             "positions": [
                 {
                     "id": 23,
-                    "position": 1947
+                    "position": 1940
                 }
             ],
             "shape": "EyeLookInRight"
@@ -323,12 +323,8 @@
             "shape": "JawOpen"
         },
         {
-            "posSize": 1,
+            "posSize": 0,
             "positions": [
-                {
-                    "id": 31,
-                    "position": 2048
-                }
             ],
             "shape": "MouthClose"
         },
@@ -630,7 +626,8 @@
         },
         {
             "posSize": 0,
-            "positions": [],
+            "positions": [
+            ],
             "shape": "MouthRollLower"
         },
         {
@@ -797,7 +794,8 @@
         },
         {
             "posSize": 0,
-            "positions": [],
+            "positions": [
+            ],
             "shape": "CheekPuff"
         },
         {
