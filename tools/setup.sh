@@ -5,14 +5,13 @@ PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd -- "$PROJECT_DIR"
 unset PYTHONPATH
 export PYTHONNOUSERSITE=1
-EXTRAS=vision
+EXTRAS=vision,trajectory
+export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 if [[ $# -gt 0 ]]; then
     if [[ $# -ne 1 || "$1" != --trajectory ]]; then
         printf 'Usage: ./tools/setup.sh [--trajectory]\n' >&2
         exit 2
     fi
-    EXTRAS=vision,trajectory
-    export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 fi
 if [[ ! -x .venv/bin/python ]]; then
     "${VIVIS_PYTHON:-python3}" -m venv .venv

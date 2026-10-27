@@ -13,7 +13,7 @@
 仓库根目录执行。新Ubuntu主机缺少系统依赖时先安装；已有环境不必重装驱动、CUDA或系统软件。
 
 ```bash
-sudo apt-get install python3-venv libportaudio2 alsa-utils
+sudo apt-get install python3-venv libportaudio2 alsa-utils build-essential cmake
 ./tools/setup.sh
 ```
 
@@ -25,7 +25,7 @@ sudo apt-get install python3-venv libportaudio2 alsa-utils
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -e '.[vision]'
+CMAKE_BUILD_PARALLEL_LEVEL=2 .venv/bin/python -m pip install -e '.[vision,trajectory]'
 .venv/bin/python tools/check_assets.py
 ```
 

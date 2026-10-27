@@ -12,6 +12,7 @@ def baseline_config():
     c=Robot().tracking()
     for axis in c['control']['axes']:axis.pop('speed_counts_s',None)
     c['neck'].update(range_mode='offset',offset_counts=80)
+    c['neck']['upstream_trajectory']['enabled']=False  # Preserve legacy controller fixtures.
     # Retain the previously accepted eye-speed fixtures for legacy regressions.
     c['control']['speed_counts_s']=300
     for axis in c['control']['axes']:

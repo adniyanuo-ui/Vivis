@@ -12,7 +12,7 @@ sudo apt-get install python3-venv libportaudio2 alsa-utils
 ./tools/setup.sh
 ```
 
-安装脚本建立独立`.venv`、安装`.[vision]`、核验素材和模型，并检查三个入口。安装/离线检查不打开串口、音频或相机。只跑面部示例也可手动执行`python3 -m venv .venv`和`.venv/bin/python -m pip install -e .`。
+安装脚本建立独立`.venv`、安装`.[vision,trajectory]`、核验素材和模型，并检查三个入口。安装/离线检查不打开串口、音频或相机。只跑面部示例也可手动执行`python3 -m venv .venv`和`.venv/bin/python -m pip install -e .`。
 
 核对设备配置后，逐个运行：
 
@@ -62,7 +62,7 @@ Vivis/
 
 - 改算法：`src/vivis/`。editable安装后改源码即生效，示例不复制控制算法。
 - 改设备参数：`configs/robots/mojia/`。运行profile、启动设置及跟踪器使用同一硬件表。
-- 可选颈部平滑：[上游轨迹规划](docs/developer/UPSTREAM_TRAJECTORY_PLANNING.md)，默认关闭；示例3用`--upstream-trajectory on/off`选择，不影响其他轴。
+- 颈部平滑：[上游轨迹规划](docs/developer/UPSTREAM_TRAJECTORY_PLANNING.md)，示例3默认开启，用`--upstream-trajectory off`显式关闭，不影响其他轴。
 - 改输入：用自己的音频与61通道文件[导入新作品](docs/developer/DATA_AND_CONTROL_API.md#3-接入自己的音频与表情序列)。
 - 核验素材：`.venv/bin/python tools/check_assets.py`；核验标定覆盖：`.venv/bin/python tools/check_calibration.py`。
 - 扩展上游：客户可以接入LLM、TTS、A2F等；已有示例不依赖CUDA，也不等于实时A2F推理已验收。

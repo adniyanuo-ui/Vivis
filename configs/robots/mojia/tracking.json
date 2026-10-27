@@ -85,7 +85,7 @@
     "filter_tau_s": 0.12,
     "target_filter_tau_s": 0.15,
     "upstream_trajectory": {
-      "enabled": false,
+      "enabled": true,
       "max_acceleration_counts_s2": 800.0,
       "max_jerk_counts_s3": 8000.0
     },
@@ -93,5 +93,5 @@
     "adaptive_speed": false,
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-27 user confirmed no segmented motion after withdrawing16-count send deadband and reduced vibration at PID16/32/0. Optional ID32 upstream trajectory planning added, default off; on replaces150ms target low-pass with velocity/acceleration/jerk-limited reference, off retains accepted path. SRAM41=128, SRAM46=600, neutral return at least3s, eye parameters, hardware deadband0/0 and position limits unchanged."
+  "parameter_revision_source": "2026-10-27 save tested ID32 upstream trajectory settings and enable by default; explicit --upstream-trajectory off restores150ms position low-pass. Completed0001 log144834 has6774/6774 planner-enabled samples without secondary150ms target filtering. Software reference acceleration800/jerk8000; PID16/32/0, SRAM41=128, SRAM46=600, neutral return at least3s, eye parameters, hardware deadband0/0 and position limits unchanged."
 }

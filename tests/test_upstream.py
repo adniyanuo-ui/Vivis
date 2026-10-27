@@ -41,7 +41,8 @@ class OptionalPlanningTests(unittest.TestCase):
             self.assertEqual(dx,dy)
 
     def test_explicit_off_overrides_saved_on_and_other_modes_cannot_enable(self):
-        c=Robot().tracking();c['neck']['upstream_trajectory']['enabled']=True
+        c=Robot().tracking()
+        self.assertTrue(configure(c,'eyes-neck')['enabled'])
         self.assertFalse(configure(c,'eyes-neck','off')['enabled'])
         for mode,home in [('face',False),('eyes',False),('eyes-neck',True)]:
             with self.subTest(mode=mode,home=home):

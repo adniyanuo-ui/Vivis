@@ -22,6 +22,7 @@ class DeveloperConfigurationTests(unittest.TestCase):
     def test_clean_package_preserves_accepted_motion_baseline(self):
         import hashlib
         robot=Robot()
+        self.assertTrue(robot.tracking()['neck']['upstream_trajectory']['enabled'])
         baseline=json.loads((ROOT/'tests/fixtures/baseline.json').read_text())
         digest=lambda data:hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         motors={m['id']:m for m in robot.profile('0001')['motors']}
@@ -96,6 +97,7 @@ class DeveloperConfigurationTests(unittest.TestCase):
                         self.assertEqual(len(result['home_ids']),35)
                         expected=[] if mode=='face' else [8,23] if mode=='eyes' else [8,23,32]
                         self.assertEqual(result['gaze_owner_ids'],expected)
+                        self.assertEqual(result['upstream_trajectory']['enabled'],mode=='eyes-neck')
                         self.assertEqual(set(result['commanded']) & {7,8,22,23,32,33,34},set(expected))
 
 
@@ -108,6 +110,7 @@ class DeveloperPlaybackTests(unittest.TestCase):
         for mode,adaptive in (('face',False),('eyes',False),('eyes-neck',False),('eyes-neck',True)):
             with self.subTest(mode=mode,adaptive=adaptive):
                 robot=Robot();c=robot.tracking();c['control']['vertical_enabled']=False
+                c['neck']['upstream_trajectory']['enabled']=False  # This fixture checks the legacy adaptive scheduler.
                 c['neck']['adaptive_speed']=adaptive
                 c['control']['axes']=[a for a in c['control']['axes'] if a['id'] not in (7,22)]
                 c['control']['held_eye_ids']=[7,22]

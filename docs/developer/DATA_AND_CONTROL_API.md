@@ -71,11 +71,11 @@ PYTHONPATH=src .venv/bin/python -m vivis.motion.export \
 
 改变速度以`hardware.json`为准；实际启动会读回核验。改变标定需重新生成受影响轨迹并核对其来源哈希，不能仅修改哈希使旧轨迹通过校验。波特率修改必须主机和35轴一致，当前示例不会自动写设备波特率。
 
-颈部目标平滑时间常数`neck.target_filter_tau_s`和回中参考最短时长`neck.return_duration_s`在`tracking.json`中定义，分别为0.15秒、3秒；属于行为目标的连续化处理，不恢复固定64计数/秒²软件加速度限制。`person_gaze`日志分别保存`planned_neck_goal`（平滑前）、`smoothed_neck_goal`（平滑后）和`neck_return_duration_s`；`events.goals`是交给发送器的整数请求，须结合`transmitted_ids`确认该周期实际发送的轴。这些均不等于编码器位置。当前32号SRAM41=128仍按唯一硬件配置恢复。
+关闭上游轨迹规划时，颈部目标平滑时间常数`neck.target_filter_tau_s`为0.15秒；回中参考最短时长`neck.return_duration_s`为3秒。它们在`tracking.json`定义，不恢复原64计数/秒²软件加速度限制。`person_gaze`日志分别保存`planned_neck_goal`、`smoothed_neck_goal`和`neck_return_duration_s`；关闭规划时前两者表示低通前后位置。`events.goals`是交给发送器的整数请求，须结合`transmitted_ids`确认实际发送的轴。这些均不等于编码器位置。当前32号SRAM41=128仍按唯一硬件配置恢复。
 
 16计数发送死区已因现场分段运动撤销，相关配置、SDK选项及运行日志字段已移除；旧日志中的`goal_deadband`仅属于当时的试验版本。ID32 PID从唯一硬件配置取得16/32/0。
 
-[上游轨迹规划](UPSTREAM_TRAJECTORY_PLANNING.md)默认关闭，由`neck.upstream_trajectory.enabled`或示例3的`--upstream-trajectory on/off`控制。开启时用单轴jerk受限规划接管ID32的位置低通，`planned_neck_goal`/`smoothed_neck_goal`均为规划输出，不表示再次滤波；原始期望速度和参考p/v/a、平均jerk、模式、周期在`person_gaze.upstream_trajectory`记录。关闭时保持150ms链路和原输出，且不导入可选Ruckig依赖。开关只在启动时解析，不支持运行中热切换。
+[上游轨迹规划](UPSTREAM_TRAJECTORY_PLANNING.md)在示例3默认开启，配置`neck.upstream_trajectory.enabled=true`；`--upstream-trajectory off`显式关闭，`on`可显式开启。开启时用单轴jerk受限规划接管ID32的位置低通，`planned_neck_goal`/`smoothed_neck_goal`均为规划输出，不表示再次滤波；原始期望速度和参考p/v/a、平均jerk、模式、周期在`person_gaze.upstream_trajectory`记录。150ms字段保留供关闭时回退，开启时不生效；关闭路径不导入Ruckig。开关只在启动时解析，不支持运行中热切换。
 
 `neck.eye_assist_ratio=0.25`定义当前相机眼的实测行程使用率辅助门槛，不是固定等待时间。`person_gaze.eye_offset_command`与`eye_offset_measured`分别记录命令和实测归一化眼位，`eye_feedback_age_s`记录反馈年龄；`eye_reserve`表示图像仍有偏差且已消耗眼部行程，`eye_feedback_stale`表示反馈过期而不请求颈部辅助。没有新增串口轮询，复用现有眼球反馈。
 
