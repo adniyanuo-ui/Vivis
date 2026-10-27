@@ -83,6 +83,8 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Need positive camera width for image growth threshold')
     if type(n.get('adaptive_speed',True)) is not bool:
         raise ValueError('Invalid neck adaptive speed flag')
+    if type(n.get('command_deadband_counts',0)) is not int or not 0<=n.get('command_deadband_counts',0)<=64:
+        raise ValueError('Invalid neck command deadband')
     for key,default,minimum,maximum in [('target_filter_tau_s',0.,0.,1.),('return_duration_s',3.,.5,10.),
                                       ('eye_assist_ratio',.25,.1,1.)]:
         value=n.get(key,default)

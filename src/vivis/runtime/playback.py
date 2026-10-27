@@ -163,6 +163,9 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         if not isinstance(gaze_override,MojiaPlaybackGaze):
             raise ValueError('Mojia tracking requires its own reviewed calibration')
         mojia_gaze=True
+        if (gaze_override.neck and gaze_override.config['neck'].get('command_deadband_counts',0)
+                and profile.get('serial_backend')!='feetech_python'):
+            raise ValueError('Neck command deadband requires the reviewed SDK transport')
     if gaze_override is not None and not {a['id'] for a in gaze_override.axes} <= command_ids:
         raise ValueError('Tracked eye axes must be among commanded IDs')
     speed_limits=np.array([motors[sid]['max_speed_counts_s'] for sid in ids],dtype=float)
@@ -446,7 +449,15 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                        for sid,speed in overrides.items()):
                     raise ValueError('Live gaze speed exceeds owned-axis speed limits')
                 command_speeds={**speeds,**overrides}
-            bus.goals(goals,command_speeds);last_sent=goals
+            command_options={}
+            if mojia_gaze and gaze_override.neck and gaze_override.config['neck'].get('command_deadband_counts',0):
+                neck=gaze_override.config['neck'];sid=neck['id']
+                command_options['position_deadbands']={sid:neck.get('command_deadband_counts',0)}
+                # A small final neutral correction must not be stranded inside
+                # the transmission deadband. Homing/initial approach are separate.
+                command_options['force_ids']=([sid] if gaze_override.last_diagnostic['returning_to_center']
+                                              and goals[sid]==motors[sid]['neutral'] else [])
+            bus.goals(goals,command_speeds,**command_options);last_sent=goals
             command_done=time.monotonic() if mojia_gaze else None
             if previous_index>=0:skipped+=max(0,index-previous_index-1)
             events.append({'audio_seconds':t,'frame':index,'sent_monotonic':now,'goals':goals})
@@ -454,7 +465,11 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             if face_hz!=fps:events[-1]['face_frame']=face_index
             if gaze_override is not None:
                 events[-1]['person_gaze']=gaze_override.last_diagnostic
-            if profile.get('changed_goals_only'):
+            if command_options and isinstance(getattr(bus,'last_goal_deadband',None),dict):
+                events[-1]['goal_deadband']={sid:{**decision,
+                    'applied_goal':bus.last_sent_commands.get(sid,(None,))[0]}
+                    for sid,decision in bus.last_goal_deadband.items()}
+            if profile.get('changed_goals_only') or command_options:
                 events[-1]['transmitted_ids']=list(bus.last_transmitted_ids)
             previous_index=index
             # Prioritize the stalest axis so a single lost reply does not wait

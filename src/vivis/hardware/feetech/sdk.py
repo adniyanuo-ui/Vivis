@@ -134,16 +134,36 @@ class OfficialSDKBus(Bus):
         return {'position':position,'load_raw':load,'voltage_raw':sensors[0],
                 'temperature_c':sensors[1],'status_register':status}
 
-    def goals(self, goals, speeds):
+    def goals(self, goals, speeds, *, position_deadbands=None, force_ids=()):
         goal_packet(goals, speeds)  # validate all positions/speeds before any write
+        deadbands={} if position_deadbands is None else position_deadbands
+        if (not isinstance(deadbands,dict) or any(type(sid) is not int or sid not in goals
+                or type(delta) is not int or not 0<=delta<=4095 for sid,delta in deadbands.items())
+                or any(type(sid) is not int or sid not in goals for sid in force_ids)):
+            raise ValueError('Invalid position command deadband or forced IDs')
         if any(sid not in self.acceleration for sid in goals):
             raise ProtocolError('Need initial snapshot to preserve acceleration')
         self.last_transmitted_ids = []
+        self.last_goal_deadband = {}
         commands = {sid:(goals[sid],speeds[sid],self.acceleration[sid]) for sid in goals}
+        previous = getattr(self,'last_sent_commands',{})
+        suppressed=set()
+        for sid,threshold in deadbands.items():
+            old=previous.get(sid)
+            delta=abs(goals[sid]-old[0]) if old is not None else None
+            # Compare with the last successful transmission, never adjacent
+            # filtered samples. Preserve first goals and RAM tuning changes.
+            blocked=(old is not None and threshold>0 and commands[sid][1:]==old[1:]
+                     and (delta==0 or (sid not in force_ids and delta<threshold)))
+            if blocked:suppressed.add(sid)
+            self.last_goal_deadband[sid]=dict(threshold_counts=threshold,requested_goal=goals[sid],
+                previous_goal=old[0] if old is not None else None,delta_counts=delta,
+                suppressed=blocked,forced=sid in force_ids)
+        goals={sid:pos for sid,pos in goals.items() if sid not in suppressed}
+        self.goal_axes_suppressed=getattr(self,'goal_axes_suppressed',0)+len(suppressed)
         if getattr(self,'changed_goals_only',False):
             # Windows ServoServer suppresses unchanged integer goals. Include
             # speed/acceleration here so configuration changes are not dropped.
-            previous = getattr(self,'last_sent_commands',{})
             changed = {sid:pos for sid,pos in goals.items() if previous.get(sid)!=commands[sid]}
             self.goal_axes_suppressed += len(goals)-len(changed)
             goals = changed

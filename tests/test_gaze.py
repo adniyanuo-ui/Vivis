@@ -12,6 +12,7 @@ def baseline_config():
     c=Robot().tracking()
     for axis in c['control']['axes']:axis.pop('speed_counts_s',None)
     c['neck'].update(range_mode='offset',offset_counts=80)
+    c['neck']['command_deadband_counts']=0  # Legacy scheduler fixtures; SDK gate is tested separately.
     # Retain the previously accepted eye-speed fixtures for legacy regressions.
     c['control']['speed_counts_s']=300
     for axis in c['control']['axes']:
@@ -702,6 +703,7 @@ class MojiaPerformanceTests(unittest.TestCase):
         for face_hz,eye,control_hz in ((30,'left',60),(60,'right',60),(30,'right',30)):
             with self.subTest(face_hz=face_hz,camera_eye=eye,control_hz=control_hz):
                 c,p,ids,r=self.setup_performance();fixture,bus,clock=PlaybackTests().fixture()
+                c['neck']['command_deadband_counts']=16
                 c['control']['camera_eye']=eye
                 for key in ['audio_device','hardware_stop_description','physical_audio_output_confirmed','actuator_latency_ms','stop_method']:
                     p[key]=fixture[key]
@@ -732,7 +734,13 @@ class MojiaPerformanceTests(unittest.TestCase):
                         raise CorruptResponse('captured ID4 startup failure')
                     return state(sid)
                 bus.snapshot.side_effect=snapshot;bus.feedback.side_effect=startup_state
-                bus.goals.side_effect=lambda goals,speeds:positions.update(goals)
+                from vivis.hardware.feetech.sdk import OfficialSDKBus
+                bus.acceleration={sid:128 if sid==32 else 0 for sid in ids}
+                bus.last_sent_commands={};bus.changed_goals_only=False
+                bus.sync_group_size=30;bus.sync_group_gap_ms=0;bus.post_goal_quiet_ms=0
+                bus.goal_axes_suppressed=0;bus.goal_axes_sent=0
+                bus._send_goals.side_effect=lambda goals,speeds:positions.update(goals)
+                bus.goals.side_effect=lambda goals,speeds,**options:OfficialSDKBus.goals(bus,goals,speeds,**options)
                 attempts=[0]
                 def read(sid,address,count):
                     attempts[0]+=1
@@ -747,6 +755,11 @@ class MojiaPerformanceTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as directory,patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus),patch('vivis.runtime.playback.AudioClock',return_value=clock):
                     result=play(p,ids,trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP',gaze_override=a)
                 self.assertTrue(result['completed'])
+                for e in result['events']:
+                    self.assertEqual(e['goal_deadband'][32]['threshold_counts'],16)
+                    if e['goal_deadband'][32]['suppressed']:
+                        self.assertNotIn(32,e['transmitted_ids'])
+                    self.assertNotIn(23,e['goal_deadband'])
                 self.assertEqual(result['control_hz'],control_hz)
                 self.assertEqual(result['playback_fps'],60)
                 self.assertEqual(result['runtime_feedback_schedule']['budget_ms'],1000/control_hz)

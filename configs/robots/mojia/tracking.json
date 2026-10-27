@@ -84,9 +84,10 @@
     "stop_deadband": 0.07,
     "filter_tau_s": 0.12,
     "target_filter_tau_s": 0.15,
+    "command_deadband_counts": 16,
     "return_duration_s": 3.0,
     "adaptive_speed": false,
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-27 symmetric neck assistance also uses fresh camera-eye encoder excursion of25% while moving with residual error; reversal clears old image-error polarity. Neck command quantization has1-count hysteresis. SRAM41=128, SRAM46=600, target low-pass150ms, neutral return at least3s, eye parameters, PID32/32/0, deadband0/0 and position limits unchanged."
+  "parameter_revision_source": "2026-10-27 ID32 playback transmission deadband16 counts measured from last successfully sent goal; final neutral correction bypasses deadband. Symmetric eye-reserve coordination, SRAM41=128, SRAM46=600, target low-pass150ms, neutral return at least3s, eye parameters, PID32/32/0, hardware deadband0/0 and position limits unchanged."
 }
