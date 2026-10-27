@@ -50,7 +50,7 @@ class StartupSettingsTests(unittest.TestCase):
             if sid in (9,24):
                 self.assertEqual(ram[sid][1],10);self.assertEqual(speeds[sid],0)
                 self.assertFalse(any(row[0]==sid for row in writes));continue
-            self.assertEqual(ram[sid][1],0)
+            self.assertEqual(ram[sid][1],128 if sid==32 else 0)
             self.assertEqual(int.from_bytes(ram[sid][6:8],'little'),60)
             self.assertEqual(speeds[sid],1200 if sid in (10,11,12,13,15,25,26,27,28,29,30,31,35,36) else 1000)
         self.assertEqual(list(config[32][21:24]),[32,32,0])

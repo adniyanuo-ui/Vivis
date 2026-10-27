@@ -71,6 +71,8 @@ PYTHONPATH=src .venv/bin/python -m vivis.motion.export \
 
 改变速度以`hardware.json`为准；实际启动会读回核验。改变标定需重新生成受影响轨迹并核对其来源哈希，不能仅修改哈希使旧轨迹通过校验。波特率修改必须主机和35轴一致，当前示例不会自动写设备波特率。
 
+颈部目标平滑时间常数`neck.target_filter_tau_s`和回中参考最短时长`neck.return_duration_s`在`tracking.json`中定义，分别为0.15秒、3秒；属于行为目标的连续化处理，不恢复固定64计数/秒²软件加速度限制。`person_gaze`日志分别保存`planned_neck_goal`（平滑前）、`smoothed_neck_goal`（平滑后）和`neck_return_duration_s`，实际整数发送目标在`events.goals`；这些均不等于编码器位置。当前32号SRAM41=128仍按唯一硬件配置恢复。
+
 `--mouth-gain`沿用既有6轴偏移倍率，适用ID12/13/27/28/29/31，在`hardware.json`的`runtime.mouth_gain_ids`中列明；它与14个口型相关轴的速度分组是两个概念。默认倍率1.0，不改变目标幅度。
 
 ## 5. 控制权与资源

@@ -82,8 +82,10 @@
     "deadband": 0.14,
     "stop_deadband": 0.07,
     "filter_tau_s": 0.12,
+    "target_filter_tau_s": 0.15,
+    "return_duration_s": 3.0,
     "adaptive_speed": false,
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-27 user requested removal of all software acceleration limits; acceleration is controlled by servo SRAM41. Existing visual-error coordination, position/speed bounds and face-loss neutral return remain. Hardware41/46, PID and deadband are unchanged in this revision."
+  "parameter_revision_source": "2026-10-27 user requested ID32 SRAM41=128, neck target low-pass150ms and a smooth neutral return of at least3s. No fixed software acceleration limit; eye parameters, neck speed1000, PID32/32/0, deadband0/0 and position limits are unchanged."
 }

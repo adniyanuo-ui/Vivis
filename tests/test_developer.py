@@ -40,8 +40,9 @@ class DeveloperConfigurationTests(unittest.TestCase):
         # User replaced ID32 and requested the same PID/deadband as its peers.
         self.assertEqual(neck['pid_raw'],[32,32,0])
         self.assertEqual(neck['deadband_raw'],[0,0])
+        self.assertEqual(neck['acceleration_raw'],128)
         neck['device_limits']=[1600,2600]
-        neck.update(pid_raw=[16,26,0],deadband_raw=[5,5])
+        neck.update(pid_raw=[16,26,0],deadband_raw=[5,5],acceleration_raw=0)
         self.assertEqual(digest(startup),baseline['startup_sha256'])
         self.assertEqual(digest(robot.home()['axes']),baseline['home_sha256'])
         self.assertEqual(robot.calibration_sha256,baseline['calibration_sha256'])
@@ -121,6 +122,7 @@ class DeveloperPlaybackTests(unittest.TestCase):
                 def snapshot(sid):
                     raw=bytearray(40);raw[18]=4;raw[21:24]=bytes(c['neck']['observed_pid_raw'])
                     raw[26:28]=bytes(c['neck']['observed_deadband_counts']);ram=bytearray(31)
+                    ram[1]=c['neck']['observed_acceleration_raw'] if sid==32 else 0
                     return dict(id=sid,model_raw=motors[sid]['model_raw_expected'],mode=0,torque_enable=1,
                                 configured_min=motors[sid]['device_min'],configured_max=motors[sid]['device_max'],
                                 position_raw=2047,config_0_39_hex=raw.hex(),state_40_70_hex=ram.hex(),

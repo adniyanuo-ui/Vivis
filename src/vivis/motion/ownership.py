@@ -102,7 +102,8 @@ class MojiaPlaybackGaze:
         self.controller.observe_eye(self.previous[self.owned.index(self.camera_eye_id)],now)
         if self.neck:
             self.scheduler=NeckCommandScheduler(self.previous[self.owned.index(32)],now,self.speeds[-1],
-                                               adaptive_speed=self.config['neck']['adaptive_speed'],endpoints=self.controller.neck_bounds)
+                adaptive_speed=self.config['neck']['adaptive_speed'],endpoints=self.controller.neck_bounds,
+                filter_tau_s=self.config['neck'].get('target_filter_tau_s',0.))
         # Approach the song's first face pose while holding the tracked axes at
         # their measured starting pose; no fast recenter jump between rounds.
         result=np.array(trajectory,copy=True)
@@ -119,7 +120,9 @@ class MojiaPlaybackGaze:
     def apply(self,base,last,dt,now):
         self.returning=self.returning or self.audio_seconds>=max(0.,self.duration-self.controller.return_window(self.previous[-1]))
         returning=self.returning
-        self.previous,d=self.controller.step(self.receiver.poll(now),self.previous,dt,now,returning=returning)
+        applied_neck=self.scheduler.filtered_position if self.neck and self.scheduler is not None else None
+        self.previous,d=self.controller.step(self.receiver.poll(now),self.previous,dt,now,
+                                             returning=returning,applied_neck=applied_neck)
         result=np.array(base,copy=True);result[self.columns]=self.previous
         speed=None
         if self.neck:
@@ -127,6 +130,7 @@ class MojiaPlaybackGaze:
             d['planned_neck_goal']=float(self.previous[-1])
             goal,speed=self.scheduler.step(self.previous[-1],now,returning=d['returning_to_center'])
             result[neck_column]=goal
+            d['smoothed_neck_goal']=self.scheduler.filtered_position
         d['neck_speed_command']=speed
         self.speed_overrides={self.config['neck']['id']:speed} if self.neck else {}
         self.last_diagnostic=d

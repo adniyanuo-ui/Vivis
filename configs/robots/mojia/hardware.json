@@ -887,7 +887,7 @@
       "position_feedback_tolerance_counts": 5,
       "role": "颈部旋转",
       "playback_enabled": true,
-      "acceleration_raw": 0,
+      "acceleration_raw": 128,
       "pid_raw": [
         32,
         32,

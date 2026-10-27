@@ -45,6 +45,50 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_neck_target_filter_rejects_steps_and_is_consistent_across_tick_rates(self):
+        positions=[]
+        for hz in (60,100):
+            scheduler=NeckCommandScheduler(2047,10,1000,False,filter_tau_s=.15)
+            first,_=scheduler.step(2147,10+1/hz)
+            self.assertLess(first,2070)
+            for tick in range(2,int(hz*.3)+1):scheduler.step(2147,10+tick/hz)
+            positions.append(scheduler.filtered_position)
+        self.assertAlmostEqual(positions[0],positions[1],places=8)
+        scheduler=NeckCommandScheduler(2047,10,1000,False,filter_tau_s=.15)
+        goals=[]
+        for tick in range(1,121):
+            goal,_=scheduler.step(2047+(20 if tick%2 else -20),10+tick/60)
+            if tick>30:goals.append(goal)
+        self.assertLessEqual(max(goals)-min(goals),4)
+
+    def test_neck_return_starts_at_applied_position_and_takes_three_seconds(self):
+        c=config();c['neck'].update(return_duration_s=3.,target_filter_tau_s=.15)
+        controller=MojiaPursuit(c,[8,23,32],[300,300,1000],True,neck_bounds=(1600,2600))
+        previous=np.array([2047.,2047.,2600.])
+        scheduler=NeckCommandScheduler(2500,10,1000,False,filter_tau_s=.15)
+        raw=[];sent=[]
+        for tick in range(1,241):
+            now=10+tick/60
+            previous,d=controller.step(None,previous,1/60,now,returning=True,
+                                        applied_neck=scheduler.filtered_position)
+            goal,_=scheduler.step(previous[-1],now,returning=True)
+            raw.append(previous[-1]);sent.append(goal)
+        self.assertEqual(raw[0],2500.)
+        self.assertAlmostEqual(d['neck_return_duration_s'],3.)
+        self.assertGreater(raw[60],2300)
+        self.assertTrue(all(b<=a+1e-8 for a,b in zip(raw,raw[1:])))
+        self.assertLessEqual(max(abs(b-a) for a,b in zip(sent,sent[1:])),7)
+        self.assertEqual(sent[-1],2047)
+        self.assertTrue(all(2047<=p<=2500 for p in raw))
+        previous,d=controller.step(packet(15.,.2),previous,1/60,15.,applied_neck=scheduler.filtered_position)
+        self.assertFalse(d['returning_to_center']);self.assertIsNone(controller.return_started)
+
+    def test_bad_target_smoothing_parameters_are_rejected_before_devices_open(self):
+        for values in (dict(target_filter_tau_s=-1),dict(target_filter_tau_s=float('nan')),
+                       dict(return_duration_s=0),dict(return_duration_s=float('inf'))):
+            c=config();c['neck'].update(values)
+            with self.assertRaises(ValueError):validate_mojia(c,profile(),ROOT/'configs/robots/mojia/calibration.json',True,True)
+
     def test_lost_face_returns_eyes_and_neck_with_bounded_motion_and_can_reacquire(self):
         for stale in (False,True):
             with self.subTest(stale=stale):

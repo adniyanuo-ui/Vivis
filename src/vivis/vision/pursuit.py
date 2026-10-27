@@ -83,6 +83,10 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Need positive camera width for image growth threshold')
     if type(n.get('adaptive_speed',True)) is not bool:
         raise ValueError('Invalid neck adaptive speed flag')
+    for key,default,minimum,maximum in [('target_filter_tau_s',0.,0.,1.),('return_duration_s',3.,.5,10.)]:
+        value=n.get(key,default)
+        if not finite(value) or not minimum<=value<=maximum:
+            raise ValueError('Invalid neck target parameter: '+key)
     low,high=neck_command_limits(config,profile)
     if n.get('range_mode','offset')=='offset' and (
             not finite(n['offset_counts']) or not 1<=n['offset_counts']<=(80 if trial else 160)):
@@ -179,15 +183,15 @@ class MojiaPursuit:
         self.eye_motion = 0.
         self.eye_motion_at = -math.inf
         self.measured_eye = False
+        self.return_started=None;self.return_origin=None;self.return_duration=None
 
     def return_window(self,position):
         if not self.neck:return 5.
-        # Time budget for the existing proportional neutral return, including
-        # a speed-limited section. This is not an acceleration constraint.
-        speed=self.config['neck']['speed_counts_s'];distance=abs(position-2047)
-        transition=min(distance,speed/2)
-        return max(5.,max(0.,distance-transition)/speed+
-                   .5*math.log(max(1.,transition/.25))+1.)
+        n=self.config['neck'];speed=min(n['speed_counts_s'],self.speeds[self.ids.index(n['id'])])
+        distance=abs(position-2047)
+        duration=max(n.get('return_duration_s',3.),1.875*distance/speed)
+        tail=n.get('target_filter_tau_s',0.)*math.log(max(1.,distance/.25))
+        return max(5.,duration+tail+1.)
 
     def observe_eye(self, position, now, measured=True):
         """Record the camera eye's feedback without adding serial reads."""
@@ -204,7 +208,7 @@ class MojiaPursuit:
             self.eye_motion, self.eye_motion_at = float(np.sign(delta)), now
             self.eye_observation = float(position)
 
-    def step(self, packet, previous, dt, now, returning=False):
+    def step(self, packet, previous, dt, now, returning=False, applied_neck=None):
         c, n = self.config['control'], self.config['neck']
         anchor,vertical=self.camera_yaw,self.camera_pitch
         applied = [axis_normalized(anchor, previous[self.ids.index(anchor['id'])]),
@@ -218,6 +222,7 @@ class MojiaPursuit:
         if anchor['positive'] < anchor['neutral']:
             eye_motion = -eye_motion
         result = np.full(len(previous), 2047.)
+        step_base=previous
         for a in c['axes']:
             coordinate=0 if a['coordinate']=='x' else 1
             result[self.ids.index(a['id'])] = 2047. if returning else 2047*(1-weight)+weight*axis_position(a, xy[coordinate])
@@ -227,18 +232,29 @@ class MojiaPursuit:
             desired = 0.
             if return_center:
                 self.assist.reset()
-                delta = 2047-position
-                desired = math.copysign(min(n['speed_counts_s'], abs(delta)*2), delta)
+                if self.return_started is None:
+                    origin=position if applied_neck is None else applied_neck
+                    if not math.isfinite(origin) or not self.neck_bounds[0]<=origin<=self.neck_bounds[1]:
+                        raise ValueError('Invalid applied neck position for neutral return')
+                    self.return_started=now;self.return_origin=float(origin)
+                    speed=min(n['speed_counts_s'],self.speeds[col])
+                    self.return_duration=max(n.get('return_duration_s',3.),1.875*abs(origin-2047)/speed)
+                    step_base=np.array(previous,copy=True);step_base[col]=origin
+                u=float(np.clip((now-self.return_started)/self.return_duration,0.,1.))
+                blend=u*u*u*(10+u*(-15+6*u))
+                goal=self.return_origin+(2047-self.return_origin)*blend
+                desired=(2047-self.return_origin)*30*u*u*(1-u)*(1-u)/self.return_duration
             else:
+                self.return_started=self.return_origin=self.return_duration=None
                 span = abs(anchor['positive' if eye >= 0 else 'negative']-anchor['neutral'])
                 desired = self.assist.step(packet,state,eye,eye_motion,span)
+                desired=float(np.clip(desired,-n['speed_counts_s'],n['speed_counts_s']))
+                goal=position+desired*dt
             low, high = self.neck_bounds
-            desired = float(np.clip(desired,-n['speed_counts_s'],n['speed_counts_s']))
-            goal = float(np.clip(position+desired*dt,low,high))
-            if return_center and abs(position-2047)<.25:goal=2047.
-            self.velocity=(goal-position)/dt
+            goal=float(np.clip(goal,low,high))
+            self.velocity=(goal-step_base[col])/dt
             result[col] = goal
-        return limit_step(previous, result, self.speeds, dt), dict(
+        return limit_step(step_base, result, self.speeds, dt), dict(
             state=state, weight=weight, eye_error_x=float(xy[0]), neck_velocity=self.velocity,
             image_error_x=self.assist.raw, filtered_image_error_x=self.assist.filtered,
             image_error_growth=self.assist.growth, camera_timestamp=self.assist.stamp,
@@ -247,17 +263,21 @@ class MojiaPursuit:
             returning_to_center=return_center,
             neck_assist_reason='returning' if returning else 'lost_face_return' if lost_return else self.assist.reason,
             neck_requested_velocity=desired if self.neck else 0.,
+            neck_return_duration_s=self.return_duration if self.neck and return_center else None,
             neck_at_limit=bool(self.neck and (result[self.ids.index(32)]<=low or result[self.ids.index(32)]>=high)))
 
 
 class NeckCommandScheduler:
-    """Coalesce tiny neck targets and match servo speed to average trajectory rate.
+    """Filter neck targets and match servo speed to average trajectory rate.
 
-    This only shapes ID32 transport; the continuous eye/head planner and eye
-    limits are unchanged. Speed remains bounded by the configured ceiling.
+    Filtered integer changes are sent each control tick. Unfiltered inputs
+    retain tiny-target coalescing. Eye targets and speed ceilings are unchanged.
     """
-    def __init__(self, position, now, maximum_speed, adaptive_speed=True,endpoints=()):
+    def __init__(self, position, now, maximum_speed, adaptive_speed=True,endpoints=(),filter_tau_s=0.):
+        if not math.isfinite(filter_tau_s) or not 0<=filter_tau_s<=1:
+            raise ValueError('Invalid neck target filter time constant')
         self.goal=int(round(position))
+        self.filtered_position=float(position);self.updated_at=now;self.filter_tau_s=filter_tau_s
         self.sent_at=now
         self.maximum_speed=int(maximum_speed)
         self.adaptive_speed=adaptive_speed
@@ -265,13 +285,19 @@ class NeckCommandScheduler:
         self.speed=min(50,self.maximum_speed) if adaptive_speed else self.maximum_speed
 
     def step(self, planned, now, returning=False):
-        goal=int(round(planned))
         dt=now-self.sent_at
-        if dt<=0 or not math.isfinite(planned) or not math.isfinite(now):
+        filter_dt=now-self.updated_at
+        if dt<=0 or filter_dt<=0 or not math.isfinite(planned) or not math.isfinite(now):
             raise ValueError('Invalid neck scheduler sample')
+        alpha=-math.expm1(-filter_dt/self.filter_tau_s) if self.filter_tau_s else 1.
+        self.filtered_position+=alpha*(planned-self.filtered_position);self.updated_at=now
+        goal=int(round(self.filtered_position))
         delta=abs(goal-self.goal)
         final_home=returning and goal==2047
-        if delta and dt>=.04 and (delta>=2 or final_home or goal in self.endpoints):
+        # Re-coalescing a filtered curve every40ms recreates large position
+        # stairs. With smoothing enabled, transmit each changed integer goal.
+        ready=self.filter_tau_s>0 or (dt>=.04 and (delta>=2 or final_home or goal in self.endpoints))
+        if delta and ready:
             # SMS fine speed units retain approximately 50-count/s precision.
             speed=math.ceil((delta/dt)/50)*50
             self.speed=min(self.maximum_speed,max(1,speed)) if self.adaptive_speed else self.maximum_speed
