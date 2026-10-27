@@ -885,7 +885,6 @@
       "register_layout_confirmed": true,
       "register_write_verification": "Pending bounded RAM write/readback during explicit arm",
       "position_feedback_tolerance_counts": 5,
-      "max_acceleration_counts_s2": 64,
       "role": "颈部旋转",
       "playback_enabled": true,
       "acceleration_raw": 0,
@@ -920,7 +919,6 @@
       "register_layout_confirmed": true,
       "register_write_verification": "Pending bounded RAM write/readback during explicit arm",
       "position_feedback_tolerance_counts": 5,
-      "max_acceleration_counts_s2": 64,
       "role": "颈部前后",
       "playback_enabled": true,
       "acceleration_raw": 0
@@ -946,7 +944,6 @@
       "register_layout_confirmed": true,
       "register_write_verification": "Pending bounded RAM write/readback during explicit arm",
       "position_feedback_tolerance_counts": 5,
-      "max_acceleration_counts_s2": 64,
       "role": "颈部左右",
       "playback_enabled": true,
       "acceleration_raw": 0

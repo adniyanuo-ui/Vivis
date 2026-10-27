@@ -336,8 +336,7 @@ def main(argv=None):
                              repeat_mode='independent_full_cycle',preparation_each_round=True,
                              developer_mode=args.mode,camera_required=args.mode!='face' and not args.home_only,
                              mouth_gain_report=profile['mouth_gain_report'],
-                             software_acceleration_counts_s2={m['id']:m['max_acceleration_counts_s2'] for m in profile['motors']
-                                 if m.get('max_acceleration_counts_s2') is not None},
+                             acceleration_control='servo_register_41',
                              volume_times_three=args.usb_volume_times_three and not args.home_only)))
         return
     args.output.mkdir(parents=True,exist_ok=False)

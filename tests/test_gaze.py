@@ -60,7 +60,6 @@ class MojiaGazeTests(unittest.TestCase):
                     target=packet0 if stale else packet(now,None)
                     new,d=controller.step(target,old,1/60,now)
                     self.assertTrue(np.all(abs(new-old)<=np.array([300,300,900])/60+1e-8))
-                    self.assertLessEqual(abs(controller.velocity-before),64/60+1e-8)
                     if d['state']=='holding':saw_hold=True;self.assertFalse(d['returning_to_center'])
                     if d['state'] in ('releasing','idle'):
                         saw_return=True;self.assertTrue(d['returning_to_center'])
@@ -72,11 +71,16 @@ class MojiaGazeTests(unittest.TestCase):
                 new,d=controller.step(packet(now+1/60,.4),old,1/60,now+1/60)
                 self.assertEqual(d['state'],'tracking');self.assertFalse(d['returning_to_center'])
 
-    def test_neck_acceleration_metadata_must_match_controller(self):
-        c,p=config(),profile()
-        next(m for m in p['motors'] if m['id']==32)['max_acceleration_counts_s2']=128
-        with self.assertRaisesRegex(ValueError,'software acceleration differs'):
-            validate_mojia(c,p,ROOT/'configs/robots/mojia/calibration.json',True,True)
+    def test_neck_direction_change_is_not_delayed_by_a_software_acceleration_ramp(self):
+        c=config();controller=MojiaPursuit(c,[8,23,32],[300,300,900],True)
+        controller.assist.step=lambda *args:90.
+        old=np.array([2047.,2047.,2047.])
+        new,d=controller.step(packet(10.,.4),old,1/60,10.)
+        self.assertAlmostEqual(d['neck_velocity'],90.)
+        controller.assist.step=lambda *args:-90.
+        back,d=controller.step(packet(10.+1/60,-.4),new,1/60,10.+1/60)
+        self.assertAlmostEqual(d['neck_velocity'],-90.)
+        self.assertAlmostEqual(back[-1],2047.)
 
     def test_current_speed_policy_only_raises_calibrated_mouth_axes(self):
         from vivis.motion.ownership import tracking_profile
@@ -87,7 +91,7 @@ class MojiaGazeTests(unittest.TestCase):
         self.assertTrue(all(a['speed_counts_s']==1000 for a in c['control']['axes']))
         runtime=tracking_profile(c,p,[m['id'] for m in p['motors']])
         self.assertEqual({m['id']:m['max_acceleration_counts_s2'] for m in runtime['motors']
-                          if 'max_acceleration_counts_s2' in m},{32:64,33:64,34:64})
+                          if 'max_acceleration_counts_s2' in m},{})
         for m in runtime['motors']:
             self.assertNotIn(m['id'],(9,24))
             mouth={10,11,12,13,15,25,26,27,28,29,30,31,35,36}
@@ -164,7 +168,10 @@ class MojiaGazeTests(unittest.TestCase):
         c=config();c['neck'].update(range_mode='device');c['neck'].pop('offset_counts')
         controller=MojiaPursuit(c,[8,23,32],[300,300,900],True,neck_bounds=(1600,2600))
         window=controller.return_window(2600)
-        self.assertGreater(window,5.)
+        self.assertGreaterEqual(window,5.)
+        slower=copy.deepcopy(c);slower['neck']['speed_counts_s']=75
+        slow=MojiaPursuit(slower,[8,23,32],[300,300,75],True,neck_bounds=(1600,2600))
+        self.assertGreater(slow.return_window(2600),window)
         old=np.array([2047.,2047.,2600.])
         for i in range(int(np.ceil(window*60))):
             now=10+(i+1)/60
@@ -351,7 +358,7 @@ class MojiaGazeTests(unittest.TestCase):
     def test_extended_speed_stage_requires_neck_confirmation(self):
         c,p=config(),profile()
         c['control'].update(calibration_confirmed=True,speed_counts_s=300)
-        c['neck'].update(speed_counts_s=75,acceleration_counts_s2=70,offset_counts=160,
+        c['neck'].update(speed_counts_s=75,offset_counts=160,
                          gain_counts_s=180,deadband=.14,stop_deadband=.07,filter_tau_s=.12)
         with self.assertRaises(ValueError):validate_mojia(c,p,ROOT/'configs/robots/mojia/calibration.json',True,False)
         c['neck']['direction_confirmed']=True

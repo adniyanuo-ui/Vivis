@@ -85,5 +85,5 @@
     "adaptive_speed": false,
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-24 user removed software acceleration limits31/35/36; neck32/33/34 retain64; face-loss neutral return, hardware parameters, speeds and ranges unchanged;2026-10-25 all mapped hardware/software speed caps1000, all other settings unchanged"
+  "parameter_revision_source": "2026-10-27 user requested removal of all software acceleration limits; acceleration is controlled by servo SRAM41. Existing visual-error coordination, position/speed bounds and face-loss neutral return remain. Hardware41/46, PID and deadband are unchanged in this revision."
 }

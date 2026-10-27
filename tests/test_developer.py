@@ -30,6 +30,9 @@ class DeveloperConfigurationTests(unittest.TestCase):
         self.assertEqual((motors[32]['device_min'],motors[32]['device_max']),(0,4095))
         self.assertEqual((motors[32].pop('tracking_min'),motors[32].pop('tracking_max')),(1600,2600))
         motors[32].update(device_min=1600,device_max=2600)
+        for sid in (32,33,34):
+            self.assertNotIn('max_acceleration_counts_s2',motors[sid])
+            motors[sid]['max_acceleration_counts_s2']=64  # Historical baseline only.
         self.assertEqual(digest(motors),baseline['motors_sha256'])
         startup=robot.startup()['axes']
         neck=next(a for a in startup if a['id']==32)
@@ -46,12 +49,14 @@ class DeveloperConfigurationTests(unittest.TestCase):
     def test_new_hardware_value_is_used_by_all_runtime_views(self):
         robot = Robot()
         robot.axes[32]['max_speed_counts_s'] = 850
-        robot.axes[32]['max_acceleration_counts_s2'] = 70
+        robot.axes[32]['acceleration_raw'] = 10
         robot.axes[32]['pid_raw'] = [16, 27, 0]
         self.assertEqual(next(m for m in robot.profile('wz2')['motors'] if m['id']==32)['max_speed_counts_s'],850)
         self.assertEqual(next(m for m in robot.startup()['axes'] if m['id']==32)['speed_raw'],850)
         self.assertEqual(robot.tracking()['neck']['speed_counts_s'],850)
-        self.assertEqual(robot.tracking()['neck']['acceleration_counts_s2'],70)
+        self.assertEqual(robot.tracking()['neck']['observed_acceleration_raw'],10)
+        self.assertEqual(next(a for a in robot.startup()['axes'] if a['id']==32)['acceleration_raw'],10)
+        self.assertNotIn('acceleration_counts_s2',robot.tracking()['neck'])
         self.assertEqual(robot.tracking()['neck']['observed_pid_raw'],[16,27,0])
 
     def test_neutral_and_named_channels_match_the_final_calibration(self):

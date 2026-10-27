@@ -148,6 +148,22 @@ class ProtocolTests(unittest.TestCase):
 
 
 class OfficialSDKTests(unittest.TestCase):
+    def test_position_targets_use_positive_speed_magnitude_for_both_directions(self):
+        from vivis.hardware.feetech.sdk import OfficialSDKBus,sms_sts
+        class Port:
+            is_using=False
+            def clearPort(self):pass
+            def writePort(self,raw):self.raw=bytes(raw);return len(raw)
+        port=Port();bus=OfficialSDKBus.__new__(OfficialSDKBus)
+        bus.sdk=sms_sts(port);bus.goal_packets_sent=0;bus.acceleration={32:10}
+        for target in (2200,1900):
+            bus.goals({32:target},{32:1000})
+            expected=packet(254,0x83,bytes([41,7,32,10])+struct.pack('<HHH',target,0,1000))
+            self.assertEqual(port.raw,expected)
+        bus.acceleration[32]=20
+        bus.goals({32:2000},{32:300})
+        self.assertEqual(port.raw,packet(254,0x83,bytes([41,7,32,20])+struct.pack('<HHH',2000,0,300)))
+
     def test_split_sync_packets_preserve_targets_and_validate_whole_frame(self):
         from unittest.mock import Mock,patch
         from vivis.hardware.feetech.sdk import OfficialSDKBus
@@ -385,19 +401,21 @@ class PlaybackTests(unittest.TestCase):
                     play(profile,[2],np.full((3,1),2047.),60,'fake.wav',Path(directory)/'log.json',Path(directory)/'STOP')
             self.assertEqual(bus.feedback.call_count,1)
 
-    def test_software_acceleration_is_applied_to_final_playback_commands(self):
+    def test_playback_keeps_speed_bounds_without_software_acceleration_ramp(self):
         from unittest.mock import patch
         from vivis.runtime.playback import play
-        profile,bus,clock=self.fixture();profile['motors'][0]['max_acceleration_counts_s2']=128
+        profile,bus,clock=self.fixture()
         trajectory=np.full((24,1),2200.);trajectory[0]=2047.;clock.duration=.4
         with tempfile.TemporaryDirectory() as directory,patch('vivis.runtime.playback.Bus',return_value=bus),patch('vivis.runtime.playback.AudioClock',return_value=clock):
             result=play(profile,[2],trajectory,60,'fake.wav',Path(directory)/'log.json',Path(directory)/'STOP')
         self.assertTrue(result['completed'])
-        self.assertEqual(result['software_acceleration_limits'],{2:128})
-        self.assertTrue(all(2 in e['software_motion'] for e in result['events']))
+        self.assertEqual(result['acceleration_control'],'servo_register_41')
+        self.assertTrue(all('software_motion' not in e for e in result['events']))
         self.assertGreater(result['sent_frames'],15)
-        self.assertLessEqual(max(e['goals'][2] for e in result['events']),2059)
-        self.assertGreater(max(e['goals'][2] for e in result['events']),2047)
+        self.assertGreater(max(e['goals'][2] for e in result['events']),2100)
+        for previous,current in zip(result['events'],result['events'][1:]):
+            dt=current['sent_monotonic']-previous['sent_monotonic']
+            self.assertLessEqual(abs(current['goals'][2]-previous['goals'][2]),300*dt+1.)
 
     def test_mojia_rejects_unverified_gaze_before_opening_devices(self):
         from unittest.mock import Mock,patch

@@ -8,8 +8,7 @@ import time
 import wave
 from pathlib import Path
 import numpy as np
-from vivis.motion.mapping import live_preflight
-from vivis.motion.limits import AccelerationLimiter
+from vivis.motion.mapping import live_preflight,limit_step
 from vivis.hardware.feetech.protocol import Bus,ServoStatusError,CorruptResponse,ReadTimeout,ProtocolError
 from vivis.runtime.telemetry import evaluate,WarningRecorder,CriticalTemperatureError,verify_sample
 
@@ -166,8 +165,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         mojia_gaze=True
     if gaze_override is not None and not {a['id'] for a in gaze_override.axes} <= command_ids:
         raise ValueError('Tracked eye axes must be among commanded IDs')
-    prelimited=gaze_override.acceleration_limited_ids if mojia_gaze else ()
-    motion_limiter=AccelerationLimiter(profile,ids,command_ids,prelimited)
+    speed_limits=np.array([motors[sid]['max_speed_counts_s'] for sid in ids],dtype=float)
     feedback_age_limit=profile.get('feedback_max_age_s')
     if feedback_age_limit is not None and not 0<feedback_age_limit<=1:
         raise ValueError('Feedback age limit must be positive and at most one second')
@@ -218,9 +216,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         'playback_fps':fps,'control_hz':control_hz,'baud':profile['baud'],
         'face_update_hz':face_hz,'feedback_polls_per_frame':polls_per_frame,
         'feedback_policy':feedback_policy,'feedback_notifications':[]}
-    result['software_acceleration_limits']={m['id']:m['max_acceleration_counts_s2']
-        for m in profile['motors'] if m.get('max_acceleration_counts_s2') is not None}
-    result['acceleration_prelimited_ids']=sorted(prelimited)
+    result['acceleration_control']='servo_register_41'
     warning_recorder=WarningRecorder(result.setdefault('telemetry_warnings',[]))
     def received(sid,state):
         result['last_feedback_received']={'id':sid,**state}
@@ -341,13 +337,13 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         # Start from measured positions, and approach frame zero with the same rate limit.
         result['phase']='initial_approach'
         last_tick=time.monotonic();ramp_deadline=last_tick+15
-        while np.max(abs(last-trajectory[0]))>.5 or not motion_limiter.at_rest():
+        while np.max(abs(last-trajectory[0]))>.5:
             if should_stop():raise RuntimeError('Stopped during initial approach')
             now=time.monotonic()
             if now>ramp_deadline:raise RuntimeError('Initial approach timeout')
             dt=now-last_tick
             if dt<1/fps:stop.wait(1/fps-dt);continue
-            last=motion_limiter.step(last,trajectory[0],dt);last_tick=now
+            last=limit_step(last,trajectory[0],speed_limits,dt);last_tick=now
             goals={sid:int(round(v)) for sid,v in zip(ids,last) if sid in command_ids}
             bus.goals(goals,speeds);last_sent=goals
             result['initial_approach_commands']+=1
@@ -440,7 +436,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                                for j,sid in enumerate(ids))):
                     raise ValueError('Live gaze target exceeds command limits')
             gaze_done=time.monotonic() if mojia_gaze else None
-            last=motion_limiter.step(last,target,max(dt,1e-6));last_tick=now
+            last=limit_step(last,target,speed_limits,max(dt,1e-6));last_tick=now
             goals={sid:int(round(v)) for sid,v in zip(ids,last) if sid in command_ids}
             command_speeds=speeds
             overrides=gaze_override.speed_overrides if mojia_gaze else {}
@@ -455,10 +451,6 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             if previous_index>=0:skipped+=max(0,index-previous_index-1)
             events.append({'audio_seconds':t,'frame':index,'sent_monotonic':now,'goals':goals})
             if overrides:events[-1]['speed_overrides']=dict(overrides)
-            if motion_limiter.axes:
-                events[-1]['software_motion']={sid:dict(requested=float(target[j]),
-                    planned=float(last[j]),velocity=motion_limiter.velocity[sid])
-                    for j,sid,_,_,_ in motion_limiter.axes}
             if face_hz!=fps:events[-1]['face_frame']=face_index
             if gaze_override is not None:
                 events[-1]['person_gaze']=gaze_override.last_diagnostic

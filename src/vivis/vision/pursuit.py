@@ -77,9 +77,6 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         if trial and max(abs(v-2047) for v in values) > cap:
             raise ValueError('Eye trial exceeds coordinate-specific limits')
     n = config['neck']
-    saved_acceleration=motors[32].get('max_acceleration_counts_s2')
-    if saved_acceleration is not None and saved_acceleration!=n['acceleration_counts_s2']:
-        raise ValueError('Neck software acceleration differs from playback profile')
     if n.get('coordination_mode') != 'visual_error_assist' or 'eye_lead_s' in n:
         raise ValueError('Mojia neck requires visual_error_assist without a fixed eye delay')
     if type(config['camera']['width']) is not int or config['camera']['width'] <= 0:
@@ -92,7 +89,6 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Invalid bounded Mojia neck setup')
     if (n['id'] != 32 or n['sign'] not in (-1, 1) or type(n['sign']) is not int
             or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 1000
-            or not finite(n['acceleration_counts_s2']) or not 0 < n['acceleration_counts_s2'] <= 200
             or motors[32]['model_raw_expected'] != 10760
             or not finite(low) or not finite(high)
             or not motors[32]['device_min']<=low<2047<high<=motors[32]['device_max']):
@@ -186,9 +182,12 @@ class MojiaPursuit:
 
     def return_window(self,position):
         if not self.neck:return 5.
-        a=self.config['neck']['acceleration_counts_s2'];speed=abs(self.velocity)
-        distance=abs(position-2047)+speed*speed/(2*a)
-        return max(5.,speed/a+2*math.sqrt(distance/a)+1.)
+        # Time budget for the existing proportional neutral return, including
+        # a speed-limited section. This is not an acceleration constraint.
+        speed=self.config['neck']['speed_counts_s'];distance=abs(position-2047)
+        transition=min(distance,speed/2)
+        return max(5.,max(0.,distance-transition)/speed+
+                   .5*math.log(max(1.,transition/.25))+1.)
 
     def observe_eye(self, position, now, measured=True):
         """Record the camera eye's feedback without adding serial reads."""
@@ -229,22 +228,15 @@ class MojiaPursuit:
             if return_center:
                 self.assist.reset()
                 delta = 2047-position
-                desired = math.copysign(min(n['speed_counts_s'], abs(delta)*2,
-                                           math.sqrt(2*n['acceleration_counts_s2']*abs(delta))), delta)
+                desired = math.copysign(min(n['speed_counts_s'], abs(delta)*2), delta)
             else:
                 span = abs(anchor['positive' if eye >= 0 else 'negative']-anchor['neutral'])
                 desired = self.assist.step(packet,state,eye,eye_motion,span)
             low, high = self.neck_bounds
-            distance = high-position if desired >= 0 else position-low
-            cap = min(n['speed_counts_s'], math.sqrt(2*n['acceleration_counts_s2']*max(0., distance)))
-            desired = float(np.clip(desired, -cap, cap))
-            old = self.velocity
-            self.velocity += float(np.clip(desired-old, -n['acceleration_counts_s2']*dt, n['acceleration_counts_s2']*dt))
-            goal = float(np.clip(position+(old+self.velocity)*dt/2, low, high))
-            if goal in (low, high):
-                self.velocity = 0.
-            if return_center and abs(position-2047) < .25 and abs(self.velocity) <= n['acceleration_counts_s2']*dt:
-                goal, self.velocity = 2047., 0.
+            desired = float(np.clip(desired,-n['speed_counts_s'],n['speed_counts_s']))
+            goal = float(np.clip(position+desired*dt,low,high))
+            if return_center and abs(position-2047)<.25:goal=2047.
+            self.velocity=(goal-position)/dt
             result[col] = goal
         return limit_step(previous, result, self.speeds, dt), dict(
             state=state, weight=weight, eye_error_x=float(xy[0]), neck_velocity=self.velocity,

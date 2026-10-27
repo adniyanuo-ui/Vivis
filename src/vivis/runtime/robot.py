@@ -85,7 +85,6 @@ class Robot:
         c['calibration_sha256'] = self.calibration_sha256
         a = self.axes[32]
         c['neck'].update(speed_counts_s=a['max_speed_counts_s'],
-                         acceleration_counts_s2=a['max_acceleration_counts_s2'],
                          observed_acceleration_raw=a['acceleration_raw'],
                          observed_pid_raw=a['pid_raw'], observed_deadband_counts=a['deadband_raw'])
         return c
