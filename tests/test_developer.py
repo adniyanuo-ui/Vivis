@@ -158,19 +158,34 @@ class DeveloperResourcesTests(unittest.TestCase):
         return dict(config_sha256=digest,target_protocol_version=VERSION,
             camera_device=config['camera']['device'],camera_eye=config['control']['camera_eye'],
             camera_transform={k:config['camera'][k] for k in ('rotation_deg','mirror_x')},
-            _updated_at=time.monotonic(),frame_age_ms=10,status='idle')
+            service_age_s=0.,frame_age_ms=10,status='idle')
 
     def test_vision_identity_rejects_old_protocol_stale_frames_and_orientation_mismatch(self):
         import time
         from vivis.runtime.developer import compatible_vision
         config=Robot().tracking();good=self.ready_state(config,'hash')
         now=time.monotonic()
-        self.assertTrue(compatible_vision(good,config,'hash',now))
+        self.assertTrue(compatible_vision(good,config,'hash'))
         for patch_values in (dict(target_protocol_version='old'),dict(camera_transform={}),
                 dict(camera_device='/dev/wrong'),dict(camera_eye='left'),dict(status='camera_stale'),
-                dict(frame_age_ms=400),dict(_updated_at=now-2),dict(_updated_at=now+1)):
+                dict(frame_age_ms=400),dict(service_age_s=2),dict(service_age_s=-1),
+                dict(service_age_s=.2,frame_age_ms=200)):
             with self.subTest(patch_values=patch_values):
-                self.assertFalse(compatible_vision({**good,**patch_values},config,'hash',now))
+                self.assertFalse(compatible_vision({**good,**patch_values},config,'hash'))
+
+    def test_launcher_accepts_the_real_public_http_state_without_internal_timestamp(self):
+        from urllib.request import urlopen
+        from vivis.vision.preview import Preview
+        from vivis.runtime.developer import compatible_vision
+        config=Robot().tracking();preview=Preview('127.0.0.1',0)
+        try:
+            preview.update(self.ready_state(config,'hash'))
+            with urlopen(f'http://127.0.0.1:{preview.server.server_address[1]}/state',timeout=1) as response:
+                state=json.load(response)
+            self.assertNotIn('_updated_at',state)
+            self.assertIn('service_age_s',state)
+            self.assertTrue(compatible_vision(state,config,'hash'))
+        finally:preview.close()
 
     def test_camera_only_service_publishes_the_identity_expected_by_the_launcher(self):
         import hashlib,time
@@ -181,7 +196,7 @@ class DeveloperResourcesTests(unittest.TestCase):
         camera=Mock();camera.actual={};camera.get.side_effect=lambda:(1,time.monotonic(),None)
         detector=Mock();detector.detect.side_effect=lambda sample:(dict(schema_version=VERSION,
             sequence=1,timestamp_monotonic=sample[1],target=None),b'jpeg',dict(processing_ms=1.))
-        preview=Mock();preview.update.side_effect=lambda state,jpeg=None:states.append({**state,'_updated_at':time.monotonic()})
+        preview=Mock();preview.update.side_effect=lambda state,jpeg=None:states.append({**state,'service_age_s':0.})
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);path=root/'config.json';path.write_text(json.dumps(config))
             with patch.object(service,'ROOT',root),patch.object(service,'LatestCamera',return_value=camera),\

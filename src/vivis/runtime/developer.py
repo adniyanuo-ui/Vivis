@@ -19,20 +19,19 @@ from vivis.runtime.robot import Robot
 from vivis.vision.policy import VERSION
 
 
-def compatible_vision(state, config, digest, now=None):
+def compatible_vision(state, config, digest):
     """A matching file hash alone does not prove a usable target stream."""
-    now=time.monotonic() if now is None else now
     if not isinstance(state,dict):return False
-    updated=state.get('_updated_at')
+    service_age=state.get('service_age_s')
     age=state.get('frame_age_ms')
     maximum=config['transport']['max_age_s']
     return (state.get('config_sha256')==digest and state.get('target_protocol_version')==VERSION
         and state.get('camera_transform')=={k:config['camera'][k] for k in ('rotation_deg','mirror_x')}
         and state.get('camera_device')==config['camera']['device']
         and state.get('camera_eye')==config['control'].get('camera_eye')
-        and type(updated) in (int,float) and 0<=now-updated<=maximum
+        and type(service_age) in (int,float) and 0<=service_age<=maximum
         and type(age) in (int,float) and 0<=age<=maximum*1000
-        and age/1000+now-updated<=maximum
+        and age/1000+service_age<=maximum
         and state.get('status') not in ('camera_stale','inference_stale'))
 
 
