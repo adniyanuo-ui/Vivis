@@ -1,7 +1,8 @@
 """Two rotary crank/rod limbs with a central universal-joint pivot.
 
 Geometry is measured input, never inferred from a motor's ID or register limits.
-Axes: x right, y forward, z up; R=Rx(pitch)@Ry(roll), angles in radians.
+Axes: CAD x/y horizontal, z up; R=Rx(pitch)@Ry(roll), angles in radians.
+Camera mounting orientation is separate from this mechanical CAD frame.
 Fixed rod lengths constrain both joint commands together. No actuator I/O.
 """
 import math

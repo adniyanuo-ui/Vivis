@@ -41,7 +41,8 @@ def validate(config,profile):
             raise ValueError('Parallel tracking window exceeds configured device envelope')
     for section,limits in [('motion',{'max_speed_counts_s':(1,1000),'max_acceleration_counts_s2':(1,10000),
                                       'max_jerk_counts_s3':(1,1e6),'return_duration_s':(1,10)}),
-                           ('control',{'pitch_gain_rad_s':(.01,1),'pitch_limit_rad':(.001,.3),
+                           ('control',{'camera_mount_yaw_rad':(-math.pi,math.pi),
+                                       'pitch_gain_rad_s':(.01,1),'pitch_limit_rad':(.001,.3),
                                        'roll_follow_ratio':(0,.5),'roll_limit_rad':(.001,.15),
                                        'roll_gain_s':(.1,5),'image_deadband':(0,.2),'filter_tau_s':(.01,1)})]:
         for key,(low,high) in limits.items():
@@ -54,9 +55,14 @@ def validate(config,profile):
     return k
 
 
-def camera_axes(pose,yaw):
-    """Above-platform yaw: R_head=Rx(pitch)Ry(roll)Rz(yaw)."""
-    p,r=pose;c,s=math.cos(yaw),math.sin(yaw)
+def camera_axes(pose,yaw,mount_yaw=0.):
+    """R_camera=Rx(pitch)Ry(roll)Rz(yaw)Rz(mount_yaw).
+
+    The mount rotates both the velocity interaction and measured attitude;
+    reversing image errors alone would leave roll feedback inconsistent.
+    This transform only serves the new platform, never the eye/yaw controller.
+    """
+    p,r=pose;c,s=math.cos(yaw+mount_yaw),math.sin(yaw+mount_yaw)
     head=rotation(p,r)@np.array([[c,-s,0],[s,c,0],[0,0,1]])
     axes=np.array([[1.,0.],[0.,math.cos(p)],[0.,math.sin(p)]])
     interaction=np.stack([head[:,0]@axes,head[:,1]@axes])
@@ -169,7 +175,7 @@ class ParallelFaceFollower:
                 self.measured_pose=self.k.forward(dict(zip((33,34),counts)),self.measured_pose,self.measurement_tolerance)
                 self.measured_counts=counts
         yaw=-self.config['neck']['sign']*(self.observations.get(32,(2047.,now))[0]-2047)*2*math.pi/4096
-        interaction,pitch,roll=camera_axes(self.measured_pose,yaw)
+        interaction,pitch,roll=camera_axes(self.measured_pose,yaw,c['camera_mount_yaw_rad'])
         if fresh and state=='tracking' and not returning and packet and packet.get('target') is not None:
             target=packet['target'];stamp=packet['timestamp_monotonic']
             if 0<=now-stamp<=max_age:
@@ -193,7 +199,8 @@ class ParallelFaceFollower:
         if not fresh:reason='feedback_stale'
         goals=self.reference.step(velocity,dt,returning=should_return and fresh)
         self.diagnostic=dict(enabled=True,reason=reason,measured_pose_rad=list(self.measured_pose),
-            head_yaw_rad=yaw,camera_pitch_rad=pitch,camera_roll_rad=roll,
+            head_yaw_rad=yaw,camera_mount_yaw_rad=c['camera_mount_yaw_rad'],
+            camera_pitch_rad=pitch,camera_roll_rad=roll,
             filtered_vertical_error=self.filtered_y,roll_target_rad=self.filtered_roll,
             feedback_age_s={str(s):now-self.observations[s][1] for s in self.observations},
             **self.reference.diagnostic)

@@ -36,6 +36,25 @@ class ParallelFollowTests(unittest.TestCase):
         self.assertEqual(p,0.);self.assertEqual(r,0.)
         np.testing.assert_allclose(camera_axes((0.,0.),0.)[0],np.eye(2),atol=1e-12)
 
+    def test_rear_facing_camera_mount_reverses_both_platform_axes_and_feedback(self):
+        c,_=configuration();mount=c['parallel_neck']['control']['camera_mount_yaw_rad']
+        self.assertAlmostEqual(mount,math.pi)
+        matrix,_,_=camera_axes((0.,0.),0.,mount)
+        np.testing.assert_allclose(matrix,-np.eye(2),atol=1e-12)
+        # With this mount, positive CAD pitch/roll is negative camera pitch/roll.
+        self.assertAlmostEqual(camera_axes((.03,0.),0.,mount)[1],-.03)
+        self.assertAlmostEqual(camera_axes((0.,.02),0.,mount)[2],-.02)
+        # Field report: upward face must now decrease33/increase34, and a
+        # positive eye-line tilt must decrease both, unlike the first trial.
+        k=RotaryParallelNeck(c['parallel_neck']['geometry'])
+        for y,tilt,signs in ((-.6,0.,(-1,1)),(.6,0.,(1,-1)),
+                             (0.,.12,(-1,-1)),(0.,-.12,(1,1))):
+            f,measured=self.run_face(y=y,human_roll=tilt,ticks=60)
+            for sid,sign in zip((33,34),signs):
+                self.assertGreater(sign*(measured[sid]-2047),0)
+            # The same CAD and confirmed encoder directions still apply.
+            np.testing.assert_allclose(k.forward({33:measured[33],34:measured[34]}),f.measured_pose,atol=.003)
+
     def test_explicit_enable_is_isolated_from_other_modes_and_unconfirmed_data(self):
         c,p=configuration();self.assertFalse(configure(c,'eyes')['enabled'])
         with self.assertRaises(ValueError):configure(c,'eyes','on')
@@ -43,6 +62,9 @@ class ParallelFollowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'confirmed'):validate(c,p)
         c,p=configuration();c['parallel_neck']['geometry']['branches'][0]['minimum_count']=0
         with self.assertRaisesRegex(ValueError,'device'):validate(c,p)
+        for offset in (math.inf,math.nan,True,4.):
+            c,p=configuration();c['parallel_neck']['control']['camera_mount_yaw_rad']=offset
+            with self.assertRaisesRegex(ValueError,'camera_mount_yaw_rad'):validate(c,p)
 
     def test_pair_motion_limits_braking_and_three_second_home(self):
         c,p=configuration();k=validate(c,p);r=CoupledJointReference(k,c['parallel_neck']['motion'])
@@ -65,7 +87,7 @@ class ParallelFollowTests(unittest.TestCase):
         for i in range(ticks):
             now=10+(i+1)/60
             for sid in (32,33,34):f.observe(sid,measured[sid],now)
-            _,_,camera_roll=camera_axes(f.measured_pose,yaw)
+            _,_,camera_roll=camera_axes(f.measured_pose,yaw,c['parallel_neck']['control']['camera_mount_yaw_rad'])
             sample=packet(now,0.);sample['target'].update(y=y,eye_line_roll_rad=human_roll-camera_roll)
             goals=f.step(sample,'tracking',1/60,now)
             measured.update({sid:float(round(v)) for sid,v in goals.items()})
