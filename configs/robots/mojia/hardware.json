@@ -877,7 +877,7 @@
       "device_max": 4095,
       "tracking_min": 1600,
       "tracking_max": 2600,
-      "max_speed_counts_s": 1000,
+      "max_speed_counts_s": 600,
       "device_max_temperature_c": 80,
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,

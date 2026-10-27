@@ -139,12 +139,12 @@ class MojiaGazeTests(unittest.TestCase):
         for m in runtime['motors']:
             self.assertNotIn(m['id'],(9,24))
             mouth={10,11,12,13,15,25,26,27,28,29,30,31,35,36}
-            self.assertEqual(m['max_speed_counts_s'],1200 if m['id'] in mouth else 1000)
+            self.assertEqual(m['max_speed_counts_s'],600 if m['id']==32 else 1200 if m['id'] in mouth else 1000)
         from vivis.runtime.show import prepare
         source_ids=p['diagnostic_command_ids']
         policy=json.loads((ROOT/'configs/robots/mojia/telemetry.json').read_text())
         prepared,_,_=prepare(c,p,source_ids,np.full((2,len(source_ids)),2047.),True,1.5,policy)
-        self.assertTrue(all(m['max_speed_counts_s']==(1200 if m['id'] in mouth else 1000) for m in prepared['motors']))
+        self.assertTrue(all(m['max_speed_counts_s']==(600 if m['id']==32 else 1200 if m['id'] in mouth else 1000) for m in prepared['motors']))
 
     def test_device_range_uses_both_asymmetric_hardware_endpoints(self):
         from vivis.vision.pursuit import neck_command_limits

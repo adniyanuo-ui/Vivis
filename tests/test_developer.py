@@ -29,7 +29,8 @@ class DeveloperConfigurationTests(unittest.TestCase):
         # changed; the accepted tracking stroke remains 1600..2600.
         self.assertEqual((motors[32]['device_min'],motors[32]['device_max']),(0,4095))
         self.assertEqual((motors[32].pop('tracking_min'),motors[32].pop('tracking_max')),(1600,2600))
-        motors[32].update(device_min=1600,device_max=2600)
+        self.assertEqual(motors[32]['max_speed_counts_s'],600)
+        motors[32].update(device_min=1600,device_max=2600,max_speed_counts_s=1000)
         for sid in (32,33,34):
             self.assertNotIn('max_acceleration_counts_s2',motors[sid])
             motors[sid]['max_acceleration_counts_s2']=64  # Historical baseline only.
@@ -41,8 +42,9 @@ class DeveloperConfigurationTests(unittest.TestCase):
         self.assertEqual(neck['pid_raw'],[32,32,0])
         self.assertEqual(neck['deadband_raw'],[0,0])
         self.assertEqual(neck['acceleration_raw'],128)
+        self.assertEqual(neck['speed_raw'],600)
         neck['device_limits']=[1600,2600]
-        neck.update(pid_raw=[16,26,0],deadband_raw=[5,5],acceleration_raw=0)
+        neck.update(pid_raw=[16,26,0],deadband_raw=[5,5],acceleration_raw=0,speed_raw=1000)
         self.assertEqual(digest(startup),baseline['startup_sha256'])
         self.assertEqual(digest(robot.home()['axes']),baseline['home_sha256'])
         self.assertEqual(robot.calibration_sha256,baseline['calibration_sha256'])
@@ -153,8 +155,8 @@ class DeveloperPlaybackTests(unittest.TestCase):
                         speed=call.args[1][32]
                         self.assertEqual(speed,event['person_gaze']['neck_speed_command'])
                         self.assertEqual(speed,event['speed_overrides'][32])
-                        self.assertTrue(1<=speed<=1000)
-                    self.assertEqual(any(call.args[1][32]<1000 for call in sent),adaptive)
+                        self.assertTrue(1<=speed<=motors[32]['max_speed_counts_s'])
+                    self.assertEqual(any(call.args[1][32]<motors[32]['max_speed_counts_s'] for call in sent),adaptive)
                 bus.close.assert_called_once();clock.close.assert_called_once()
 
 

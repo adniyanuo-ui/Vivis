@@ -52,7 +52,7 @@ class StartupSettingsTests(unittest.TestCase):
                 self.assertFalse(any(row[0]==sid for row in writes));continue
             self.assertEqual(ram[sid][1],128 if sid==32 else 0)
             self.assertEqual(int.from_bytes(ram[sid][6:8],'little'),60)
-            self.assertEqual(speeds[sid],1200 if sid in (10,11,12,13,15,25,26,27,28,29,30,31,35,36) else 1000)
+            self.assertEqual(speeds[sid],600 if sid==32 else 1200 if sid in (10,11,12,13,15,25,26,27,28,29,30,31,35,36) else 1000)
         self.assertEqual(list(config[32][21:24]),[32,32,0])
         self.assertEqual(list(config[32][26:28]),[0,0])
         self.assertTrue(all(addr in (21,22,23,26,27,41,46) for _,addr,_,_ in writes))
