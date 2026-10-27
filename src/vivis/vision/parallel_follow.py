@@ -94,7 +94,13 @@ class CoupledJointReference:
         inp.max_jerk=[self.motion['max_jerk_counts_s3']]*2
         inp.target_position=[2047.,2047.] if home else self.p.tolist()
         inp.target_velocity=[0.,0.] if velocity is None else list(map(float,velocity))
-        if not home:inp.control_interface=self.r.ControlInterface.Velocity
+        if not home:
+            inp.control_interface=self.r.ControlInterface.Velocity
+            # Zero-velocity endpoints can finish and hold independently. Forcing
+            # near-identical stop times through Step2 fails numerically in
+            # Ruckig0.19.4. Nonzero targets still synchronize when necessary.
+            # Position-mode home retains strict Time synchronization.
+            inp.synchronization=self.r.Synchronization.TimeIfNecessary
         if minimum is not None:inp.minimum_duration=minimum
         trajectory=self.r.Trajectory(2);result=self.engine.calculate(inp,trajectory)
         if result<0:raise RuntimeError('Coupled parallel trajectory calculation failed: '+str(result))

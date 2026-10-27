@@ -136,6 +136,39 @@ class ParallelFollowTests(unittest.TestCase):
         for _ in range(math.ceil(window*60)):r.step([0.,0.],1/60,returning=True)
         np.testing.assert_allclose(r.p,[2047,2047],atol=1e-6)
 
+    def test_live_nearly_symmetric_brake_preserves_continuity_and_stops(self):
+        # Exact input from the173310 run: strict Time synchronization fails in
+        # Ruckig0.19.4 at Step2, despite a feasible jerk-limited stop per axis.
+        c,p=configuration();k=validate(c,p);r=CoupledJointReference(k,c['parallel_neck']['motion'])
+        r.reset([1847.353933442777,2220.837926281496])
+        r.v=np.array([-2.502828474255631,2.502828707989294])
+        r.a=np.array([141.5013349549928,-141.5013415622423])
+        profile=r.profile()
+        np.testing.assert_allclose(r.sample(profile,0.),(r.p,r.v,r.a),atol=1e-10)
+        self.assertTrue(r.bounded(profile))
+        self.assertLess(profile.duration,.1)
+        np.testing.assert_allclose(r.sample(profile,profile.duration)[1:],[np.zeros(2),np.zeros(2)],atol=1e-8)
+        for _ in range(12):r.step([0.,0.],1/60)
+        np.testing.assert_allclose(r.v,[0.,0.],atol=1e-8)
+        np.testing.assert_allclose(r.a,[0.,0.],atol=1e-8)
+
+    def test_near_brake_switching_surface_and_nonzero_velocity_targets(self):
+        c,p=configuration();r=CoupledJointReference(validate(c,p),c['parallel_neck']['motion'])
+        rng=np.random.default_rng(173310)
+        for _ in range(128):
+            r.reset([1847.,2221.])
+            accelerations=rng.uniform(10,300,2)*np.array([1.,-1.])
+            r.a=accelerations
+            r.v=-np.sign(accelerations)*accelerations**2/(2*4000)+rng.uniform(-1e-6,1e-6,2)
+            profile=r.profile()
+            self.assertTrue(r.bounded(profile))
+            np.testing.assert_allclose(r.sample(profile,profile.duration)[1:],[np.zeros(2),np.zeros(2)],atol=1e-7)
+        r.reset([2047.,2047.]);moving=r.profile([20.,-30.])
+        np.testing.assert_allclose(r.sample(moving,moving.duration)[1:],[np.array([20.,-30.]),np.zeros(2)],atol=1e-8)
+        r.reset([1800.,2300.]);home=r.profile(home=True,minimum=3.)
+        self.assertGreaterEqual(home.duration,3.)
+        np.testing.assert_allclose(r.sample(home,home.duration)[0],[2047.,2047.],atol=1e-8)
+
     def test_platform_can_start_song_end_return_without_changing_yaw_return_time(self):
         c,p=configuration();ids=[m['id'] for m in p['motors']]
         active=tracking_profile(c,p,ids);f=MojiaPlaybackGaze(c,active,ids,SimpleNamespace(poll=lambda now:packet(now,0.)))
