@@ -236,19 +236,19 @@ class MojiaGazeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'requires the hardware profile'):
             MojiaPursuit(c,[8,23,32],[300,300,900],True)
 
-    def test_cold_start_device_range_does_not_expand_tracking_or_change_other_modes(self):
+    def test_confirmed_eprom_limits_bound_tracking_without_device_writes(self):
         from vivis.vision.pursuit import neck_command_limits
         from vivis.runtime.show import prepare
         from vivis.runtime.startup import startup_plan
         robot=Robot();c=robot.tracking();p=robot.profile('wz2')
         motor=next(m for m in p['motors'] if m['id']==32)
-        self.assertEqual((motor['device_min'],motor['device_max']),(0,4095))
-        self.assertEqual(neck_command_limits(c,p),(1600,2600))
+        self.assertEqual((motor['device_min'],motor['device_max']),(1706,2388))
+        self.assertEqual(neck_command_limits(c,p),(1706,2388))
         ids=p['diagnostic_command_ids']
         for mode in ('face','eyes','eyes-neck'):
             runtime,_,_=prepare(c,p,ids,np.full((2,len(ids)),2047.),True,1.,robot.telemetry(),mode)
             neck=next(m for m in runtime['motors'] if m['id']==32)
-            expected=(2027,2067) if mode=='face' else (1600,2600)
+            expected=(2027,2067) if mode=='face' else (1706,2388)
             self.assertEqual((neck['safe_min'],neck['safe_max']),expected)
             self.assertEqual(32 in runtime['gaze_owner_ids'],mode=='eyes-neck')
         # The old device-limit mismatch is accepted only after explicitly
@@ -257,7 +257,7 @@ class MojiaGazeTests(unittest.TestCase):
         preset.update(axes=[axis],excluded_ids=[])
         raw=bytearray(40);raw[18]=4;ram=bytearray(31)
         snapshot=dict(id=32,model_raw=10760,mode=0,status_register=0,
-            configured_min=0,configured_max=4095,config_0_39_hex=raw.hex(),state_40_70_hex=ram.hex())
+            configured_min=1706,configured_max=2388,config_0_39_hex=raw.hex(),state_40_70_hex=ram.hex())
         _,plan=startup_plan(preset,[snapshot],60)
         self.assertFalse(any(row['address'] in (9,10,11,12) for row in plan))
         snapshot['configured_max']=3000

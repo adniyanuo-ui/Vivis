@@ -37,7 +37,7 @@ CMAKE_BUILD_PARALLEL_LEVEL=2 .venv/bin/python -m pip install -e '.[vision,trajec
 
 入口为`configs/robots/mojia/robot.json`。核对串口、波特率、音箱和相机节点；示例2/3可用`--camera-device /dev/v4l/by-id/实际节点`指定。串口USB重插后需仍有权限，部署规则见`tools/99-vivis-servo-access.rules`。
 
-默认右眼参考ID23，相机640×480/30FPS、检测目标20Hz、运动60Hz，各频率相互独立。横向双眼1987–2107，颈部32跟踪指令范围1600–2600。ID32当前设备限位寄存器读回0–4095，跟踪范围独立保存在`hardware.json`的`tracking_min/max`，不会随设备范围扩大。500kbps候选未启用，默认仍1Mbps。启动器只提示占用服务，不自行停服务、重启USB或切驱动。
+默认右眼参考ID23，相机640×480/30FPS、检测目标20Hz、运动60Hz，各频率相互独立。横向双眼1987–2107，颈部32跟踪指令范围1706–2388。用户已确认ID32新增EPROM限位1706–2388；设备与跟踪范围均保存在`hardware.json`，启动核验且不自动改写限位。500kbps候选未启用，默认仍1Mbps。启动器只提示占用服务，不自行停服务、重启USB或切驱动。
 
 音频设备名保存在`hardware.json`的`runtime.audio_device`。默认音量操作针对已核验的USB Audio Device；客户改用其他音箱/声卡时，应在`robot.json`中将`defaults.usb_volume_times_three`设为`false`，配置实际输出后自行设音量。不能把本机USB音箱的固定档位套用到其他声卡。
 

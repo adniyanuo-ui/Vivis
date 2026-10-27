@@ -26,10 +26,9 @@ class DeveloperConfigurationTests(unittest.TestCase):
         baseline=json.loads((ROOT/'tests/fixtures/baseline.json').read_text())
         digest=lambda data:hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         motors={m['id']:m for m in robot.profile('0001')['motors']}
-        # The cold-start readback is 0..4095. Only device identity metadata
-        # changed; the accepted tracking stroke remains 1600..2600.
-        self.assertEqual((motors[32]['device_min'],motors[32]['device_max']),(0,4095))
-        self.assertEqual((motors[32].pop('tracking_min'),motors[32].pop('tracking_max')),(1600,2600))
+        # User confirmed new EPROM stops; tracking is contained by these stops.
+        self.assertEqual((motors[32]['device_min'],motors[32]['device_max']),(1706,2388))
+        self.assertEqual((motors[32].pop('tracking_min'),motors[32].pop('tracking_max')),(1706,2388))
         self.assertEqual(motors[32]['max_speed_counts_s'],600)
         motors[32].update(device_min=1600,device_max=2600,max_speed_counts_s=1000)
         for sid in (32,33,34):
@@ -38,7 +37,7 @@ class DeveloperConfigurationTests(unittest.TestCase):
         self.assertEqual(digest(motors),baseline['motors_sha256'])
         startup=robot.startup()['axes']
         neck=next(a for a in startup if a['id']==32)
-        self.assertEqual(neck['device_limits'],[0,4095])
+        self.assertEqual(neck['device_limits'],[1706,2388])
         # User reduced P after the replacement-axis baseline; D/I stay unchanged.
         self.assertEqual(neck['pid_raw'],[16,32,0])
         self.assertEqual(neck['deadband_raw'],[0,0])
