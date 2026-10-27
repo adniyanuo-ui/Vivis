@@ -79,6 +79,7 @@
     "range_mode": "configured",
     "direction_confirmed": false,
     "gain_counts_s": 120,
+    "eye_assist_ratio": 0.25,
     "deadband": 0.14,
     "stop_deadband": 0.07,
     "filter_tau_s": 0.12,
@@ -87,5 +88,5 @@
     "adaptive_speed": false,
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-27 user requested ID32 SRAM41=128, SRAM46=600 and neck target low-pass150ms. Smooth neutral return remains at least3s; no fixed software acceleration limit. Eye parameters, PID32/32/0, deadband0/0 and position limits are unchanged."
+  "parameter_revision_source": "2026-10-27 symmetric neck assistance also uses fresh camera-eye encoder excursion of25% while moving with residual error; reversal clears old image-error polarity. Neck command quantization has1-count hysteresis. SRAM41=128, SRAM46=600, target low-pass150ms, neutral return at least3s, eye parameters, PID32/32/0, deadband0/0 and position limits unchanged."
 }

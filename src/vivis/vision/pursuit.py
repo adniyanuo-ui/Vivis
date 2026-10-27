@@ -83,7 +83,8 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Need positive camera width for image growth threshold')
     if type(n.get('adaptive_speed',True)) is not bool:
         raise ValueError('Invalid neck adaptive speed flag')
-    for key,default,minimum,maximum in [('target_filter_tau_s',0.,0.,1.),('return_duration_s',3.,.5,10.)]:
+    for key,default,minimum,maximum in [('target_filter_tau_s',0.,0.,1.),('return_duration_s',3.,.5,10.),
+                                      ('eye_assist_ratio',.25,.1,1.)]:
         value=n.get(key,default)
         if not finite(value) or not minimum<=value<=maximum:
             raise ValueError('Invalid neck target parameter: '+key)
@@ -111,10 +112,10 @@ class VisualNeckAssist:
     """Recruit the neck from fresh image-error growth, never an eye-position timer.
 
     The existing neck hysteresis now applies to normalized image error. Two
-    image pixels of accumulated growth reject subpixel trend noise. Actual eye
-    feedback supplies movement evidence in production; command evidence is an
-    explicit offline simulation fallback. Saturated eyes can request help even
-    when they can no longer move. No command is treated as measured head motion.
+    image pixels of accumulated growth reject subpixel trend noise. Fresh eye
+    feedback also recruits the neck when remaining eye travel is being consumed,
+    even if the moving camera reduces image error. Command evidence is only an
+    explicit offline simulation fallback. No command is measured head motion.
     """
     def __init__(self, config):
         self.config = config
@@ -126,11 +127,14 @@ class VisualNeckAssist:
         self.direction = 0
         self.reason = 'eyes_only'
 
-    def step(self, packet, state, eye, eye_motion, eye_span):
+    def step(self, packet, state, eye, eye_motion, eye_span,eye_fresh=True):
         n = self.config['neck']
         if state != 'tracking':
             self.reset()
             self.reason = 'no_fresh_face'
+            return 0.
+        if not eye_fresh:
+            self.reset();self.reason='eye_feedback_stale'
             return 0.
         stamp = packet['timestamp_monotonic']
         if self.stamp is None or stamp > self.stamp:
@@ -138,12 +142,18 @@ class VisualNeckAssist:
             increasing = self.stamp is not None and raw*self.raw > 0 and abs(raw) > abs(self.raw)
             if self.stamp is None:
                 self.filtered, self.growth = raw, 0.
+                self.reason='eyes_only'
             else:
                 frame_dt = stamp-self.stamp
                 same_side = raw*self.raw > 0
                 self.growth = (max(0., self.growth+abs(raw)-abs(self.raw))
                                if same_side else 0.)
-                self.filtered += -math.expm1(-frame_dt/n['filter_tau_s'])*(raw-self.filtered)
+                if not same_side:
+                    # A confident new side must not wait for the old side's
+                    # error to decay through zero. Target smoothing is retained.
+                    self.filtered=raw
+                else:
+                    self.filtered += -math.expm1(-frame_dt/n['filter_tau_s'])*(raw-self.filtered)
             self.raw, self.stamp = raw, stamp
             sign = int(np.sign(raw))
             # A reversal must first brake the old request. It does not wait for
@@ -157,6 +167,11 @@ class VisualNeckAssist:
             if not self.direction:
                 if abs(raw) >= n['deadband'] and growing and eye_motion*sign > 0:
                     self.direction, self.reason = sign, 'growing_error'
+                elif (abs(raw)>=n['deadband'] and eye_motion*sign>0
+                      and eye*sign>=n.get('eye_assist_ratio',.25)):
+                    # The eye-mounted camera can reduce image error while
+                    # eye travel is being consumed. Do not wait for saturation.
+                    self.direction,self.reason=sign,'eye_reserve'
                 elif abs(raw) > n['stop_deadband'] and saturated:
                     self.direction, self.reason = sign, 'eye_limit'
             if self.direction:
@@ -180,6 +195,7 @@ class MojiaPursuit:
         self.velocity = 0.
         self.assist = VisualNeckAssist(config)
         self.eye_observation = None
+        self.eye_observed_at=-math.inf
         self.eye_motion = 0.
         self.eye_motion_at = -math.inf
         self.measured_eye = False
@@ -201,6 +217,7 @@ class MojiaPursuit:
             self.eye_observation = None
             self.eye_motion = 0.
         self.measured_eye = self.measured_eye or measured
+        self.eye_observed_at=now
         if self.eye_observation is None:
             self.eye_observation = float(position)
         delta = position-self.eye_observation
@@ -221,6 +238,8 @@ class MojiaPursuit:
         eye_motion = self.eye_motion if now-self.eye_motion_at <= self.config['transport']['max_age_s'] else 0.
         if anchor['positive'] < anchor['neutral']:
             eye_motion = -eye_motion
+        eye_fresh=not self.measured_eye or 0<=now-self.eye_observed_at<=self.config['transport']['max_age_s']
+        eye_offset=axis_normalized(anchor,self.eye_observation) if self.measured_eye else applied[0]
         result = np.full(len(previous), 2047.)
         step_base=previous
         for a in c['axes']:
@@ -228,7 +247,7 @@ class MojiaPursuit:
             result[self.ids.index(a['id'])] = 2047. if returning else 2047*(1-weight)+weight*axis_position(a, xy[coordinate])
         if self.neck:
             col = self.ids.index(32);position = previous[col]
-            eye = applied[0]
+            eye = eye_offset
             desired = 0.
             if return_center:
                 self.assist.reset()
@@ -247,7 +266,7 @@ class MojiaPursuit:
             else:
                 self.return_started=self.return_origin=self.return_duration=None
                 span = abs(anchor['positive' if eye >= 0 else 'negative']-anchor['neutral'])
-                desired = self.assist.step(packet,state,eye,eye_motion,span)
+                desired = self.assist.step(packet,state,eye,eye_motion,span,eye_fresh)
                 desired=float(np.clip(desired,-n['speed_counts_s'],n['speed_counts_s']))
                 goal=position+desired*dt
             low, high = self.neck_bounds
@@ -259,6 +278,8 @@ class MojiaPursuit:
             image_error_x=self.assist.raw, filtered_image_error_x=self.assist.filtered,
             image_error_growth=self.assist.growth, camera_timestamp=self.assist.stamp,
             eye_motion_direction=eye_motion, eye_motion_source='encoder' if self.measured_eye else 'command_simulation',
+            eye_offset_command=float(applied[0]),eye_offset_measured=float(eye_offset) if self.measured_eye else None,
+            eye_feedback_age_s=now-self.eye_observed_at if self.measured_eye else None,
             camera_eye=c.get('camera_eye'),camera_eye_id=self.camera_eye_id,
             returning_to_center=return_center,
             neck_assist_reason='returning' if returning else 'lost_face_return' if lost_return else self.assist.reason,
@@ -294,6 +315,9 @@ class NeckCommandScheduler:
         goal=int(round(self.filtered_position))
         delta=abs(goal-self.goal)
         final_home=returning and goal==2047
+        endpoint=goal in self.endpoints
+        if self.filter_tau_s and abs(self.filtered_position-self.goal)<1. and not (final_home or endpoint):
+            return self.goal,self.speed
         # Re-coalescing a filtered curve every40ms recreates large position
         # stairs. With smoothing enabled, transmit each changed integer goal.
         ready=self.filter_tau_s>0 or (dt>=.04 and (delta>=2 or final_home or goal in self.endpoints))

@@ -45,6 +45,72 @@ def packet(now,x):
 
 
 class MojiaGazeTests(unittest.TestCase):
+    def test_falling_camera_error_recruits_neck_symmetrically_before_eye_saturation(self):
+        for side in ('left','right'):
+            starts=[];paths=[]
+            for sign in (-1,1):
+                c=config();c['control']['camera_eye']=side
+                for a in c['control']['axes']:a.update(negative=1987,positive=2107)
+                controller=MojiaPursuit(c,[8,23,32],[300,300,600],True)
+                old=np.full(3,2047.);start=None;path=[]
+                for tick in range(16):
+                    now=10+tick*.05
+                    controller.observe_eye(2047+sign*min(60,tick*3),now)
+                    old,d=controller.step(packet(now,sign*(.9-.03*tick)),old,.05,now)
+                    path.append(old[2]-2047)
+                    if start is None and abs(d['neck_velocity'])>0:
+                        start=tick
+                        self.assertEqual(d['neck_assist_reason'],'eye_reserve')
+                        self.assertLess(abs(d['eye_offset_measured']),1.)
+                self.assertIsNotNone(start);starts.append(start);paths.append(path)
+            self.assertEqual(starts,[5,5])
+            np.testing.assert_allclose(paths[0],-np.array(paths[1]),atol=1e-8)
+
+    def test_reversal_clears_old_image_error_polarity_in_both_directions(self):
+        from vivis.vision.pursuit import VisualNeckAssist
+        for sign in (-1,1):
+            assist=VisualNeckAssist(config())
+            self.assertGreater(sign*assist.step(packet(10.,sign*.9),'tracking',sign,sign,60),0)
+            v=assist.step(packet(10.05,-sign*.3),'tracking',-sign*.4,-sign,60)
+            self.assertLess(sign*v,0)
+            self.assertEqual(assist.reason,'eye_reserve')
+
+    def test_neck_assistance_uses_encoder_reserve_not_a_saturated_eye_command(self):
+        c=config();controller=MojiaPursuit(c,[8,23,32],[300,300,600],True)
+        controller.observe_eye(2047,10.)
+        previous=np.array([2087.,2087.,2047.])
+        previous,d=controller.step(packet(10.01,.4),previous,.01,10.01)
+        self.assertEqual(d['eye_offset_command'],1.)
+        self.assertEqual(d['eye_offset_measured'],0.)
+        self.assertEqual(d['neck_velocity'],0.)
+        controller.observe_eye(2060,10.05)
+        previous,d=controller.step(packet(10.06,.3),previous,.05,10.06)
+        self.assertGreater(d['neck_velocity'],0.)
+        self.assertEqual(d['neck_assist_reason'],'eye_reserve')
+
+    def test_stale_camera_eye_feedback_does_not_recruit_the_neck(self):
+        controller=MojiaPursuit(config(),[8,23,32],[300,300,600],True)
+        controller.observe_eye(2047,9.99);controller.observe_eye(2087,10.)
+        previous=np.array([2087.,2087.,2047.])
+        previous,d=controller.step(packet(10.02,.4),previous,.02,10.02)
+        self.assertGreater(d['neck_velocity'],0.)
+        previous,d=controller.step(packet(10.4,.4),previous,.02,10.4)
+        self.assertEqual(d['neck_velocity'],0.)
+        self.assertEqual(d['neck_assist_reason'],'eye_feedback_stale')
+
+    def test_filtered_fractional_boundary_noise_does_not_toggle_integer_neck_goals(self):
+        scheduler=NeckCommandScheduler(2047,10,600,False,filter_tau_s=.15)
+        for tick in range(1,241):
+            goal,_=scheduler.step(2047.5+(.02 if tick%2 else -.02),10+tick/60)
+            self.assertEqual(goal,2047)
+        previous=2047
+        for tick in range(1,121):
+            goal,_=scheduler.step(2047+tick*.1,14+tick/60)
+            self.assertTrue(0<=goal-previous<=1)
+            self.assertLessEqual(abs(scheduler.filtered_position-goal),1.)
+            previous=goal
+        self.assertGreater(previous,2055)
+
     def test_neck_target_filter_rejects_steps_and_is_consistent_across_tick_rates(self):
         positions=[]
         for hz in (60,100):
@@ -292,11 +358,12 @@ class MojiaGazeTests(unittest.TestCase):
         self.assertLess(first[2],2127)
         self.assertLess(old[2],2120)
 
-    def test_decreasing_error_keeps_eyes_in_charge(self):
+    def test_decreasing_error_keeps_eyes_in_charge_without_measured_eye_excursion(self):
         controller=MojiaPursuit(config(),[8,23,32],[300,300,900],True)
         old=np.full(3,2047.)
         for i in range(45):
             now=10+(i+1)/60
+            controller.observe_eye(2047,now)
             old,d=controller.step(packet(now,.25*(1-i/45)),old,1/60,now)
             self.assertEqual(d['neck_velocity'],0.)
         self.assertGreater(old[1],2047)
@@ -467,8 +534,10 @@ class MojiaGazeTests(unittest.TestCase):
             errors.append(error)
             old,_=controller.step(packet(now,error),old,1/60,now)
         self.assertLess(abs(errors[-1]),.08)
-        # A stationary target that the eyes can acquire needs no neck motion.
-        self.assertAlmostEqual(old[2],2047)
+        # Reserve assistance may share a stationary offset with the neck;
+        # the image loop must converge while reducing the eye's excursion.
+        self.assertGreater(old[2],2047)
+        self.assertLess(abs(old[1]-2047),initial*40)
 
     def test_eyes_only_never_adds_neck_axis(self):
         c=config();controller=MojiaPursuit(c,[8,23],[60,60],False)

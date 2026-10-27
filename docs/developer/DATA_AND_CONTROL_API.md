@@ -73,6 +73,8 @@ PYTHONPATH=src .venv/bin/python -m vivis.motion.export \
 
 颈部目标平滑时间常数`neck.target_filter_tau_s`和回中参考最短时长`neck.return_duration_s`在`tracking.json`中定义，分别为0.15秒、3秒；属于行为目标的连续化处理，不恢复固定64计数/秒²软件加速度限制。`person_gaze`日志分别保存`planned_neck_goal`（平滑前）、`smoothed_neck_goal`（平滑后）和`neck_return_duration_s`，实际整数发送目标在`events.goals`；这些均不等于编码器位置。当前32号SRAM41=128仍按唯一硬件配置恢复。
 
+`neck.eye_assist_ratio=0.25`定义当前相机眼的实测行程使用率辅助门槛，不是固定等待时间。`person_gaze.eye_offset_command`与`eye_offset_measured`分别记录命令和实测归一化眼位，`eye_feedback_age_s`记录反馈年龄；`eye_reserve`表示图像仍有偏差且已消耗眼部行程，`eye_feedback_stale`表示反馈过期而不请求颈部辅助。没有新增串口轮询，复用现有眼球反馈。
+
 `--mouth-gain`沿用既有6轴偏移倍率，适用ID12/13/27/28/29/31，在`hardware.json`的`runtime.mouth_gain_ids`中列明；它与14个口型相关轴的速度分组是两个概念。默认倍率1.0，不改变目标幅度。
 
 ## 5. 控制权与资源
