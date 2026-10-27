@@ -1,0 +1,117 @@
+{
+  "schema_version": "vivis-parallel-neck-tracking-1.0",
+  "enabled": false,
+  "geometry_confirmed": true,
+  "directions_confirmed": true,
+  "yaw_above_platform": true,
+  "geometry": {
+    "schema_version": "vivis-rotary-parallel-neck-1.0",
+    "pivot_base_mm": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "pose_limits_rad": [
+      [
+        -0.20943951023931956,
+        0.20943951023931956
+      ],
+      [
+        -0.13962634015954636,
+        0.13962634015954636
+      ]
+    ],
+    "jacobian_condition_limit": 30.0,
+    "branches": [
+      {
+        "id": 33,
+        "motor_pivot_mm": [
+          -31.756202697753764,
+          -3.4910015258772398,
+          -51.45000000000292
+        ],
+        "platform_anchor_mm": [
+          -31.756202697753764,
+          20.996753692627944,
+          4.199999999999575
+        ],
+        "crank_u": [
+          0,
+          1,
+          0
+        ],
+        "crank_v": [
+          0,
+          0,
+          1
+        ],
+        "crank_radius_mm": 21.609603881835938,
+        "rod_length_mm": 55.724377565990345,
+        "neutral_crank_angle_rad": 0.0,
+        "encoder_sign": 1,
+        "neutral_count": 2047,
+        "counts_per_revolution": 4096,
+        "minimum_count": 1967,
+        "maximum_count": 2127
+      },
+      {
+        "id": 34,
+        "motor_pivot_mm": [
+          31.75615692138706,
+          -3.4910015258777745,
+          -86.00447387695775
+        ],
+        "platform_anchor_mm": [
+          31.75615692138706,
+          20.996753692627944,
+          4.199999999999575
+        ],
+        "crank_u": [
+          0,
+          1,
+          0
+        ],
+        "crank_v": [
+          0,
+          0,
+          1
+        ],
+        "crank_radius_mm": 21.609603881835938,
+        "rod_length_mm": 90.2503787390139,
+        "neutral_crank_angle_rad": 0.0,
+        "encoder_sign": -1,
+        "neutral_count": 2047,
+        "counts_per_revolution": 4096,
+        "minimum_count": 1967,
+        "maximum_count": 2127
+      }
+    ]
+  },
+  "motion": {
+    "max_speed_counts_s": 100.0,
+    "max_acceleration_counts_s2": 400.0,
+    "max_jerk_counts_s3": 4000.0,
+    "return_duration_s": 3.0
+  },
+  "control": {
+    "pitch_gain_rad_s": 0.18,
+    "pitch_limit_rad": 0.05235987755982989,
+    "roll_follow_ratio": 0.25,
+    "roll_limit_rad": 0.03490658503988659,
+    "roll_gain_s": 1.0,
+    "image_deadband": 0.04,
+    "filter_tau_s": 0.15
+  },
+  "provenance": {
+    "cad_file": "脖子整体3.STEP",
+    "cad_sha256": "18077b6906b77f6d1480d4c9a5815c0c788c7f0660faf5b447469a33c23c6fcb",
+    "cad_pivot_mm": [
+      194.6902622304941,
+      -1.1729955715640474,
+      -8.499999999999966
+    ],
+    "source": "CAD pin axes; neutral closure; user confirmed33 short/up positive,34 long/up negative,2047 level,32 above platform",
+    "workspace_samples": 289,
+    "live_acceptance": "pending bounded onsite trial; encoder limits are not a collision certificate"
+  }
+}

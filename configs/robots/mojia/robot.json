@@ -5,6 +5,7 @@
   "calibration_sha256": "b3b0321ac804d89cc131749890fe031035654ce07644a594bcad47ec4eb67943",
   "hardware": "hardware.json",
   "tracking": "tracking.json",
+  "parallel_neck": "parallel_neck.json",
   "homing": "homing.json",
   "telemetry": "telemetry.json",
   "works": "../../../assets/works.json",

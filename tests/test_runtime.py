@@ -7,6 +7,20 @@ from vivis.hardware.feetech.protocol import Bus,packet,decode_status,goal_packet
 from vivis.motion.mapping import inputs,compile_trajectory,limit_step,live_preflight
 
 class ProtocolTests(unittest.TestCase):
+    def test_parallel_pair_is_kept_in_the_same_syncwrite_group(self):
+        from unittest.mock import Mock
+        from vivis.hardware.feetech.sdk import OfficialSDKBus
+        bus=OfficialSDKBus.__new__(OfficialSDKBus)
+        ids=[sid for sid in range(2,37) if sid not in (9,24)]
+        bus.acceleration={sid:0 for sid in ids};bus.coordinated_goal_ids=(33,34)
+        bus.sync_group_size=30;bus._send_goals=Mock()
+        bus.goals({sid:2047 for sid in ids},{sid:1000 for sid in ids})
+        groups=[call.args[0] for call in bus._send_goals.call_args_list]
+        self.assertEqual(len(groups),2)
+        self.assertTrue({33,34}<=set(groups[0]))
+        self.assertFalse({33,34}&set(groups[1]))
+        self.assertEqual(set().union(*(set(g) for g in groups)),set(ids))
+
     def test_segmented_sdk_snapshot_decodes_all_bytes_and_preserves_cached_control_fields(self):
         from types import SimpleNamespace
         from unittest.mock import Mock

@@ -70,6 +70,7 @@ class Robot:
 
     def tracking(self, camera='right', device=None):
         c = read_json(self.resolve('tracking'))
+        if 'parallel_neck' in self.definition:c['parallel_neck']=read_json(self.resolve('parallel_neck'))
         if camera not in self.definition['cameras']:
             raise ValueError('Unknown camera side')
         mount = self.definition['cameras'][camera]

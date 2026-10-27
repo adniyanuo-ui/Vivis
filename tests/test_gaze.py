@@ -701,12 +701,19 @@ class MojiaPerformanceTests(unittest.TestCase):
         from vivis.runtime.playback import play
         from vivis.hardware.feetech.protocol import ReadTimeout,CorruptResponse
         import importlib.util
-        cases=[(30,'left',60,False),(60,'right',60,False),(30,'right',30,False)]
-        if importlib.util.find_spec('ruckig') is not None:cases.append((60,'right',60,True))
-        for face_hz,eye,control_hz,upstream in cases:
-            with self.subTest(face_hz=face_hz,camera_eye=eye,control_hz=control_hz,upstream=upstream):
+        cases=[(30,'left',60,False,False),(60,'right',60,False,False),(30,'right',30,False,False)]
+        if importlib.util.find_spec('ruckig') is not None:cases.extend([(60,'right',60,True,False),(60,'right',60,True,True)])
+        for face_hz,eye,control_hz,upstream,parallel in cases:
+            with self.subTest(face_hz=face_hz,camera_eye=eye,control_hz=control_hz,upstream=upstream,parallel=parallel):
                 c,p,ids,r=self.setup_performance();fixture,bus,clock=PlaybackTests().fixture()
                 c['neck']['upstream_trajectory']['enabled']=upstream
+                c['parallel_neck']['enabled']=parallel
+                if parallel:
+                    from vivis.motion.ownership import tracking_profile
+                    canonical=Robot()
+                    for motor in p['motors']:
+                        if motor['id'] in (33,34):motor['max_speed_counts_s']=canonical.axes[motor['id']]['max_speed_counts_s']
+                    p=tracking_profile(c,p,ids)
                 c['control']['camera_eye']=eye
                 for key in ['audio_device','hardware_stop_description','physical_audio_output_confirmed','actuator_latency_ms','stop_method']:
                     p[key]=fixture[key]
@@ -758,7 +765,7 @@ class MojiaPerformanceTests(unittest.TestCase):
                 self.assertEqual(result['playback_fps'],60)
                 self.assertEqual(result['runtime_feedback_schedule']['budget_ms'],1000/control_hz)
                 self.assertEqual(result['runtime_feedback_schedule']['budget_mode'],'remaining_control_period')
-                self.assertEqual(result['runtime_feedback_schedule']['priority_ids'],[a.camera_eye_id,32])
+                self.assertEqual(result['runtime_feedback_schedule']['priority_ids'],[a.camera_eye_id,32]+([33,34] if parallel else []))
                 self.assertTrue(startup_loss[0])
                 self.assertEqual({r['id'] for r in result['startup_communication_recoveries']},{2,4})
                 self.assertTrue(all(r['recovered'] for r in result['startup_communication_recoveries']))

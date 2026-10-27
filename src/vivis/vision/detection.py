@@ -27,8 +27,17 @@ def select_largest(faces, width, height, min_area_ratio=.002, score_threshold=.8
         cx, cy = (float(row[4]) + float(row[6])) / 2, (float(row[5]) + float(row[7])) / 2
         if not (x0 <= cx <= x1 and y0 <= cy <= y1):
             cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        # Eye-line orientation is an image measurement, not absolute head pose.
+        # Preserve the existing centre/ranking and let optional neck consumers
+        # reject unreliable roll without losing normal x/y face tracking.
+        ex1,ey1,ex2,ey2=map(float,row[4:8]);dx,dy=ex2-ex1,ey2-ey1
+        eye_span=math.hypot(dx,dy)
+        good_eyes=(x0<=ex1<=x1 and y0<=ey1<=y1 and x0<=ex2<=x1 and y0<=ey2<=y1
+                   and eye_span>=max(6.,.1*(x1-x0)))
+        eye_line_roll=.5*math.atan2(2*dx*dy,dx*dx-dy*dy) if good_eyes else None
         candidates.append({'bbox': [x0, y0, x1 - x0, y1 - y0],
                            'area_ratio': area / (width * height), 'score': score,
+                           'eye_line_roll_rad':eye_line_roll,'eye_span_px':eye_span if math.isfinite(eye_span) else None,
                            'point': [cx, cy], 'x': 2 * cx / width - 1, 'y': 2 * cy / height - 1})
     return (max(candidates, key=lambda face: face['area_ratio']) if candidates else None), candidates
 

@@ -158,16 +158,16 @@ class UpstreamTrajectory:
         return p
 
 
-def position_extrema(trajectory):
+def position_extrema(trajectory,axis=0):
     """Exact cubic-segment extrema, including zero-velocity interior points.
 
     Ruckig0.19.4 velocity profiles leave pf=0; native position_extrema includes
     that unused endpoint. Use actual piecewise p/v/a/j data instead, without
     treating the fictitious zero as a real position or ignoring real overshoot.
     """
-    values=[trajectory.at_time(0.)[0][0],trajectory.at_time(trajectory.duration)[0][0]]
+    values=[trajectory.at_time(0.)[0][axis],trajectory.at_time(trajectory.duration)[0][axis]]
     for section in trajectory.profiles:
-        profile=section[0]
+        profile=section[axis]
         for phases in (profile.brake,profile,profile.accel):
             for index,duration in enumerate(phases.t):
                 if duration<=0:continue

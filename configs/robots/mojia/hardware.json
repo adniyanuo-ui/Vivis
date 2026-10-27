@@ -919,7 +919,7 @@
       "register_layout_confirmed": true,
       "register_write_verification": "Pending bounded RAM write/readback during explicit arm",
       "position_feedback_tolerance_counts": 5,
-      "role": "颈部前后",
+      "role": "并联颈部短拉杆（俯仰/翻滚耦合）",
       "playback_enabled": true,
       "acceleration_raw": 0
     },
@@ -944,7 +944,7 @@
       "register_layout_confirmed": true,
       "register_write_verification": "Pending bounded RAM write/readback during explicit arm",
       "position_feedback_tolerance_counts": 5,
-      "role": "颈部左右",
+      "role": "并联颈部长拉杆（俯仰/翻滚耦合）",
       "playback_enabled": true,
       "acceleration_raw": 0
     },

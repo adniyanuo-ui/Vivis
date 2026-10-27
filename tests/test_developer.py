@@ -184,6 +184,9 @@ class DeveloperResourcesTests(unittest.TestCase):
                 dict(service_age_s=.2,frame_age_ms=200)):
             with self.subTest(patch_values=patch_values):
                 self.assertFalse(compatible_vision({**good,**patch_values},config,'hash'))
+        config['parallel_neck']['enabled']=True
+        self.assertFalse(compatible_vision(good,config,'hash'))
+        self.assertTrue(compatible_vision({**good,'target_features':['face_xy','eye_line_roll']},config,'hash'))
 
     def test_launcher_accepts_the_real_public_http_state_without_internal_timestamp(self):
         from urllib.request import urlopen

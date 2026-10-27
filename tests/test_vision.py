@@ -1,5 +1,5 @@
 """Camera lifecycle, local UDP and preview tests without real video devices."""
-import copy,json,socket,tempfile,time,unittest
+import copy,json,math,socket,tempfile,time,unittest
 from pathlib import Path
 from unittest.mock import Mock,patch
 from urllib.request import urlopen
@@ -28,6 +28,27 @@ def face(x, y, width, height, score=.95):
 
 
 class SelectionTests(unittest.TestCase):
+    def test_eye_line_roll_measures_tilt_without_changing_existing_face_target(self):
+        for degrees in (-25.,0.,25.):
+            row=face(100,100,100,100);angle=math.radians(degrees)
+            dx,dy=20*math.cos(angle),20*math.sin(angle)
+            row[4:8]=[150-dx,135-dy,150+dx,135+dy]
+            selected,_=select_largest([row],640,480)
+            self.assertAlmostEqual(selected['eye_line_roll_rad'],angle)
+            self.assertEqual(selected['point'],[150.,135.])
+            self.assertAlmostEqual(selected['x'],2*150/640-1)
+            self.assertAlmostEqual(selected['y'],2*135/480-1)
+            row[4:8]=row[6:8]+row[4:6]
+            swapped,_=select_largest([row],640,480)
+            self.assertAlmostEqual(swapped['eye_line_roll_rad'],angle)
+
+    def test_invalid_eye_line_does_not_remove_an_otherwise_valid_face(self):
+        for landmarks in ([0,0,0,0],[150,135,150.01,135],[99,130,170,135]):
+            row=face(100,100,100,100);row[4:8]=landmarks
+            selected,_=select_largest([row],640,480)
+            self.assertIsNotNone(selected)
+            self.assertIsNone(selected['eye_line_roll_rad'])
+
     def test_area_wins_over_confidence_and_distance_to_center(self):
         selected, faces = select_largest([face(300, 200, 40, 50, .99), face(10, 10, 150, 180, .85)], 640, 480)
         self.assertEqual(len(faces), 2)

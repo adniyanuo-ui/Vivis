@@ -151,6 +151,8 @@ class OfficialSDKBus(Bus):
             return
         group_size=getattr(self,'sync_group_size',30)
         ordered=sorted(goals)
+        coordinated=[sid for sid in getattr(self,'coordinated_goal_ids',()) if sid in goals]
+        ordered=coordinated+[sid for sid in ordered if sid not in coordinated]
         for offset in range(0,len(ordered),group_size):
             group={sid:goals[sid] for sid in ordered[offset:offset+group_size]}
             self._send_goals(group,speeds)

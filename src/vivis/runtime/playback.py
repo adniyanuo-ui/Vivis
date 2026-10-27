@@ -295,6 +295,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         else:
             bus=Bus(profile['port'],profile['baud'])
         result['serial_backend']=profile.get('serial_backend','local')
+        if mojia_gaze and gaze_override.platform is not None:
+            bus.coordinated_goal_ids=(33,34)
         result['sdk_transaction_timeout_ms']=profile.get('sdk_transaction_timeout_ms')
         positions=[];snapshot_deadline=time.monotonic()+10
         for sid in ids:
@@ -375,7 +377,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             # Startup checks use the original timeout/retry. Playback reads are
             # individually bounded and retried by scheduling a fresh sample.
             bus.set_read_policy(3,retry=False)
-            priority_ids=tuple(sid for sid in (gaze_override.camera_eye_id,32)
+            priority_ids=tuple(sid for sid in (gaze_override.camera_eye_id,32,*((33,34) if gaze_override.platform is not None else ()))
                                if sid in command_ids) if mojia_gaze else ()
             feedback_requests=int(8*60/control_hz)
             feedback_scheduler=BudgetedFeedback(bus,ids,priority_ids=priority_ids,max_feedback_age_s=feedback_age_limit,

@@ -24,6 +24,8 @@ done
 for work in 0001 wz2; do
     VIVIS_PYTHON="$PYTHON" ./examples/03_face_eye_neck_tracking/run.sh --work "$work" --upstream-trajectory off --check > /dev/null
     printf 'Explicit upstream trajectory off check passed: %s\n' "$work"
+    VIVIS_PYTHON="$PYTHON" ./examples/03_face_eye_neck_tracking/run.sh --work "$work" --parallel-neck on --check > /dev/null
+    printf 'Parallel pitch/roll check passed: %s\n' "$work"
 done
 "$PYTHON" -m unittest discover -s tests -p 'test_*.py'
 if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then

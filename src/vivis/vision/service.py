@@ -43,7 +43,7 @@ def main(argv=None):
         camera_config['rotation_deg'] = args.rotation
     if args.mirror_x is not None:
         camera_config['mirror_x'] = args.mirror_x
-    identity=dict(config_sha256=config_digest,target_protocol_version=VERSION,
+    identity=dict(config_sha256=config_digest,target_protocol_version=VERSION,target_features=['face_xy','eye_line_roll'],
         camera_device=camera_config['device'],camera_eye=config['control'].get('camera_eye'),
         camera_transform={k:camera_config[k] for k in ('rotation_deg','mirror_x')})
     if (camera_config['rotation_deg'] not in (0, 90, 180, 270)

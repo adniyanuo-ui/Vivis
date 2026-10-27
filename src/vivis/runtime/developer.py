@@ -25,6 +25,9 @@ def compatible_vision(state, config, digest):
     service_age=state.get('service_age_s')
     age=state.get('frame_age_ms')
     maximum=config['transport']['max_age_s']
+    features=state.get('target_features',[])
+    if config.get('parallel_neck',{}).get('enabled') and (not isinstance(features,list) or 'eye_line_roll' not in features):
+        return False
     return (state.get('config_sha256')==digest and state.get('target_protocol_version')==VERSION
         and state.get('camera_transform')=={k:config['camera'][k] for k in ('rotation_deg','mirror_x')}
         and state.get('camera_device')==config['camera']['device']
@@ -117,6 +120,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     parser.add_argument('--baud', type=int, choices=(250000, 500000, 1000000))
     parser.add_argument('--upstream-trajectory', choices=('on','off'),
                         help='Optional ID32 jerk-limited upstream trajectory planning')
+    parser.add_argument('--parallel-neck',choices=('on','off'),help='ID33/34 coupled pitch and light roll')
     args = parser.parse_args(argv)
     if mode not in ('face', 'eyes', 'eyes-neck'):
         parser.error('Unknown example mode')
@@ -146,6 +150,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         command += ['--baud', str(args.baud)]
     if args.upstream_trajectory is not None:
         command += ['--upstream-trajectory',args.upstream_trajectory]
+    if args.parallel_neck is not None:command+=['--parallel-neck',args.parallel_neck]
     if args.home_only:
         command += ['--home-only']
     from vivis.runtime.show import main
@@ -169,6 +174,8 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         config = robot.tracking(args.camera, args.camera_device or ('unused' if not required else None))
         from vivis.motion.upstream import configure
         trajectory=configure(config,mode,args.upstream_trajectory,args.home_only)
+        from vivis.vision.parallel_follow import configure as configure_parallel
+        parallel=configure_parallel(config,mode,args.parallel_neck,args.home_only)
         config['control']['vertical_enabled'] = False
         config['control']['axes'] = [a for a in config['control']['axes'] if a['id'] not in (7, 22)]
         config['control']['held_eye_ids'] = [7, 22]
@@ -177,6 +184,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         print(f'模式：{mode}；作品：{args.work}；每遍独立准备、35轴缓慢回中。', flush=True)
         if mode=='eyes-neck' and not args.home_only:
             print('上游轨迹规划：'+('开启（仅ID32）' if trajectory['enabled'] else '关闭（使用原150ms位置低通）'),flush=True)
+            print('并联颈部：'+('开启（ID33/34俯仰及轻微侧倾）' if parallel['enabled'] else '关闭（ID33/34保持）'),flush=True)
         print('日志：' + str(output), flush=True)
         def interrupt(*_):
             raise KeyboardInterrupt
