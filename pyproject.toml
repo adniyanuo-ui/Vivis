@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 vision = ["opencv-python-headless==4.10.0.84"]
+trajectory = ["ruckig==0.19.4"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

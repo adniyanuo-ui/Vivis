@@ -282,6 +282,7 @@ def main(argv=None):
                         help='Actual combined control rate; source timing and audio stay unchanged')
     parser.add_argument('--baud',type=int,choices=(250000,500000,1000000),
                         help='Host baud; all servos must already be verified at this baud')
+    parser.add_argument('--upstream-trajectory',choices=('on','off'),help='Optional ID32 upstream trajectory planning')
     parser.add_argument('--authorized-tongue-observation',action='store_true')
     parser.add_argument('--usb-volume-times-three',action='store_true',help='Use the saved original USB volume reference, never cumulative gain')
     parser.add_argument('--hold-vertical-eyes',action='store_true',help='Hold ID7/22: neither song nor tracking may send them position commands')
@@ -295,6 +296,8 @@ def main(argv=None):
     args.targets,args.audio=work['targets'],work['audio']
     original=robot.profile(args.work)
     config=robot.tracking(args.camera,args.camera_device or ('unused' if args.mode=='face' else None))
+    from vivis.motion.upstream import configure
+    trajectory_settings=configure(config,args.mode,args.upstream_trajectory,args.home_only)
     telemetry_policy=robot.telemetry()
     calibration=robot.calibration
     if args.hold_vertical_eyes:
@@ -337,6 +340,7 @@ def main(argv=None):
                              developer_mode=args.mode,camera_required=args.mode!='face' and not args.home_only,
                              mouth_gain_report=profile['mouth_gain_report'],
                              acceleration_control='servo_register_41',
+                             upstream_trajectory=trajectory_settings,
                              volume_times_three=args.usb_volume_times_three and not args.home_only)))
         return
     args.output.mkdir(parents=True,exist_ok=False)
@@ -354,7 +358,8 @@ def main(argv=None):
         if stopped or stop_file.exists():raise RuntimeError('Operator stop')
     summary=dict(completed=False,rounds=[],error=None,startup_events=[],tongue_disabled_after=False,mouth_motion_gain=args.mouth_gain)
     summary.update(repeat_mode='independent_full_cycle',requested_rounds=args.repeat,cleanup_attempted=False,
-                   control_hz=args.control_fps,baud=profile['baud'],source_fps=fps,developer_mode=args.mode)
+                   control_hz=args.control_fps,baud=profile['baud'],source_fps=fps,developer_mode=args.mode,
+                   upstream_trajectory=trajectory_settings)
     summary['homing']={}
     status_path=ROOT/'outputs/runtime/control_status.json'
     status_path.parent.mkdir(parents=True,exist_ok=True)

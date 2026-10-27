@@ -115,9 +115,13 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     parser.add_argument('--control-fps', type=int, choices=(30, 60))
     parser.add_argument('--face-fps', type=int, choices=(30, 60))
     parser.add_argument('--baud', type=int, choices=(250000, 500000, 1000000))
+    parser.add_argument('--upstream-trajectory', choices=('on','off'),
+                        help='Optional ID32 jerk-limited upstream trajectory planning')
     args = parser.parse_args(argv)
     if mode not in ('face', 'eyes', 'eyes-neck'):
         parser.error('Unknown example mode')
+    if args.upstream_trajectory=='on' and (mode!='eyes-neck' or args.home_only):
+        parser.error('上游轨迹规划只能用于示例3的眼颈跟踪播放')
     robot = Robot(args.robot)
     if mode != 'face' and not args.home_only:
         from vivis.runtime.assets import verify_model
@@ -140,6 +144,8 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         command += ['--camera-device', args.camera_device]
     if args.baud is not None:
         command += ['--baud', str(args.baud)]
+    if args.upstream_trajectory is not None:
+        command += ['--upstream-trajectory',args.upstream_trajectory]
     if args.home_only:
         command += ['--home-only']
     from vivis.runtime.show import main
@@ -161,12 +167,16 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         except BlockingIOError as exc:
             raise RuntimeError('另一份开发者示例正在运行，请先停止当前任务') from exc
         config = robot.tracking(args.camera, args.camera_device or ('unused' if not required else None))
+        from vivis.motion.upstream import configure
+        trajectory=configure(config,mode,args.upstream_trajectory,args.home_only)
         config['control']['vertical_enabled'] = False
         config['control']['axes'] = [a for a in config['control']['axes'] if a['id'] not in (7, 22)]
         config['control']['held_eye_ids'] = [7, 22]
         config_path = output / 'tracking_effective.json'
         config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n')
         print(f'模式：{mode}；作品：{args.work}；每遍独立准备、35轴缓慢回中。', flush=True)
+        if mode=='eyes-neck' and not args.home_only:
+            print('上游轨迹规划：'+('开启（仅ID32）' if trajectory['enabled'] else '关闭（使用原150ms位置低通）'),flush=True)
         print('日志：' + str(output), flush=True)
         def interrupt(*_):
             raise KeyboardInterrupt

@@ -21,6 +21,14 @@ for entry in examples/*/run.sh; do
         printf 'Offline check passed: %s / %s\n' "$entry" "$work"
     done
 done
+if "$PYTHON" -c "import importlib.util; raise SystemExit(importlib.util.find_spec('ruckig') is None)"; then
+    for work in 0001 wz2; do
+        VIVIS_PYTHON="$PYTHON" ./examples/03_face_eye_neck_tracking/run.sh --work "$work" --upstream-trajectory on --check > /dev/null
+        printf 'Optional upstream trajectory check passed: %s\n' "$work"
+    done
+else
+    printf 'Optional trajectory dependency absent; checking default/off paths only.\n'
+fi
 "$PYTHON" -m unittest discover -s tests -p 'test_*.py'
 if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     git diff --check

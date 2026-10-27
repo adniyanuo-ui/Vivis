@@ -50,7 +50,16 @@
 
 丢脸或歌曲结束回中采用起止速度均为0的平滑曲线，`neck.return_duration_s=3.0`秒是参考轨迹最短时长；低速度上限会延长时间，低通还需要收尾。轨迹从当前已滤波的命令位置开始，不宣称该值是编码器实测位置。眼球参数不变。
 
-当前先验收撤销16发送死区、P降至16的组合；若抖动消失，则暂停后续轨迹开发。[上游轨迹规划](../../docs/developer/UPSTREAM_TRAJECTORY_PLANNING.md)已记录为可按需启停的后续功能，尚未实现。现场现象见[颈部诊断记录](../../docs/developer/NECK_JITTER_DIAGNOSIS.md)。
+用户确认撤销16发送死区后卡顿消失，P16后抖动降低。当前加入可选的[上游轨迹规划](../../docs/developer/UPSTREAM_TRAJECTORY_PLANNING.md)，默认关闭；安装可选依赖后可做对照：
+
+```bash
+# 新环境首次需要：./tools/setup.sh --trajectory
+./examples/03_face_eye_neck_tracking/run.sh --work 0001 --repeat 1 --upstream-trajectory on
+# 先Ctrl+C结束当前轮，再关闭该功能启动另一轮
+./examples/03_face_eye_neck_tracking/run.sh --work 0001 --repeat 1 --upstream-trajectory off
+```
+
+开启仅接管ID32目标平滑，绕过150ms位置低通，生成速度/加速度/jerk受限的浮点参考；初始软件加速度800计数/秒²、jerk8000计数/秒³，与硬件128的含义不同。关闭保持上文原链路；不加选项仍关闭。PID、硬件参数、眼球及作品不变。开关在启动时生效，若效果不明显或更迟就用`off`。现场现象见[颈部诊断记录](../../docs/developer/NECK_JITTER_DIAGNOSIS.md)。
 
 ## 4. 现场验收
 

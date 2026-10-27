@@ -9,6 +9,7 @@ import numpy as np
 
 from vivis.vision.policy import GazePolicy, axis_normalized, axis_position, finite, validate_config
 from vivis.motion.mapping import limit_step
+from vivis.motion.upstream import settings as upstream_settings,require_engine,UpstreamTrajectory
 
 
 def camera_axes(config):
@@ -77,6 +78,8 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         if trial and max(abs(v-2047) for v in values) > cap:
             raise ValueError('Eye trial exceeds coordinate-specific limits')
     n = config['neck']
+    plan=upstream_settings(n)
+    if neck and plan['enabled']:require_engine()
     if n.get('coordination_mode') != 'visual_error_assist' or 'eye_lead_s' in n:
         raise ValueError('Mojia neck requires visual_error_assist without a fixed eye delay')
     if type(config['camera']['width']) is not int or config['camera']['width'] <= 0:
@@ -200,9 +203,14 @@ class MojiaPursuit:
         self.eye_motion_at = -math.inf
         self.measured_eye = False
         self.return_started=None;self.return_origin=None;self.return_duration=None
+        plan=upstream_settings(config['neck'])
+        self.upstream=(UpstreamTrajectory(*self.neck_bounds,
+            min(config['neck']['speed_counts_s'],self.speeds[self.ids.index(32)]),plan,
+            config['neck'].get('return_duration_s',3.)) if neck and plan['enabled'] else None)
 
     def return_window(self,position):
         if not self.neck:return 5.
+        if self.upstream is not None:return self.upstream.return_window(position)
         n=self.config['neck'];speed=min(n['speed_counts_s'],self.speeds[self.ids.index(n['id'])])
         distance=abs(position-2047)
         duration=max(n.get('return_duration_s',3.),1.875*distance/speed)
@@ -249,7 +257,16 @@ class MojiaPursuit:
             col = self.ids.index(32);position = previous[col]
             eye = eye_offset
             desired = 0.
-            if return_center:
+            if self.upstream is not None:
+                if self.upstream.position is None:self.upstream.reset(position)
+                if return_center:self.assist.reset()
+                else:
+                    span=abs(anchor['positive' if eye>=0 else 'negative']-anchor['neutral'])
+                    desired=self.assist.step(packet,state,eye,eye_motion,span,eye_fresh)
+                goal=self.upstream.step(desired,dt,returning=return_center)
+                self.velocity=self.upstream.velocity
+                self.return_duration=self.upstream.last_diagnostic['return_duration_s']
+            elif return_center:
                 self.assist.reset()
                 if self.return_started is None:
                     origin=position if applied_neck is None else applied_neck
@@ -271,7 +288,7 @@ class MojiaPursuit:
                 goal=position+desired*dt
             low, high = self.neck_bounds
             goal=float(np.clip(goal,low,high))
-            self.velocity=(goal-step_base[col])/dt
+            if self.upstream is None:self.velocity=(goal-step_base[col])/dt
             result[col] = goal
         return limit_step(step_base, result, self.speeds, dt), dict(
             state=state, weight=weight, eye_error_x=float(xy[0]), neck_velocity=self.velocity,
@@ -285,6 +302,7 @@ class MojiaPursuit:
             neck_assist_reason='returning' if returning else 'lost_face_return' if lost_return else self.assist.reason,
             neck_requested_velocity=desired if self.neck else 0.,
             neck_return_duration_s=self.return_duration if self.neck and return_center else None,
+            upstream_trajectory=(dict(self.upstream.last_diagnostic) if self.upstream is not None else {'enabled':False}),
             neck_at_limit=bool(self.neck and (result[self.ids.index(32)]<=low or result[self.ids.index(32)]>=high)))
 
 

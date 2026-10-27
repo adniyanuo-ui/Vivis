@@ -699,9 +699,13 @@ class MojiaPerformanceTests(unittest.TestCase):
         from vivis.motion.ownership import MojiaPlaybackGaze
         from vivis.runtime.playback import play
         from vivis.hardware.feetech.protocol import ReadTimeout,CorruptResponse
-        for face_hz,eye,control_hz in ((30,'left',60),(60,'right',60),(30,'right',30)):
-            with self.subTest(face_hz=face_hz,camera_eye=eye,control_hz=control_hz):
+        import importlib.util
+        cases=[(30,'left',60,False),(60,'right',60,False),(30,'right',30,False)]
+        if importlib.util.find_spec('ruckig') is not None:cases.append((60,'right',60,True))
+        for face_hz,eye,control_hz,upstream in cases:
+            with self.subTest(face_hz=face_hz,camera_eye=eye,control_hz=control_hz,upstream=upstream):
                 c,p,ids,r=self.setup_performance();fixture,bus,clock=PlaybackTests().fixture()
+                c['neck']['upstream_trajectory']['enabled']=upstream
                 c['control']['camera_eye']=eye
                 for key in ['audio_device','hardware_stop_description','physical_audio_output_confirmed','actuator_latency_ms','stop_method']:
                     p[key]=fixture[key]
@@ -747,6 +751,8 @@ class MojiaPerformanceTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as directory,patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus),patch('vivis.runtime.playback.AudioClock',return_value=clock):
                     result=play(p,ids,trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP',gaze_override=a)
                 self.assertTrue(result['completed'])
+                self.assertTrue(all(e['person_gaze']['upstream_trajectory']['enabled']==upstream
+                                    for e in result['events']))
                 self.assertEqual(result['control_hz'],control_hz)
                 self.assertEqual(result['playback_fps'],60)
                 self.assertEqual(result['runtime_feedback_schedule']['budget_ms'],1000/control_hz)

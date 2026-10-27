@@ -84,9 +84,14 @@
     "stop_deadband": 0.07,
     "filter_tau_s": 0.12,
     "target_filter_tau_s": 0.15,
+    "upstream_trajectory": {
+      "enabled": false,
+      "max_acceleration_counts_s2": 800.0,
+      "max_jerk_counts_s3": 8000.0
+    },
     "return_duration_s": 3.0,
     "adaptive_speed": false,
     "coordination_mode": "visual_error_assist"
   },
-  "parameter_revision_source": "2026-10-27 withdraw16-count neck transmission deadband after onsite segmented motion; ID32 P reduced to16, D/I32/0 unchanged. Symmetric eye-reserve coordination, SRAM41=128, SRAM46=600, target low-pass150ms, neutral return at least3s, eye parameters, hardware deadband0/0 and position limits unchanged. Optional upstream trajectory planning is deferred, not implemented."
+  "parameter_revision_source": "2026-10-27 user confirmed no segmented motion after withdrawing16-count send deadband and reduced vibration at PID16/32/0. Optional ID32 upstream trajectory planning added, default off; on replaces150ms target low-pass with velocity/acceleration/jerk-limited reference, off retains accepted path. SRAM41=128, SRAM46=600, neutral return at least3s, eye parameters, hardware deadband0/0 and position limits unchanged."
 }

@@ -100,7 +100,9 @@ class MojiaPlaybackGaze:
                     raise RuntimeError('ID32 no longer matches saved hardware preset')
         self.previous=np.asarray(measured,dtype=float)[self.columns].copy()
         self.controller.observe_eye(self.previous[self.owned.index(self.camera_eye_id)],now)
-        if self.neck:
+        if self.neck and self.controller.upstream is not None:
+            self.controller.upstream.reset(self.previous[self.owned.index(32)])
+        if self.neck and self.controller.upstream is None:
             self.scheduler=NeckCommandScheduler(self.previous[self.owned.index(32)],now,self.speeds[-1],
                 adaptive_speed=self.config['neck']['adaptive_speed'],endpoints=self.controller.neck_bounds,
                 filter_tau_s=self.config['neck'].get('target_filter_tau_s',0.))
@@ -128,9 +130,13 @@ class MojiaPlaybackGaze:
         if self.neck:
             neck_column=self.ids.index(32)
             d['planned_neck_goal']=float(self.previous[-1])
-            goal,speed=self.scheduler.step(self.previous[-1],now,returning=d['returning_to_center'])
+            if self.controller.upstream is not None:
+                goal=int(round(self.previous[-1]));speed=int(self.speeds[-1])
+                d['smoothed_neck_goal']=float(self.previous[-1])
+            else:
+                goal,speed=self.scheduler.step(self.previous[-1],now,returning=d['returning_to_center'])
+                d['smoothed_neck_goal']=self.scheduler.filtered_position
             result[neck_column]=goal
-            d['smoothed_neck_goal']=self.scheduler.filtered_position
         d['neck_speed_command']=speed
         self.speed_overrides={self.config['neck']['id']:speed} if self.neck else {}
         self.last_diagnostic=d

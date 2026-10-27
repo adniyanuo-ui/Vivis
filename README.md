@@ -62,6 +62,7 @@ Vivis/
 
 - 改算法：`src/vivis/`。editable安装后改源码即生效，示例不复制控制算法。
 - 改设备参数：`configs/robots/mojia/`。运行profile、启动设置及跟踪器使用同一硬件表。
+- 可选颈部平滑：[上游轨迹规划](docs/developer/UPSTREAM_TRAJECTORY_PLANNING.md)，默认关闭；示例3用`--upstream-trajectory on/off`选择，不影响其他轴。
 - 改输入：用自己的音频与61通道文件[导入新作品](docs/developer/DATA_AND_CONTROL_API.md#3-接入自己的音频与表情序列)。
 - 核验素材：`.venv/bin/python tools/check_assets.py`；核验标定覆盖：`.venv/bin/python tools/check_calibration.py`。
 - 扩展上游：客户可以接入LLM、TTS、A2F等；已有示例不依赖CUDA，也不等于实时A2F推理已验收。
