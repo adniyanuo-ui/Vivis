@@ -63,8 +63,23 @@ class Robot:
             if shape['shape'].startswith(('Mouth','Jaw','Tongue')) for point in shape['positions']})
         p['round_lip_motion_ids']=sorted({point['id'] for shape in shapes
             if shape['shape'] in ('MouthFunnel','MouthPucker') for point in shape['positions']})
+        if hasattr(self,'mouth_speed_override'):
+            p['mouth_speed_override']=copy.deepcopy(self.mouth_speed_override)
         apply_policy(p, self.telemetry())
         return p
+
+    def set_mouth_speed(self,speed):
+        """One-run RAM speed preset; leave files, limits, acceleration and PID intact."""
+        if type(speed) is not int or not 1<=speed<=32767:
+            raise ValueError('Mouth speed must be integer1..32767')
+        ids=self.motion_profile()['mouth_motion_ids']
+        if not ids or any(sid not in self.axes or not self.axes[sid]['playback_enabled'] for sid in ids):
+            raise ValueError('Mouth speed needs a calibrated active mouth group')
+        before={sid:self.axes[sid]['max_speed_counts_s'] for sid in ids}
+        for sid in ids:self.axes[sid]['max_speed_counts_s']=speed
+        self.mouth_speed_override=dict(speed_counts_s=speed,axes=ids,previous_speed_counts_s=before,
+                                       persistence='task RAM preset; canonical hardware file unchanged')
+        return copy.deepcopy(self.mouth_speed_override)
 
     def profile(self, name):
         w = self.work(name)

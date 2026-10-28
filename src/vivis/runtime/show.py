@@ -124,7 +124,8 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
 
 def recover_tongue(bus,motor,guard,events,speed=1000):
     s=bus.snapshot(29)
-    if s['torque_enable']==1:return
+    if s['torque_enable']==1 and abs(s['position_raw']-motor['neutral'])<=motor['initial_settle_tolerance_counts']:
+        return
     if s['model_raw']!=521 or s['mode']!=0 or not 0<=s['position_raw']<=4095:
         raise RuntimeError('ID29 startup hardware mismatch')
     if (s['configured_min'],s['configured_max'])!=(motor['device_min'],motor['device_max']):
@@ -175,10 +176,10 @@ def prepare_recovery_clearance(bus,plan,snapshots,motors,guard,report,home_speed
     if plan is None:return
     c,axis,motor=plan;states={s['id']:s for s in snapshots}
     recovering=states[c['recovering_id']];m=motors[c['recovering_id']]
-    if recovering['torque_enable']!=0 or abs(recovering['position_raw']-m['neutral'])<=m.get('initial_settle_tolerance_counts',20):
+    if abs(recovering['position_raw']-m['neutral'])<=m.get('initial_settle_tolerance_counts',20):
         report.update(required=False)
         return
-    report.update(required=True,reason='Disabled recovery axis requires the configured mechanical clearance')
+    report.update(required=True,reason='Off-center recovery axis requires the configured mechanical clearance')
     print(f'RECOVERY CLEARANCE ID{axis["id"]} -> {axis["neutral"]} before ID{c["recovering_id"]} recovery',flush=True)
     home_all(bus,[axis],{axis['id']:motor},guard,report,min(home_speed,c['max_speed_counts_s']),
              keep_enabled=[axis['id']],telemetry_policy=motor.get('telemetry_policy'),position_recovery=position_recovery)
@@ -282,6 +283,7 @@ def main(argv=None):
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--repeat',type=int,default=3)
     parser.add_argument('--mouth-gain',type=float,default=1.,help='Mouth displacement multiplier, clipped to existing command limits')
+    parser.add_argument('--mouth-speed',type=int,help='Task RAM speed preset for calibrated mouth axes')
     parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),default='limited',
                         help='Direct delivery for calibrated Funnel/Pucker lip axes only; hardware speed and homing unchanged')
     parser.add_argument('--home-speed',type=int,default=60,help='Temporary neutral homing speed cap in counts/s')
@@ -303,6 +305,7 @@ def main(argv=None):
     if not 1<=args.home_speed<=32767:parser.error('Home speed must be within 1..32767')
     from vivis.runtime.robot import Robot
     robot=Robot(args.robot)
+    if args.mouth_speed is not None:robot.set_mouth_speed(args.mouth_speed)
     work=robot.work(args.work)
     args.targets,args.audio=work['targets'],work['audio']
     original=robot.profile(args.work)
@@ -352,6 +355,7 @@ def main(argv=None):
                              repeat_mode='independent_full_cycle',preparation_each_round=True,
                              developer_mode=args.mode,camera_required=args.mode!='face' and not args.home_only,
                              mouth_gain_report=profile['mouth_gain_report'],
+                             mouth_speed_override=profile.get('mouth_speed_override'),
                              mouth_command_mode=profile['mouth_command_mode'],direct_position_ids=profile['direct_position_ids'],
                              acceleration_control='servo_register_41',
                              upstream_trajectory=trajectory_settings,
@@ -377,6 +381,7 @@ def main(argv=None):
                    upstream_trajectory=trajectory_settings)
     summary['parallel_neck_enabled']=parallel_settings['enabled']
     summary['mouth_command_mode']=profile['mouth_command_mode']
+    summary['mouth_speed_override']=profile.get('mouth_speed_override')
     summary['homing']={}
     status_path=ROOT/'outputs/runtime/control_status.json'
     status_path.parent.mkdir(parents=True,exist_ok=True)

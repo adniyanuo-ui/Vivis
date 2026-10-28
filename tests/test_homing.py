@@ -133,13 +133,21 @@ class RecoveryClearanceTests(unittest.TestCase):
         self.assertTrue(report['required']);self.assertEqual(motors[31]['neutral'],2047)
         self.assertEqual(motors[29]['initial_settle_tolerance_counts'],40)
 
-    def test_no_clearance_motion_for_enabled_or_already_centered_tongue(self):
+    def test_no_clearance_motion_for_already_centered_tongue(self):
         from vivis.runtime.show import prepare_recovery_clearance
         for torque,position in [(1,2050),(0,2047),(0,2087)]:
             _,motors,states,bus,plan=self.fixture();states[0].update(torque_enable=torque,position_raw=position)
             with patch('vivis.runtime.show.home_all') as home:
                 prepare_recovery_clearance(bus,plan,states,motors,lambda:None,{},60)
                 home.assert_not_called()
+
+    def test_enabled_off_center_tongue_also_requires_jaw_clearance(self):
+        from vivis.runtime.show import prepare_recovery_clearance
+        _,motors,states,bus,plan=self.fixture();states[0].update(torque_enable=1,position_raw=1800)
+        with patch('vivis.runtime.show.home_all') as home:
+            prepare_recovery_clearance(bus,plan,states,motors,lambda:None,{},60)
+        self.assertEqual(home.call_args.args[1][0]['neutral'],1900)
+        self.assertEqual(home.call_args.args[5],60)
 
     def test_clearance_limits_are_validated_before_motion(self):
         from vivis.runtime.show import recovery_clearance_plan

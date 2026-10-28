@@ -228,7 +228,14 @@ class ColdStartTests(unittest.TestCase):
     def test_full_preparation_with_goal_enabled_id9_and_mixed_firmware(self):
         self.full_preparation({9,21,24,35})
 
-    def full_preparation(self,auto_enable_ids):
+    def test_enabled_off_center_tongue_is_centered_before_jaw_closes(self):
+        self.full_preparation(set(),tongue_enabled=True)
+
+    def test_failed_tongue_recovery_never_closes_jaw(self):
+        with self.assertRaisesRegex(RuntimeError,'ID29 did not reach its authorized startup corridor'):
+            self.full_preparation(set(),tongue_enabled=True,tongue_jammed=True)
+
+    def full_preparation(self,auto_enable_ids,tongue_enabled=False,tongue_jammed=False):
         import numpy as np
         from vivis.runtime import show
         from vivis.hardware.feetech.protocol import Bus
@@ -239,6 +246,7 @@ class ColdStartTests(unittest.TestCase):
         motors={m['id']:m for m in profile['motors']}
         inventory=robot.home();memory={};positions={};events=[]
         cold={9:2056,21:2106,29:2273,35:1904}
+        if tongue_enabled:cold[29]=1800
         for sid in range(2,37):
             m=motors.get(sid,{})
             c=bytearray(40);r=bytearray(31)
@@ -249,6 +257,8 @@ class ColdStartTests(unittest.TestCase):
             c[14]=m.get('max_voltage_raw',90);c[15]=m.get('min_voltage_raw',40)
             c[21:24]=bytes([32,32,0]);c[16:18]=(1000).to_bytes(2,'little')
             r[1]=10;r[8:10]=(1000).to_bytes(2,'little');r[15]=1
+            if sid==29 and tongue_enabled:
+                r[0]=1;r[2:4]=cold[29].to_bytes(2,'little')
             r[22]=238 if 31<=sid<=35 else 62;r[23]=35
             memory[sid]=(c,r);positions[sid]=cold.get(sid,2047)
         def read(sid,address,width):
@@ -262,12 +272,16 @@ class ColdStartTests(unittest.TestCase):
             return 0,0
         def goals(targets,speeds):
             for sid,target in targets.items():
+                if sid==29 and target==2047 and abs(positions[29]-2047)>40:
+                    self.assertLessEqual(abs(positions[31]-1900),20)
+                if sid==31 and target==2047 and any(e[:3]==('goal',31,1900) for e in events):
+                    self.assertLessEqual(abs(positions[29]-2047),40)
                 c,r=memory[sid];lo=int.from_bytes(c[9:11],'little');hi=int.from_bytes(c[11:13],'little')
                 self.assertTrue(lo<=target<=hi);self.assertLessEqual(speeds[sid],60)
                 events.append(('goal',sid,target,speeds[sid]))
                 r[2:4]=target.to_bytes(2,'little');r[6:8]=speeds[sid].to_bytes(2,'little')
                 if sid in auto_enable_ids:r[0]=1
-                if r[0]:positions[sid]=target
+                if r[0] and not (sid==29 and tongue_jammed):positions[sid]=target
         bus=SimpleNamespace(read=read,goals=goals,close=Mock())
         bus.snapshot=lambda sid:Bus.snapshot(bus,sid)
         bus.feedback=lambda sid:dict(position=positions[sid],load_raw=0,temperature_c=35,
@@ -290,6 +304,12 @@ class ColdStartTests(unittest.TestCase):
         self.assertEqual({r['id'] for r in report['disabled_position_recoveries']},{9,21,35})
         self.assertTrue(report['recovery_clearance']['required'])
         self.assertTrue(all(p==2047 for p in positions.values()))
+        # The simulated mechanism rejects tongue recovery before jaw clearance,
+        # and jaw closure before the tongue has returned. Check the actual goals.
+        opened=next(i for i,e in enumerate(events) if e[:3]==('goal',31,1900))
+        tongue=next(i for i,e in enumerate(events) if e[:3]==('goal',29,2047))
+        closed=next(i for i,e in enumerate(events) if i>opened and e[:3]==('goal',31,2047))
+        self.assertLess(opened,tongue);self.assertLess(tongue,closed)
         for sid,first_goal in ((21,2100),(35,2040)):
             self.assertEqual(next(e for e in events if e[:2]==('goal',sid)),('goal',sid,first_goal,60))
         self.assertFalse(any(e[0]=='write' and e[2] in (9,10,11,12,18) for e in events))

@@ -114,6 +114,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--home-only', action='store_true')
     parser.add_argument('--mouth-gain', type=float)
+    parser.add_argument('--mouth-speed',type=int,help='Task RAM speed for calibrated mouth axes; default saved hardware speed')
     parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),default='limited',
                         help='Round-lip target delivery comparison; jaw/tongue and hardware speed unchanged')
     parser.add_argument('--home-speed', type=int)
@@ -129,6 +130,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     if args.upstream_trajectory=='on' and (mode!='eyes-neck' or args.home_only):
         parser.error('上游轨迹规划只能用于示例3的眼颈跟踪播放')
     robot = Robot(args.robot)
+    if args.mouth_speed is not None:robot.set_mouth_speed(args.mouth_speed)
     if mode != 'face' and not args.home_only:
         from vivis.runtime.assets import verify_model
         verify_model()
@@ -151,6 +153,8 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         command += ['--camera-device', args.camera_device]
     if args.baud is not None:
         command += ['--baud', str(args.baud)]
+    if args.mouth_speed is not None:
+        command += ['--mouth-speed',str(args.mouth_speed)]
     if args.upstream_trajectory is not None:
         command += ['--upstream-trajectory',args.upstream_trajectory]
     if args.parallel_neck is not None:command+=['--parallel-neck',args.parallel_neck]
@@ -185,8 +189,10 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         config_path = output / 'tracking_effective.json'
         config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n')
         print(f'模式：{mode}；作品：{args.work}；每遍独立准备、35轴缓慢回中。', flush=True)
+        if args.mouth_speed is not None:
+            print(f'口部速度对照：{args.mouth_speed}计数/秒；通过原启动流程写入并核验SRAM，默认配置不改。',flush=True)
         if args.mouth_command_mode=='lips-direct' and not args.home_only:
-            print('圆唇对照：仅直接发送Funnel/Pucker唇部原目标；下巴/舌部和硬件参数保持。',flush=True)
+            print('圆唇对照：直接发送Funnel/Pucker唇部原目标；下颌/舌部仍沿用原发送限速。',flush=True)
         if mode=='eyes-neck' and not args.home_only:
             print('上游轨迹规划：'+('开启（仅ID32）' if trajectory['enabled'] else '关闭（使用原150ms位置低通）'),flush=True)
             print('并联颈部：'+('开启（ID33/34俯仰及轻微侧倾）' if parallel['enabled'] else '关闭（ID33/34保持）'),flush=True)
