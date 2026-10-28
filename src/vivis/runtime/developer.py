@@ -116,7 +116,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     parser.add_argument('--mouth-gain', type=float)
     parser.add_argument('--mouth-speed',type=int,help='Task RAM speed for calibrated mouth axes; default saved hardware speed')
     parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),default='limited',
-                        help='Round-lip target delivery comparison; jaw/tongue and hardware speed unchanged')
+                        help='Round-lip and jaw target delivery comparison; hardware speed and homing unchanged')
     parser.add_argument('--home-speed', type=int)
     parser.add_argument('--control-fps', type=int, choices=(30, 60))
     parser.add_argument('--face-fps', type=int, choices=(30, 60))
@@ -192,7 +192,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         if args.mouth_speed is not None:
             print(f'口部速度对照：{args.mouth_speed}计数/秒；通过原启动流程写入并核验SRAM，默认配置不改。',flush=True)
         if args.mouth_command_mode=='lips-direct' and not args.home_only:
-            print('圆唇对照：直接发送Funnel/Pucker唇部原目标；下颌/舌部仍沿用原发送限速。',flush=True)
+            print('口型对照：歌曲阶段直接发送10个圆唇轴及ID31下颌原目标；启动避让、回中和硬件限速保留。',flush=True)
         if mode=='eyes-neck' and not args.home_only:
             print('上游轨迹规划：'+('开启（仅ID32）' if trajectory['enabled'] else '关闭（使用原150ms位置低通）'),flush=True)
             print('并联颈部：'+('开启（ID33/34俯仰及轻微侧倾）' if parallel['enabled'] else '关闭（ID33/34保持）'),flush=True)

@@ -75,6 +75,6 @@
 
 ## 圆唇表现对照
 
-若圆唇、嘟唇不明显，可在保持硬件参数和原素材时测试`--mouth-command-mode lips-direct`。它只改变10个圆唇相关轴在音乐阶段的目标发送方式，默认仍为`limited`；见[分析与对照说明](../../docs/developer/LIP_FULLNESS_COMPARISON.md)。
+若圆唇、嘟唇不明显，可在保持硬件参数和原素材时测试`--mouth-command-mode lips-direct`。它只改变10个圆唇相关轴及ID31下颌在音乐阶段的目标发送方式，默认仍为`limited`；见[分析与对照说明](../../docs/developer/LIP_FULLNESS_COMPARISON.md)。
 
 口部速度对照可再加`--mouth-speed 1500`，按原启动流程核验并设置14个口部轴的SRAM运行速度；加速度、PID、限位、增益和眼颈不变。省略此参数或设1200可在下一次启动恢复原速度。详见上述分析第4、5节；没有添加提前补偿或停顿闭嘴算法。

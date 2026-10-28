@@ -63,6 +63,8 @@ class Robot:
             if shape['shape'].startswith(('Mouth','Jaw','Tongue')) for point in shape['positions']})
         p['round_lip_motion_ids']=sorted({point['id'] for shape in shapes
             if shape['shape'] in ('MouthFunnel','MouthPucker') for point in shape['positions']})
+        p['jaw_open_motion_ids']=sorted({point['id'] for shape in shapes
+            if shape['shape']=='JawOpen' for point in shape['positions']})
         if hasattr(self,'mouth_speed_override'):
             p['mouth_speed_override']=copy.deepcopy(self.mouth_speed_override)
         apply_policy(p, self.telemetry())

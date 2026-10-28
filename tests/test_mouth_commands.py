@@ -20,7 +20,8 @@ class MouthCommandTests(unittest.TestCase):
         self.assertEqual(monitored,other);np.testing.assert_array_equal(a,b)
         self.assertEqual(profile,before)
         self.assertEqual(limited['direct_position_ids'],[])
-        self.assertEqual(direct['direct_position_ids'],[10,11,12,13,15,25,26,27,28,30])
+        self.assertEqual(direct['direct_position_ids'],[10,11,12,13,15,25,26,27,28,30,31])
+        self.assertEqual(profile['jaw_open_motion_ids'],[31])
         self.assertEqual(direct['motors'],limited['motors'])
         self.assertTrue(all(m['max_speed_counts_s']==1200 for m in direct['motors'] if m['id'] in direct['direct_position_ids']))
         with self.assertRaises(ValueError):prepare(config,profile,ids,positions,mode='face',mouth_command_mode='invalid')
@@ -34,7 +35,7 @@ class MouthCommandTests(unittest.TestCase):
                     run_example(mode,['--check','--work','wz2','--mouth-command-mode','lips-direct'])
                 report=json.loads(output.getvalue())
                 self.assertEqual(report['mouth_command_mode'],'lips-direct')
-                self.assertEqual(len(report['direct_position_ids']),10)
+                self.assertEqual(len(report['direct_position_ids']),11)
                 self.assertFalse(set(report['direct_position_ids'])&set(report['gaze_owner_ids']))
 
     def fixture(self,direct=False):
@@ -89,3 +90,32 @@ class MouthCommandTests(unittest.TestCase):
                  patch('vivis.runtime.playback.AudioClock') as audio:
                 with self.assertRaises(ValueError):play(profile,[2,12],trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP')
                 hardware.assert_not_called();audio.assert_not_called()
+
+    def test_jaw_song_targets_are_direct_but_initial_approach_and_1500_speed_remain(self):
+        profile,bus,clock=self.fixture(True)
+        jaw=copy.deepcopy(profile['motors'][-1]);jaw.update(id=31,max_speed_counts_s=1500)
+        profile['motors'].append(jaw)
+        profile.update(mouth_motion_ids=[12,31],jaw_open_motion_ids=[31],direct_position_ids=[12,31])
+        original_snapshot=bus.snapshot.side_effect;original_feedback=bus.feedback.side_effect
+        positions={31:2047}
+        bus.snapshot.side_effect=lambda sid:({**original_snapshot(12),'position_raw':positions[31]}
+                                           if sid==31 else original_snapshot(sid))
+        bus.feedback.side_effect=lambda sid:({**original_feedback(12),'position':positions[31]}
+                                           if sid==31 else original_feedback(sid))
+        original_goals=bus.goals.side_effect
+        def goals(targets,speeds):
+            original_goals(targets,speeds)
+            positions[31]=targets[31]
+        bus.goals.side_effect=goals
+        trajectory=np.full((9,3),2250.);trajectory[0]=[2047,2047,2100]
+        with tempfile.TemporaryDirectory() as directory,patch('vivis.runtime.playback.Bus',return_value=bus), \
+             patch('vivis.runtime.playback.AudioClock',return_value=clock):
+            result=play(profile,[2,12,31],trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP')
+        self.assertTrue(result['completed']);self.assertGreater(result['initial_approach_commands'],1)
+        for event in result['events']:
+            self.assertEqual(event['goals'][31],round(trajectory[event['frame'],2]))
+        initial=bus.goals.call_args_list[:result['initial_approach_commands']]
+        self.assertTrue(all(call.args[0][31]<=2100 for call in initial))
+        for call in bus.goals.call_args_list:self.assertEqual(call.args[1][31],1500)
+        for a,b in zip(result['events'],result['events'][1:]):
+            self.assertLessEqual(abs(b['goals'][2]-a['goals'][2]),300*(b['sent_monotonic']-a['sent_monotonic'])+1.)

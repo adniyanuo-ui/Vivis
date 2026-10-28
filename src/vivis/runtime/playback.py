@@ -176,8 +176,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             or not set(direct_ids)<=set(profile.get('mouth_motion_ids',[]))
             or set(direct_ids)&set(profile.get('gaze_owner_ids',[]))):
         raise ValueError('Invalid direct mouth command ownership')
-    if direct_ids and set(direct_ids)!=set(profile.get('round_lip_motion_ids',[])):
-        raise ValueError('Direct lip commands must match the calibrated round-lip group')
+    if direct_ids and set(direct_ids)!=(set(profile.get('round_lip_motion_ids',[]))|set(profile.get('jaw_open_motion_ids',[]))):
+        raise ValueError('Direct mouth commands must match the calibrated round-lip and jaw-open groups')
     direct_columns=np.array([ids.index(sid) for sid in direct_ids],dtype=int)
     direct_low=np.array([motors[sid]['safe_min'] for sid in direct_ids],dtype=float)
     direct_high=np.array([motors[sid]['safe_max'] for sid in direct_ids],dtype=float)

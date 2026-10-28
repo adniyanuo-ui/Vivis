@@ -112,7 +112,7 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
     for sid in p.get('held_eye_ids',[]):trajectory[:,monitored.index(sid)]=2047.
     trajectory,p['mouth_gain_report']=mouth_gain_targets(p,monitored,trajectory,mouth_gain)
     p['mouth_motion_gain']=mouth_gain
-    direct=list(p.get('round_lip_motion_ids',[])) if mouth_command_mode=='lips-direct' else []
+    direct=sorted(set(p.get('round_lip_motion_ids',[]))|set(p.get('jaw_open_motion_ids',[]))) if mouth_command_mode=='lips-direct' else []
     if mouth_command_mode=='lips-direct' and (not direct or len(set(direct))!=len(direct)
             or any(type(sid) is not int or sid not in p['diagnostic_command_ids'] for sid in direct)
             or set(direct)&set(p['gaze_owner_ids'])):
@@ -285,7 +285,7 @@ def main(argv=None):
     parser.add_argument('--mouth-gain',type=float,default=1.,help='Mouth displacement multiplier, clipped to existing command limits')
     parser.add_argument('--mouth-speed',type=int,help='Task RAM speed preset for calibrated mouth axes')
     parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),default='limited',
-                        help='Direct delivery for calibrated Funnel/Pucker lip axes only; hardware speed and homing unchanged')
+                        help='Direct song targets for calibrated Funnel/Pucker and JawOpen axes; hardware speed and homing unchanged')
     parser.add_argument('--home-speed',type=int,default=60,help='Temporary neutral homing speed cap in counts/s')
     parser.add_argument('--home-only',action='store_true',help='Home all inventory axes; no camera, audio or task execution')
     parser.add_argument('--face-fps',type=int,choices=(30,60),default=60,
