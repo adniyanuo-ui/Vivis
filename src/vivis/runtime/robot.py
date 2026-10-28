@@ -58,6 +58,11 @@ class Robot:
                         if k not in ('role', 'playback_enabled', 'acceleration_raw', 'pid_raw', 'deadband_raw')}
                        for a in self.axes.values() if a['playback_enabled']]
         p.update(calibration_sha256=self.calibration_sha256, calibration_path=str(self.calibration))
+        shapes=read_json(self.calibration)['blendShapes']
+        p['mouth_motion_ids']=sorted({point['id'] for shape in shapes
+            if shape['shape'].startswith(('Mouth','Jaw','Tongue')) for point in shape['positions']})
+        p['round_lip_motion_ids']=sorted({point['id'] for shape in shapes
+            if shape['shape'] in ('MouthFunnel','MouthPucker') for point in shape['positions']})
         apply_policy(p, self.telemetry())
         return p
 

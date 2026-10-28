@@ -72,3 +72,7 @@
 ## 5. 如何替换上游
 
 使用[命名表情映射API与作品导入](../../docs/developer/DATA_AND_CONTROL_API.md)接入自己的音频、表情或算法输出。两个已有作品只供回放验收，不需要运行LLM、TTS、CUDA或A2F；完整AI交互应用可在相同表情接口之上开发。
+
+## 圆唇表现对照
+
+若圆唇、嘟唇不明显，可在保持硬件参数和原素材时测试`--mouth-command-mode lips-direct`。它只改变10个圆唇相关轴在音乐阶段的目标发送方式，默认仍为`limited`；见[分析与对照说明](../../docs/developer/LIP_FULLNESS_COMPARISON.md)。

@@ -166,6 +166,21 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     if gaze_override is not None and not {a['id'] for a in gaze_override.axes} <= command_ids:
         raise ValueError('Tracked eye axes must be among commanded IDs')
     speed_limits=np.array([motors[sid]['max_speed_counts_s'] for sid in ids],dtype=float)
+    direct_ids=profile.get('direct_position_ids',[])
+    mouth_command_mode=profile.get('mouth_command_mode','limited')
+    if (mouth_command_mode not in ('limited','lips-direct')
+            or bool(direct_ids)!=(mouth_command_mode=='lips-direct')):
+        raise ValueError('Mouth command mode and direct axes disagree')
+    if (not isinstance(direct_ids,list) or len(set(direct_ids))!=len(direct_ids)
+            or any(type(sid) is not int or sid not in command_ids for sid in direct_ids)
+            or not set(direct_ids)<=set(profile.get('mouth_motion_ids',[]))
+            or set(direct_ids)&set(profile.get('gaze_owner_ids',[]))):
+        raise ValueError('Invalid direct mouth command ownership')
+    if direct_ids and set(direct_ids)!=set(profile.get('round_lip_motion_ids',[])):
+        raise ValueError('Direct lip commands must match the calibrated round-lip group')
+    direct_columns=np.array([ids.index(sid) for sid in direct_ids],dtype=int)
+    direct_low=np.array([motors[sid]['safe_min'] for sid in direct_ids],dtype=float)
+    direct_high=np.array([motors[sid]['safe_max'] for sid in direct_ids],dtype=float)
     feedback_age_limit=profile.get('feedback_max_age_s')
     if feedback_age_limit is not None and not 0<feedback_age_limit<=1:
         raise ValueError('Feedback age limit must be positive and at most one second')
@@ -217,6 +232,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         'face_update_hz':face_hz,'feedback_polls_per_frame':polls_per_frame,
         'feedback_policy':feedback_policy,'feedback_notifications':[]}
     result['acceleration_control']='servo_register_41'
+    result.update(mouth_command_mode=mouth_command_mode,direct_position_ids=direct_ids)
     warning_recorder=WarningRecorder(result.setdefault('telemetry_warnings',[]))
     def received(sid,state):
         result['last_feedback_received']={'id':sid,**state}
@@ -439,6 +455,11 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                     raise ValueError('Live gaze target exceeds command limits')
             gaze_done=time.monotonic() if mojia_gaze else None
             last=limit_step(last,target,speed_limits,max(dt,1e-6));last_tick=now
+            if direct_ids:
+                nominal=np.asarray(target)[direct_columns]
+                if not np.isfinite(nominal).all() or np.any(nominal<direct_low) or np.any(nominal>direct_high):
+                    raise ValueError('Direct mouth targets exceed command limits')
+                last[direct_columns]=nominal
             goals={sid:int(round(v)) for sid,v in zip(ids,last) if sid in command_ids}
             command_speeds=speeds
             overrides=gaze_override.speed_overrides if mojia_gaze else {}

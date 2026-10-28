@@ -114,6 +114,8 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--home-only', action='store_true')
     parser.add_argument('--mouth-gain', type=float)
+    parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),default='limited',
+                        help='Round-lip target delivery comparison; jaw/tongue and hardware speed unchanged')
     parser.add_argument('--home-speed', type=int)
     parser.add_argument('--control-fps', type=int, choices=(30, 60))
     parser.add_argument('--face-fps', type=int, choices=(30, 60))
@@ -136,6 +138,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
                '--repeat', str(args.repeat), '--output', str(output / 'performance'),
                '--hold-vertical-eyes', '--camera', args.camera,
                '--mouth-gain', str(args.mouth_gain if args.mouth_gain is not None else defaults['mouth_gain']),
+               '--mouth-command-mode',args.mouth_command_mode,
                '--home-speed', str(args.home_speed if args.home_speed is not None else
                                     json.loads(robot.resolve('homing').read_text())['home_speed_counts_s']),
                '--control-fps', str(args.control_fps or defaults['control_hz']),
@@ -182,6 +185,8 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         config_path = output / 'tracking_effective.json'
         config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n')
         print(f'模式：{mode}；作品：{args.work}；每遍独立准备、35轴缓慢回中。', flush=True)
+        if args.mouth_command_mode=='lips-direct' and not args.home_only:
+            print('圆唇对照：仅直接发送Funnel/Pucker唇部原目标；下巴/舌部和硬件参数保持。',flush=True)
         if mode=='eyes-neck' and not args.home_only:
             print('上游轨迹规划：'+('开启（仅ID32）' if trajectory['enabled'] else '关闭（使用原150ms位置低通）'),flush=True)
             print('并联颈部：'+('开启（ID33/34俯仰及轻微侧倾）' if parallel['enabled'] else '关闭（ID33/34保持）'),flush=True)

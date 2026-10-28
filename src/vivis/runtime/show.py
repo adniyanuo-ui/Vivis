@@ -76,9 +76,11 @@ def configure_show_volume(device):
                      digital_trim=gain,output_amplitude_factor=3.,before=before,after=after)
 
 
-def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,telemetry_policy=None,mode='eyes-neck'):
+def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,telemetry_policy=None,mode='eyes-neck',mouth_command_mode='limited'):
     if mode not in ('face','eyes','eyes-neck'):
         raise ValueError('Unknown developer mode')
+    if mouth_command_mode not in ('limited','lips-direct'):
+        raise ValueError('Unknown mouth command mode')
     monitored=list(ids)+[32,33,34]
     if len(set(monitored))!=len(monitored):raise ValueError('Repeated motor ownership')
     if mode=='face':
@@ -110,6 +112,12 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
     for sid in p.get('held_eye_ids',[]):trajectory[:,monitored.index(sid)]=2047.
     trajectory,p['mouth_gain_report']=mouth_gain_targets(p,monitored,trajectory,mouth_gain)
     p['mouth_motion_gain']=mouth_gain
+    direct=list(p.get('round_lip_motion_ids',[])) if mouth_command_mode=='lips-direct' else []
+    if mouth_command_mode=='lips-direct' and (not direct or len(set(direct))!=len(direct)
+            or any(type(sid) is not int or sid not in p['diagnostic_command_ids'] for sid in direct)
+            or set(direct)&set(p['gaze_owner_ids'])):
+        raise ValueError('Direct mouth commands require calibrated, exclusively owned mouth axes')
+    p.update(mouth_command_mode=mouth_command_mode,direct_position_ids=direct)
     live_preflight(p,monitored)
     return p,monitored,trajectory
 
@@ -274,6 +282,8 @@ def main(argv=None):
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--repeat',type=int,default=3)
     parser.add_argument('--mouth-gain',type=float,default=1.,help='Mouth displacement multiplier, clipped to existing command limits')
+    parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),default='limited',
+                        help='Direct delivery for calibrated Funnel/Pucker lip axes only; hardware speed and homing unchanged')
     parser.add_argument('--home-speed',type=int,default=60,help='Temporary neutral homing speed cap in counts/s')
     parser.add_argument('--home-only',action='store_true',help='Home all inventory axes; no camera, audio or task execution')
     parser.add_argument('--face-fps',type=int,choices=(30,60),default=60,
@@ -308,7 +318,7 @@ def main(argv=None):
         config['control']['axes']=[a for a in config['control']['axes'] if a['id'] not in (7,22)]
         config['control']['held_eye_ids']=[7,22]
     ids,positions,fps=load_targets(args.targets,original,args.audio,calibration)
-    profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation,args.mouth_gain,telemetry_policy,args.mode)
+    profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation,args.mouth_gain,telemetry_policy,args.mode,args.mouth_command_mode)
     if fps!=60:parser.error('The reviewed combined controller requires the 60 FPS source')
     profile['face_update_hz']=min(args.face_fps,args.control_fps)
     profile['control_hz']=args.control_fps
@@ -342,6 +352,7 @@ def main(argv=None):
                              repeat_mode='independent_full_cycle',preparation_each_round=True,
                              developer_mode=args.mode,camera_required=args.mode!='face' and not args.home_only,
                              mouth_gain_report=profile['mouth_gain_report'],
+                             mouth_command_mode=profile['mouth_command_mode'],direct_position_ids=profile['direct_position_ids'],
                              acceleration_control='servo_register_41',
                              upstream_trajectory=trajectory_settings,
                              parallel_neck=parallel_settings['enabled'],
@@ -365,6 +376,7 @@ def main(argv=None):
                    control_hz=args.control_fps,baud=profile['baud'],source_fps=fps,developer_mode=args.mode,
                    upstream_trajectory=trajectory_settings)
     summary['parallel_neck_enabled']=parallel_settings['enabled']
+    summary['mouth_command_mode']=profile['mouth_command_mode']
     summary['homing']={}
     status_path=ROOT/'outputs/runtime/control_status.json'
     status_path.parent.mkdir(parents=True,exist_ok=True)
