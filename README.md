@@ -30,7 +30,7 @@ sudo apt-get install python3-venv libportaudio2 alsa-utils
 |---|---|---|
 | 1 | [面部控制](examples/01_face_control/README.md) | 音频＋表情，不启动相机；眼球/颈部保持 |
 | 2 | [面部＋眼球](examples/02_face_eye_tracking/README.md) | 增加横向双眼ID8/23跟踪，颈部保持 |
-| 3 | [面部＋眼球＋颈部](examples/03_face_eye_neck_tracking/README.md) | 增加ID32协同；7/22/33/34保持 |
+| 3 | [面部＋眼球＋颈部](examples/03_face_eye_neck_tracking/README.md) | 增加ID32协同；可选33/34并联俯仰/翻滚，7/22保持 |
 
 准备/回中会涉及35轴，“保持”指正式播放阶段。一次只运行一个示例。示例自行启动的视觉服务在结束/异常后关闭；复用外部视觉服务需配置、目标协议、相机方向一致，且图像仍新鲜。
 
@@ -63,7 +63,7 @@ Vivis/
 - 改算法：`src/vivis/`。editable安装后改源码即生效，示例不复制控制算法。
 - 改设备参数：`configs/robots/mojia/`。运行profile、启动设置及跟踪器使用同一硬件表。
 - 颈部平滑：[上游轨迹规划](docs/developer/UPSTREAM_TRAJECTORY_PLANNING.md)，示例3默认开启，用`--upstream-trajectory off`显式关闭，不影响其他轴。
-- 新增俯仰/侧倾：[33/34并联颈部跟踪](docs/developer/PARALLEL_NECK_TRACKING.md)，示例3用`--parallel-neck on`选择，保留原横向参数；方向已现场确认，33/34采用已标定的硬件行程，扩大行程后的跟踪效果待复测。
+- 新增俯仰/侧倾：[33/34并联颈部跟踪](docs/developer/PARALLEL_NECK_TRACKING.md)，示例3用`--parallel-neck on`选择，保留原横向参数；方向已现场确认，33/34采用已标定的硬件行程；新标定0001连续两遍效果获用户认可，见[审查记录](docs/developer/DELIVERY_REVIEW.md)。
 - 改输入：用自己的音频与61通道文件[导入新作品](docs/developer/DATA_AND_CONTROL_API.md#3-接入自己的音频与表情序列)。
 - 核验素材：`.venv/bin/python tools/check_assets.py`；核验标定覆盖：`.venv/bin/python tools/check_calibration.py`。
 - 扩展上游：客户可以接入LLM、TTS、A2F等；已有示例不依赖CUDA，也不等于实时A2F推理已验收。
