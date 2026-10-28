@@ -114,6 +114,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     parser.add_argument('--check', action='store_true')
     parser.add_argument('--home-only', action='store_true')
     parser.add_argument('--mouth-gain', type=float)
+    parser.add_argument('--round-lip-gain',type=float,default=1.,help='Runtime MouthFunnel/MouthPucker channel multiplier')
     parser.add_argument('--mouth-speed',type=int,help='Task RAM speed for calibrated mouth axes; default saved hardware speed')
     parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),default='limited',
                         help='Round-lip and jaw target delivery comparison; hardware speed and homing unchanged')
@@ -141,6 +142,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
                '--hold-vertical-eyes', '--camera', args.camera,
                '--mouth-gain', str(args.mouth_gain if args.mouth_gain is not None else defaults['mouth_gain']),
                '--mouth-command-mode',args.mouth_command_mode,
+               '--round-lip-gain',str(args.round_lip_gain),
                '--home-speed', str(args.home_speed if args.home_speed is not None else
                                     json.loads(robot.resolve('homing').read_text())['home_speed_counts_s']),
                '--control-fps', str(args.control_fps or defaults['control_hz']),
@@ -191,6 +193,8 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         print(f'模式：{mode}；作品：{args.work}；每遍独立准备、35轴缓慢回中。', flush=True)
         if args.mouth_speed is not None:
             print(f'口部速度对照：{args.mouth_speed}计数/秒；通过原启动流程写入并核验SRAM，默认配置不改。',flush=True)
+        if args.round_lip_gain!=1.:
+            print(f'圆唇通道增益：MouthFunnel/MouthPucker ×{args.round_lip_gain}；原素材及其他通道保持。',flush=True)
         if args.mouth_command_mode=='lips-direct' and not args.home_only:
             print('口型对照：歌曲阶段直接发送10个圆唇轴及ID31下颌原目标；启动避让、回中和硬件限速保留。',flush=True)
         if mode=='eyes-neck' and not args.home_only:

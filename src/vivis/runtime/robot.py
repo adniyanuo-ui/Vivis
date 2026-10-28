@@ -50,6 +50,7 @@ class Robot:
             raise ValueError('Work was generated with another calibration')
         for key in ('audio', 'targets'):
             w[key] = ROOT / w[key]
+        if 'source_clip' in w:w['source_clip']=ROOT/w['source_clip']
         return w
 
     def motion_profile(self):

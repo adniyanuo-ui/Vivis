@@ -13,7 +13,7 @@ def verify_assets(robot, source=None):
     report = []
     for name in robot.works['works']:
         work = robot.work(name)
-        for key in ('audio', 'targets'):
+        for key in ('audio','targets',*(('source_clip',) if 'source_clip' in work else ())):
             target = work[key]
             expected = work[key + '_sha256']
             if source is not None and not target.is_file():

@@ -283,6 +283,7 @@ def main(argv=None):
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--repeat',type=int,default=3)
     parser.add_argument('--mouth-gain',type=float,default=1.,help='Mouth displacement multiplier, clipped to existing command limits')
+    parser.add_argument('--round-lip-gain',type=float,default=1.,help='Runtime MouthFunnel/MouthPucker channel multiplier')
     parser.add_argument('--mouth-speed',type=int,help='Task RAM speed preset for calibrated mouth axes')
     parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),default='limited',
                         help='Direct song targets for calibrated Funnel/Pucker and JawOpen axes; hardware speed and homing unchanged')
@@ -321,6 +322,9 @@ def main(argv=None):
         config['control']['axes']=[a for a in config['control']['axes'] if a['id'] not in (7,22)]
         config['control']['held_eye_ids']=[7,22]
     ids,positions,fps=load_targets(args.targets,original,args.audio,calibration)
+    from vivis.motion.channel_gain import round_lip_gain_targets
+    positions,channel_gain_report=round_lip_gain_targets(robot,work,ids,positions,fps,args.round_lip_gain)
+    original['round_lip_gain_report']=channel_gain_report
     profile,ids,trajectory=prepare(config,original,ids,positions,args.authorized_tongue_observation,args.mouth_gain,telemetry_policy,args.mode,args.mouth_command_mode)
     if fps!=60:parser.error('The reviewed combined controller requires the 60 FPS source')
     profile['face_update_hz']=min(args.face_fps,args.control_fps)
@@ -355,6 +359,7 @@ def main(argv=None):
                              repeat_mode='independent_full_cycle',preparation_each_round=True,
                              developer_mode=args.mode,camera_required=args.mode!='face' and not args.home_only,
                              mouth_gain_report=profile['mouth_gain_report'],
+                             round_lip_gain_report=profile['round_lip_gain_report'],
                              mouth_speed_override=profile.get('mouth_speed_override'),
                              mouth_command_mode=profile['mouth_command_mode'],direct_position_ids=profile['direct_position_ids'],
                              acceleration_control='servo_register_41',
@@ -381,6 +386,7 @@ def main(argv=None):
                    upstream_trajectory=trajectory_settings)
     summary['parallel_neck_enabled']=parallel_settings['enabled']
     summary['mouth_command_mode']=profile['mouth_command_mode']
+    summary['round_lip_gain_report']=profile['round_lip_gain_report']
     summary['mouth_speed_override']=profile.get('mouth_speed_override')
     summary['homing']={}
     status_path=ROOT/'outputs/runtime/control_status.json'

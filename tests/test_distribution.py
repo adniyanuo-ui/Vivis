@@ -19,7 +19,8 @@ class DistributionTests(unittest.TestCase):
         sdk_path = Path(inspect.getfile(PortHandler)).resolve()
         self.assertTrue(sdk_path.is_relative_to(ROOT / 'src/vivis/hardware/feetech/_vendor'))
         rows = verify_assets(Robot())
-        self.assertEqual(len(rows), 4)
+        self.assertEqual(len([r for r in rows if r['kind'] in ('audio','targets')]),4)
+        self.assertEqual([(r['work'],r['kind']) for r in rows if r['kind']=='source_clip'],[('wz2','source_clip')])
         self.assertTrue(all(Path(row['path']).stat().st_size > 1000 for row in rows))
         self.assertEqual(verify_model().stat().st_size, 232589)
 

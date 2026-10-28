@@ -83,7 +83,9 @@
         31,
         35,
         36
-      ]
+      ],
+      "source_clip": "assets/works/wz2/source.json",
+      "source_clip_sha256": "edcb927cf48c45a5b79665882d8612568f7317c43752b1818c76e49da3767767"
     }
   }
 }

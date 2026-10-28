@@ -31,6 +31,8 @@ for work in 0001 wz2; do
     VIVIS_PYTHON="$PYTHON" ./examples/03_face_eye_neck_tracking/run.sh --work "$work" --parallel-neck on --mouth-command-mode lips-direct --mouth-speed 1500 --check > /dev/null
     printf 'Mouth speed preset check passed: %s\n' "$work"
 done
+VIVIS_PYTHON="$PYTHON" ./examples/03_face_eye_neck_tracking/run.sh --work wz2 --parallel-neck on --mouth-command-mode lips-direct --mouth-speed 1500 --round-lip-gain 1.2 --check > /dev/null
+printf 'Runtime Funnel/Pucker channel gain check passed: wz2\n'
 "$PYTHON" -m unittest discover -s tests -p 'test_*.py'
 if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     git diff --check
