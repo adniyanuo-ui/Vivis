@@ -60,7 +60,7 @@ Vivis/
 
 [快速上手](docs/developer/QUICKSTART.md) → [整体架构](docs/developer/ARCHITECTURE.md)／[离线架构图](docs/developer/ARCHITECTURE.html) → [本体与标定](docs/developer/HARDWARE_AND_CALIBRATION.md) → [数据与接口](docs/developer/DATA_AND_CONTROL_API.md)。
 
-讨论标定和融合语义前，先阅读[人工标定与表情驱动对齐原则](docs/developer/机电仿生头_人工标定与表情驱动说明.md)。该文档保存用户确认的中位/参与关系，明确基础叠加公式、当前归一化实现和待部署变更的区别。
+讨论标定和融合语义前，先阅读[人工标定与表情驱动对齐原则](docs/developer/机电仿生头_人工标定与表情驱动说明.md)。该文档保存用户确认的中位与缺省零位移约定，明确基础叠加公式、当前归一化实现和待部署变更的区别。
 
 - 改算法：`src/vivis/`。editable安装后改源码即生效，示例不复制控制算法。
 - 改设备参数：`configs/robots/mojia/`。运行profile、启动设置及跟踪器使用同一硬件表。
