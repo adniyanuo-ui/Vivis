@@ -837,7 +837,7 @@
       "reported_model": "SM45BL",
       "neutral": 2047,
       "endpoint_envelope_not_safe_limits": [
-        1380,
+        1547,
         2047
       ],
       "safe_min": 1547,

@@ -15,12 +15,12 @@ class Calibration1029Tests(unittest.TestCase):
     def setUp(self):
         self.robot=Robot();self.revision=json.loads((ROOT/'tests/fixtures/calibration_1029.json').read_text())
 
-    def test_exact_source_revision_and_four_changed_shapes(self):
+    def test_exact_source_revision_and_five_changed_shapes(self):
         self.assertEqual(self.robot.definition['calibration_source'],'墨甲10.29.json')
         self.assertEqual(self.robot.calibration_sha256,self.revision['calibration_sha256'])
         mapper=ExpressionMapper(self.robot)
         self.assertEqual(len(mapper.names),52)
-        self.assertEqual(set(self.revision['changed_shapes']),{'JawForward','JawLeft','JawRight','TongueOut'})
+        self.assertEqual(set(self.revision['changed_shapes']),{'JawForward','JawLeft','JawRight','TongueOut','JawOpen'})
         for name,change in self.revision['changed_shapes'].items():
             self.assertEqual(mapper.shapes[name],{int(sid):pos for sid,pos in change['after'].items()})
 
@@ -45,6 +45,16 @@ class Calibration1029Tests(unittest.TestCase):
         self.assertEqual({sid:(self.robot.axes[sid]['device_min'],self.robot.axes[sid]['device_max']) for sid in (29,31,35,36)},
                          {29:(1400,2050),31:(1547,2049),35:(2000,2247),36:(1800,2280)})
         mapper=ExpressionMapper(self.robot)
-        self.assertEqual(mapper.shapes['JawOpen'][31],1380)  # Keep the supplied JSON unchanged.
-        self.assertEqual(mapper.frame({'JawOpen':1.})[31],1547.)  # Respect confirmed device stops.
+        self.assertEqual(mapper.shapes['JawOpen'][31],1547)  # User explicitly corrected the endpoint.
+        self.assertEqual(mapper.frame({'JawOpen':1.})[31],1547.)
         self.assertTrue(all(self.robot.axes[sid]['max_speed_counts_s']==1200 for sid in self.robot.motion_profile()['mouth_motion_ids']))
+
+    def test_corrected_jaw_curve_is_rescaled_from_neutral_without_endpoint_clipping(self):
+        from vivis.motion.mapping import compile_trajectory
+        mapper=ExpressionMapper(self.robot)
+        values=np.zeros((4,61));values[:,mapper.channels.index('JawOpen')]=[0.,.25,.5,1.]
+        ids,positions,report=compile_trajectory(values,mapper.channels,mapper.shapes,self.robot.motion_profile(),'face_eyes')
+        np.testing.assert_array_equal(positions[:,ids.index(31)],[2047.,1922.,1797.,1547.])
+        self.assertEqual(report['clipped_samples_by_id']['31'],0)
+        for j,sid in enumerate(ids):
+            if sid!=31:np.testing.assert_array_equal(positions[:,j],np.full(4,2047.))

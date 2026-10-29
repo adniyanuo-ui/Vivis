@@ -1,6 +1,6 @@
 {
   "source_file": "墨甲10.29.json",
-  "calibration_sha256": "7d09f26efa4097e20460dc504230360e403127cab9f6dfbe524ed78ae7a51904",
+  "calibration_sha256": "77de8ab0e57ff8d1d8d88da9b69f9e92737e2d926cb02f5e1e0cf06f7a0efe71",
   "previous_calibration_sha256": "e07ceb22c9eee566fcc925c2273a9b104adc7981bb293d45c0e5b6fa9187df28",
   "changed_shapes": {
     "JawForward": {
@@ -41,6 +41,14 @@
       "after": {
         "29": 1400,
         "31": 1747
+      }
+    },
+    "JawOpen": {
+      "before": {
+        "31": 1380
+      },
+      "after": {
+        "31": 1547
       }
     }
   },
@@ -97,6 +105,16 @@
       "feedback_max": {
         "before": 2050,
         "after": 2049
+      },
+      "endpoint_envelope_not_safe_limits": {
+        "before": [
+          1380,
+          2047
+        ],
+        "after": [
+          1547,
+          2047
+        ]
       }
     },
     "35": {
@@ -146,14 +164,14 @@
       }
     }
   },
-  "deployment_scope": "User confirmed calibrated device limits; full JawOpen endpoint1380 still constrained to1547. Current works have no new clipping.",
+  "deployment_scope": "JawOpen endpoint corrected to1547; all source weights and timing preserved",
   "works": {
     "0001": {
       "frames": 6774,
       "fps": 60,
       "audio_sha256": "cbd18a1080ce5c1830df8c4e1cbc3cacbcbee37f5075e18ab344549e0a36e3a6",
       "previous_targets_sha256": "8d15e930fba76e60fbbeb6885fb645c05288b0e0e21e141b225b839029e182e0",
-      "targets_sha256": "374a28fe720a812ec6771c11ba53eb4eaa216544f5fadcc6a6d645a7f690f390",
+      "targets_sha256": "9141a67bc51d533bc7226b97b89bb51fadc3b11319ae1d12712c996d21462fa7",
       "accepted_previous_render_max_error": 0.0,
       "changed_axes": [
         31
@@ -195,16 +213,17 @@
         "JawForward": 0.1513994336128235,
         "JawLeft": 0.0,
         "JawRight": 0.0,
-        "TongueOut": 0.0
+        "TongueOut": 0.0,
+        "JawOpen": 0.6656711101531982
       },
-      "max_id31_target_change_counts": 30.128487288951874,
+      "max_id31_target_change_counts": 117.43751778826118,
       "raw_target_ranges": {
         "29": [
           2047.0,
           2047.0
         ],
         "31": [
-          1593.5129315368831,
+          1704.6800069324672,
           2047.0
         ],
         "35": [
@@ -228,7 +247,7 @@
       "fps": 60,
       "audio_sha256": "639a020f5742de3bd60e87a1f357d2567dc24e363139e7b22824335c951cc923",
       "previous_targets_sha256": "19bb19111ff64d64ea08ddad4a304f7c456a13ec7a6b7ba45215e11cd01e10e7",
-      "targets_sha256": "6dad5f7df18f64eb2c043fb869c581c5075c680d1aed41150db76afd4253a3e7",
+      "targets_sha256": "e1dd622a3bfe7ad8ef2d0a2c88d6e67adc46af009940df5d21ab39c19d69473a",
       "accepted_previous_render_max_error": 0.0,
       "changed_axes": [
         31
@@ -270,16 +289,17 @@
         "JawForward": 0.21017137169837952,
         "JawLeft": 0.0,
         "JawRight": 0.0,
-        "TongueOut": 0.0
+        "TongueOut": 0.0,
+        "JawOpen": 0.5925427079200745
       },
-      "max_id31_target_change_counts": 41.824102967977524,
+      "max_id31_target_change_counts": 104.38288079947233,
       "raw_target_ranges": {
         "29": [
           2047.0,
           2047.0
         ],
         "31": [
-          1645.2855761740357,
+          1744.240208396688,
           2047.0
         ],
         "35": [
@@ -377,19 +397,14 @@
         1930,
         2170
       ]
-    },
-    {
-      "shape": "JawOpen",
-      "id": 31,
-      "endpoint": 1380,
-      "command_limits": [
-        1547,
-        2048
-      ],
-      "device_limits": [
-        1547,
-        2049
-      ]
     }
-  ]
+  ],
+  "original_provided_calibration_sha256": "7d09f26efa4097e20460dc504230360e403127cab9f6dfbe524ed78ae7a51904",
+  "endpoint_correction": {
+    "shape": "JawOpen",
+    "id": 31,
+    "before": 1380,
+    "after": 1547,
+    "basis": "User explicitly confirmed1547 as calibration endpoint"
+  }
 }
