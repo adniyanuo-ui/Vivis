@@ -27,6 +27,11 @@ class DeveloperConfigurationTests(unittest.TestCase):
         digest=lambda data:hashlib.sha256(json.dumps(data,sort_keys=True,separators=(',',':')).encode()).hexdigest()
         motors={m['id']:m for m in robot.profile('0001')['motors']}
         revision=json.loads((ROOT/'tests/fixtures/calibration_1027_1904.json').read_text())
+        latest=json.loads((ROOT/'tests/fixtures/calibration_1029.json').read_text())
+        for sid,changes in latest['hardware_updates'].items():
+            for key,change in changes.items():
+                self.assertEqual(motors[int(sid)][key],change['after'])
+                motors[int(sid)][key]=change['before']
         # Explicit calibration/EPROM changes are audited separately; preserve
         # the frozen historical hash for every other hardware field.
         for sid,changes in revision['hardware_updates'].items():
@@ -51,6 +56,9 @@ class DeveloperConfigurationTests(unittest.TestCase):
         self.assertEqual(neck['acceleration_raw'],128)
         self.assertEqual(neck['speed_raw'],600)
         for axis in startup:
+            latest_changes=latest['hardware_updates'].get(str(axis['id']),{})
+            axis['device_limits']=[latest_changes.get(key,{'before':axis['device_limits'][j]})['before']
+                                   for j,key in enumerate(('device_min','device_max'))]
             changes=revision['hardware_updates'].get(str(axis['id']),{})
             if 'device_min' in changes or 'device_max' in changes:
                 axis['device_limits']=[changes.get(key,{'before':axis['device_limits'][j]})['before']
@@ -59,7 +67,8 @@ class DeveloperConfigurationTests(unittest.TestCase):
         neck.update(pid_raw=[16,26,0],deadband_raw=[5,5],acceleration_raw=0,speed_raw=1000)
         self.assertEqual(digest(startup),baseline['startup_sha256'])
         self.assertEqual(digest(robot.home()['axes']),baseline['home_sha256'])
-        self.assertEqual(robot.calibration_sha256,revision['calibration_sha256'])
+        self.assertEqual(robot.calibration_sha256,latest['calibration_sha256'])
+        self.assertEqual(latest['previous_calibration_sha256'],revision['calibration_sha256'])
         self.assertEqual(revision['previous_calibration_sha256'],baseline['calibration_sha256'])
 
     def test_calibration_revision_preserves_work_timing_audio_and_unaffected_axes(self):

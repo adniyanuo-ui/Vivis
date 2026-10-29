@@ -310,7 +310,7 @@ class ColdStartTests(unittest.TestCase):
         tongue=next(i for i,e in enumerate(events) if e[:3]==('goal',29,2047))
         closed=next(i for i,e in enumerate(events) if i>opened and e[:3]==('goal',31,2047))
         self.assertLess(opened,tongue);self.assertLess(tongue,closed)
-        for sid,first_goal in ((21,2100),(35,2040)):
+        for sid,first_goal in ((21,2100),(35,robot.axes[35]['device_min'])):
             self.assertEqual(next(e for e in events if e[:2]==('goal',sid)),('goal',sid,first_goal,60))
         self.assertFalse(any(e[0]=='write' and e[2] in (9,10,11,12,18) for e in events))
         for row in report['homing']['startup_primes']:

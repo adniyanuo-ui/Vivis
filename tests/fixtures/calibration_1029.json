@@ -1,0 +1,395 @@
+{
+  "source_file": "墨甲10.29.json",
+  "calibration_sha256": "7d09f26efa4097e20460dc504230360e403127cab9f6dfbe524ed78ae7a51904",
+  "previous_calibration_sha256": "e07ceb22c9eee566fcc925c2273a9b104adc7981bb293d45c0e5b6fa9187df28",
+  "changed_shapes": {
+    "JawForward": {
+      "before": {
+        "31": 1547,
+        "35": 2247
+      },
+      "after": {
+        "31": 1746,
+        "35": 2247
+      }
+    },
+    "JawLeft": {
+      "before": {
+        "31": 1544,
+        "36": 2089
+      },
+      "after": {
+        "31": 1748,
+        "36": 2278
+      }
+    },
+    "JawRight": {
+      "before": {
+        "31": 1544,
+        "36": 1850
+      },
+      "after": {
+        "31": 1748,
+        "36": 1803
+      }
+    },
+    "TongueOut": {
+      "before": {
+        "29": 1447,
+        "31": 1551
+      },
+      "after": {
+        "29": 1400,
+        "31": 1747
+      }
+    }
+  },
+  "hardware_updates": {
+    "29": {
+      "endpoint_envelope_not_safe_limits": {
+        "before": [
+          1447,
+          2047
+        ],
+        "after": [
+          1400,
+          2047
+        ]
+      },
+      "safe_min": {
+        "before": 1447,
+        "after": 1400
+      },
+      "device_min": {
+        "before": 1447,
+        "after": 1400
+      },
+      "device_max": {
+        "before": 2147,
+        "after": 2050
+      },
+      "feedback_min": {
+        "before": 1447,
+        "after": 1400
+      },
+      "feedback_max": {
+        "before": 2147,
+        "after": 2050
+      }
+    },
+    "31": {
+      "safe_min": {
+        "before": 1380,
+        "after": 1547
+      },
+      "device_min": {
+        "before": 1380,
+        "after": 1547
+      },
+      "device_max": {
+        "before": 2050,
+        "after": 2049
+      },
+      "feedback_min": {
+        "before": 1380,
+        "after": 1547
+      },
+      "feedback_max": {
+        "before": 2050,
+        "after": 2049
+      }
+    },
+    "35": {
+      "device_min": {
+        "before": 2040,
+        "after": 2000
+      },
+      "feedback_min": {
+        "before": 2040,
+        "after": 2000
+      }
+    },
+    "36": {
+      "endpoint_envelope_not_safe_limits": {
+        "before": [
+          1850,
+          2089
+        ],
+        "after": [
+          1803,
+          2278
+        ]
+      },
+      "safe_min": {
+        "before": 1850,
+        "after": 1800
+      },
+      "safe_max": {
+        "before": 2089,
+        "after": 2280
+      },
+      "device_min": {
+        "before": 1850,
+        "after": 1800
+      },
+      "device_max": {
+        "before": 2089,
+        "after": 2280
+      },
+      "feedback_min": {
+        "before": 1850,
+        "after": 1800
+      },
+      "feedback_max": {
+        "before": 2089,
+        "after": 2280
+      }
+    }
+  },
+  "deployment_scope": "User confirmed calibrated device limits; full JawOpen endpoint1380 still constrained to1547. Current works have no new clipping.",
+  "works": {
+    "0001": {
+      "frames": 6774,
+      "fps": 60,
+      "audio_sha256": "cbd18a1080ce5c1830df8c4e1cbc3cacbcbee37f5075e18ab344549e0a36e3a6",
+      "previous_targets_sha256": "8d15e930fba76e60fbbeb6885fb645c05288b0e0e21e141b225b839029e182e0",
+      "targets_sha256": "374a28fe720a812ec6771c11ba53eb4eaa216544f5fadcc6a6d645a7f690f390",
+      "accepted_previous_render_max_error": 0.0,
+      "changed_axes": [
+        31
+      ],
+      "unchanged_axes": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        35,
+        36
+      ],
+      "unchanged_axes_sha256": "8ed9f879280a19c24d46970f3c6162ff7e866b2dd4f0effa0626b5e841894af9",
+      "blink_adjustment_sha256": "c5ebbd726a4c8b9c34d1f8b7141cfb62c247554da20da9bed4334b681ff97a47",
+      "changed_source_channel_peaks": {
+        "JawForward": 0.1513994336128235,
+        "JawLeft": 0.0,
+        "JawRight": 0.0,
+        "TongueOut": 0.0
+      },
+      "max_id31_target_change_counts": 30.128487288951874,
+      "raw_target_ranges": {
+        "29": [
+          2047.0,
+          2047.0
+        ],
+        "31": [
+          1593.5129315368831,
+          2047.0
+        ],
+        "35": [
+          2047.0,
+          2077.2798867225647
+        ],
+        "36": [
+          2047.0,
+          2047.0
+        ]
+      },
+      "clipped_samples_by_id": {
+        "29": 0,
+        "31": 0,
+        "35": 0,
+        "36": 0
+      }
+    },
+    "wz2": {
+      "frames": 1646,
+      "fps": 60,
+      "audio_sha256": "639a020f5742de3bd60e87a1f357d2567dc24e363139e7b22824335c951cc923",
+      "previous_targets_sha256": "19bb19111ff64d64ea08ddad4a304f7c456a13ec7a6b7ba45215e11cd01e10e7",
+      "targets_sha256": "6dad5f7df18f64eb2c043fb869c581c5075c680d1aed41150db76afd4253a3e7",
+      "accepted_previous_render_max_error": 0.0,
+      "changed_axes": [
+        31
+      ],
+      "unchanged_axes": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        35,
+        36
+      ],
+      "unchanged_axes_sha256": "e68d84934682a3dff746be0e13e2d5b14482949426c6fab05e320eb01ceb195d",
+      "blink_adjustment_sha256": "12d5360b80e2ef6f9423ddfaa00feb7f20e614f64523d73fa55c5307febe67a0",
+      "changed_source_channel_peaks": {
+        "JawForward": 0.21017137169837952,
+        "JawLeft": 0.0,
+        "JawRight": 0.0,
+        "TongueOut": 0.0
+      },
+      "max_id31_target_change_counts": 41.824102967977524,
+      "raw_target_ranges": {
+        "29": [
+          2047.0,
+          2047.0
+        ],
+        "31": [
+          1645.2855761740357,
+          2047.0
+        ],
+        "35": [
+          2047.0,
+          2089.034274339676
+        ],
+        "36": [
+          2047.0,
+          2047.0
+        ]
+      },
+      "clipped_samples_by_id": {
+        "29": 0,
+        "31": 0,
+        "35": 0,
+        "36": 0
+      }
+    }
+  },
+  "endpoint_limit_differences": [
+    {
+      "shape": "EyeLookDownLeft",
+      "id": 7,
+      "endpoint": 1880,
+      "command_limits": [
+        1920,
+        2150
+      ],
+      "device_limits": [
+        1920,
+        2150
+      ]
+    },
+    {
+      "shape": "EyeLookUpLeft",
+      "id": 7,
+      "endpoint": 2247,
+      "command_limits": [
+        1920,
+        2150
+      ],
+      "device_limits": [
+        1920,
+        2150
+      ]
+    },
+    {
+      "shape": "EyeLookDownRight",
+      "id": 21,
+      "endpoint": 2127,
+      "command_limits": [
+        1943,
+        2100
+      ],
+      "device_limits": [
+        1943,
+        2100
+      ]
+    },
+    {
+      "shape": "EyeLookDownRight",
+      "id": 22,
+      "endpoint": 2214,
+      "command_limits": [
+        1930,
+        2170
+      ],
+      "device_limits": [
+        1930,
+        2170
+      ]
+    },
+    {
+      "shape": "EyeLookOutRight",
+      "id": 23,
+      "endpoint": 2200,
+      "command_limits": [
+        1940,
+        2180
+      ],
+      "device_limits": [
+        1940,
+        2180
+      ]
+    },
+    {
+      "shape": "EyeLookUpRight",
+      "id": 22,
+      "endpoint": 1860,
+      "command_limits": [
+        1930,
+        2170
+      ],
+      "device_limits": [
+        1930,
+        2170
+      ]
+    },
+    {
+      "shape": "JawOpen",
+      "id": 31,
+      "endpoint": 1380,
+      "command_limits": [
+        1547,
+        2048
+      ],
+      "device_limits": [
+        1547,
+        2049
+      ]
+    }
+  ]
+}

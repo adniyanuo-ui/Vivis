@@ -2,7 +2,7 @@
   "schema_version": "vivis-robot-1.0",
   "name": "mojia",
   "calibration": "calibration.json",
-  "calibration_sha256": "e07ceb22c9eee566fcc925c2273a9b104adc7981bb293d45c0e5b6fa9187df28",
+  "calibration_sha256": "7d09f26efa4097e20460dc504230360e403127cab9f6dfbe524ed78ae7a51904",
   "hardware": "hardware.json",
   "tracking": "tracking.json",
   "parallel_neck": "parallel_neck.json",
@@ -41,5 +41,5 @@
       "candidate_activated": false
     }
   },
-  "calibration_source": "墨甲10.27（19.04）.json"
+  "calibration_source": "墨甲10.29.json"
 }

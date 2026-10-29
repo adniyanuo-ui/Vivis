@@ -1,6 +1,6 @@
 # 2026-10-27标定替换记录
 
-当前唯一标定为`configs/robots/mojia/calibration.json`，其文件字节与用户提供的`墨甲10.27（19.04）.json`完全一致。
+本文记录10月27日更新时点；当前已由`墨甲10.29.json`替代，见[最新标定说明](LIP_FULLNESS_COMPARISON.md)。当时的唯一标定为`configs/robots/mojia/calibration.json`，文件字节与用户提供的`墨甲10.27（19.04）.json`完全一致。
 
 - SHA256：`e07ceb22c9eee566fcc925c2273a9b104adc7981bb293d45c0e5b6fa9187df28`。
 - 52个基础表情，映射轴清单不变；按新文件原样采用全部映射。

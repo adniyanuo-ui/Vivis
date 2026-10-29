@@ -275,7 +275,7 @@
             "positions": [
                 {
                     "id": 31,
-                    "position": 1547
+                    "position": 1746
                 },
                 {
                     "id": 35,
@@ -289,11 +289,11 @@
             "positions": [
                 {
                     "id": 31,
-                    "position": 1544
+                    "position": 1748
                 },
                 {
                     "id": 36,
-                    "position": 2089
+                    "position": 2278
                 }
             ],
             "shape": "JawLeft"
@@ -303,11 +303,11 @@
             "positions": [
                 {
                     "id": 31,
-                    "position": 1544
+                    "position": 1748
                 },
                 {
                     "id": 36,
-                    "position": 1850
+                    "position": 1803
                 }
             ],
             "shape": "JawRight"
@@ -843,11 +843,11 @@
             "positions": [
                 {
                     "id": 29,
-                    "position": 1447
+                    "position": 1400
                 },
                 {
                     "id": 31,
-                    "position": 1551
+                    "position": 1747
                 }
             ],
             "shape": "TongueOut"
