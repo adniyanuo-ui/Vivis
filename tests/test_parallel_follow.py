@@ -23,9 +23,10 @@ def configuration(vertical_target_y=0.):
 
 class ParallelFollowTests(unittest.TestCase):
     def test_vertical_bias_moves_head_down_at_each_yaw_and_has_a_stationary_setpoint(self):
-        self.assertEqual(Robot().tracking()['parallel_neck']['control']['vertical_target_y'],-.15)
+        bias=Robot().tracking()['parallel_neck']['control']['vertical_target_y']
+        self.assertEqual(bias,-.3)
         for yaw in (0.,math.pi/6,-math.pi/6):
-            c,p=configuration(-.15);f=ParallelFaceFollower(c,p)
+            c,p=configuration(bias);f=ParallelFaceFollower(c,p)
             measured={32:2047-yaw*4096/(2*math.pi),33:2047.,34:2047.};f.reset(measured,10.)
             for tick in range(180):
                 now=10+(tick+1)/60
@@ -33,11 +34,11 @@ class ParallelFollowTests(unittest.TestCase):
                 goals=f.step(packet(now,0.),'tracking',1/60,now)
                 measured.update({sid:float(round(v)) for sid,v in goals.items()})
             self.assertLess(f.diagnostic['camera_pitch_rad'],-math.radians(.5))
-        c,p=configuration(-.15);f=ParallelFaceFollower(c,p);f.reset({32:2047.,33:2047.,34:2047.},10.)
+        c,p=configuration(bias);f=ParallelFaceFollower(c,p);f.reset({32:2047.,33:2047.,34:2047.},10.)
         for tick in range(60):
             now=10+(tick+1)/60
             for sid in (32,33,34):f.observe(sid,2047.,now)
-            sample=packet(now,0.);sample['target']['y']=-.15
+            sample=packet(now,0.);sample['target']['y']=bias
             goals=f.step(sample,'tracking',1/60,now)
         np.testing.assert_allclose(list(goals.values()),[2047.,2047.],atol=1e-7)
 
