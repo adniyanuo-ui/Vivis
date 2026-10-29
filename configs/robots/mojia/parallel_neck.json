@@ -81,7 +81,7 @@
   },
   "control": {
     "camera_mount_yaw_rad": 3.141592653589793,
-    "vertical_target_y": -0.3,
+    "vertical_target_y": -0.45,
     "pitch_gain_rad_s": 0.18,
     "roll_follow_ratio": 0.25,
     "roll_gain_s": 1.0,

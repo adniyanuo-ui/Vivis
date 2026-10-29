@@ -24,7 +24,7 @@ def configuration(vertical_target_y=0.):
 class ParallelFollowTests(unittest.TestCase):
     def test_vertical_bias_moves_head_down_at_each_yaw_and_has_a_stationary_setpoint(self):
         bias=Robot().tracking()['parallel_neck']['control']['vertical_target_y']
-        self.assertEqual(bias,-.3)
+        self.assertEqual(bias,-.45)
         for yaw in (0.,math.pi/6,-math.pi/6):
             c,p=configuration(bias);f=ParallelFaceFollower(c,p)
             measured={32:2047-yaw*4096/(2*math.pi),33:2047.,34:2047.};f.reset(measured,10.)
@@ -54,9 +54,32 @@ class ParallelFollowTests(unittest.TestCase):
         for follower in followers:follower.reset({32:2047.,33:2047.,34:2047.},10.)
         np.testing.assert_allclose(list(followers[0].step(packet(10.01,.2),'tracking',.01,10.01).values()),
                                    list(followers[1].step(packet(10.01,.2),'tracking',.01,10.01).values()))
-        for value in (math.nan,math.inf,True,.6,-.6):
+        for value in (math.nan,math.inf,True,.500001,-.500001,72,108):
             c,p=configuration(value)
             with self.assertRaisesRegex(ValueError,'vertical_target_y'):validate(c,p)
+        for value in (-.5,.5):
+            c,p=configuration(value);validate(c,p)
+
+    def test_108px_bias_brakes_inside_device_limits_under_sustained_tracking_error(self):
+        bias=Robot().tracking()['parallel_neck']['control']['vertical_target_y']
+        c,p=configuration(bias);f=ParallelFaceFollower(c,p)
+        measured={32:2047.,33:2047.,34:2047.};f.reset(measured,10.)
+        modes=set()
+        for tick in range(720):
+            now=10+(tick+1)/60
+            for sid in (32,33,34):f.observe(sid,measured[sid],now)
+            sample=packet(now,0.);sample['target']['y']=1.
+            goals=f.step(sample,'tracking',1/60,now)
+            for b in f.k.branches:
+                self.assertGreaterEqual(goals[b['id']],b['low'])
+                self.assertLessEqual(goals[b['id']],b['high'])
+                self.assertGreaterEqual(round(goals[b['id']]),b['low'])
+                self.assertLessEqual(round(goals[b['id']]),b['high'])
+            modes.add(f.diagnostic['mode'])
+            measured.update({sid:float(round(value)) for sid,value in goals.items()})
+        self.assertIn('workspace_braking',modes)
+        self.assertTrue(any(min(goals[b['id']]-b['low'],b['high']-goals[b['id']])<20 for b in f.k.branches))
+        self.assertLess(np.max(np.abs(f.reference.v)),1e-5)
 
     def test_cad_neutral_and_confirmed_encoder_directions(self):
         c,p=configuration();k=validate(c,p)
