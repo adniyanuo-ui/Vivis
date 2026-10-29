@@ -55,6 +55,9 @@ def validate(config,profile):
                 raise ValueError('Invalid parallel '+section+' parameter: '+key)
     if any(plan['motion']['max_speed_counts_s']>motors[b['id']]['max_speed_counts_s'] for b in k.branches):
         raise ValueError('Parallel reference speed exceeds hardware speed configuration')
+    target_y=plan['control'].get('vertical_target_y',0.)
+    if type(target_y) not in (int,float) or not math.isfinite(target_y) or not -.5<=target_y<=.5:
+        raise ValueError('Invalid parallel control parameter: vertical_target_y')
     require_engine()
     return k
 
@@ -207,7 +210,8 @@ class ParallelFaceFollower:
                     valid=type(line) in (int,float) and math.isfinite(line) and abs(line)<=math.pi/2
                     desired_roll=c['roll_follow_ratio']*(line+roll) if valid else 0.
                     self.filtered_roll+=alpha*(desired_roll-self.filtered_roll);self.stamp=stamp
-                error=math.copysign(max(0.,abs(self.filtered_y)-c['image_deadband']),self.filtered_y)
+                vertical_error=self.filtered_y-c.get('vertical_target_y',0.)
+                error=math.copysign(max(0.,abs(vertical_error)-c['image_deadband']),vertical_error)
                 vp=-c['pitch_gain_rad_s']*error
                 vr=c['roll_gain_s']*(self.filtered_roll-roll)
                 pose_velocity=np.linalg.solve(interaction,np.array([vp,vr]))
@@ -221,6 +225,7 @@ class ParallelFaceFollower:
             head_yaw_rad=yaw,camera_mount_yaw_rad=c['camera_mount_yaw_rad'],
             camera_pitch_rad=pitch,camera_roll_rad=roll,
             filtered_vertical_error=self.filtered_y,roll_target_rad=self.filtered_roll,
+            vertical_target_y=c.get('vertical_target_y',0.),
             feedback_age_s={str(s):now-self.observations[s][1] for s in self.observations},
             **self.reference.diagnostic)
         return goals

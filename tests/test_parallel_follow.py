@@ -11,14 +11,52 @@ from vivis.motion.ownership import tracking_profile,MojiaPlaybackGaze
 from test_gaze import packet
 
 
-def configuration():
+def configuration(vertical_target_y=0.):
     robot=Robot();c=robot.tracking();c['parallel_neck']['enabled']=True
+    # Historical behavior tests use an explicit zero target; production default
+    # is separately checked by the vertical framing bias regressions below.
+    c['parallel_neck']['control']['vertical_target_y']=vertical_target_y
     c['control']['vertical_enabled']=False;c['control']['held_eye_ids']=[7,22]
     c['control']['axes']=[a for a in c['control']['axes'] if a['id'] in (8,23)]
     return c,robot.motion_profile()
 
 
 class ParallelFollowTests(unittest.TestCase):
+    def test_vertical_bias_moves_head_down_at_each_yaw_and_has_a_stationary_setpoint(self):
+        self.assertEqual(Robot().tracking()['parallel_neck']['control']['vertical_target_y'],-.15)
+        for yaw in (0.,math.pi/6,-math.pi/6):
+            c,p=configuration(-.15);f=ParallelFaceFollower(c,p)
+            measured={32:2047-yaw*4096/(2*math.pi),33:2047.,34:2047.};f.reset(measured,10.)
+            for tick in range(180):
+                now=10+(tick+1)/60
+                for sid in (32,33,34):f.observe(sid,measured[sid],now)
+                goals=f.step(packet(now,0.),'tracking',1/60,now)
+                measured.update({sid:float(round(v)) for sid,v in goals.items()})
+            self.assertLess(f.diagnostic['camera_pitch_rad'],-math.radians(.5))
+        c,p=configuration(-.15);f=ParallelFaceFollower(c,p);f.reset({32:2047.,33:2047.,34:2047.},10.)
+        for tick in range(60):
+            now=10+(tick+1)/60
+            for sid in (32,33,34):f.observe(sid,2047.,now)
+            sample=packet(now,0.);sample['target']['y']=-.15
+            goals=f.step(sample,'tracking',1/60,now)
+        np.testing.assert_allclose(list(goals.values()),[2047.,2047.],atol=1e-7)
+
+    def test_bias_does_not_change_idle_return_and_zero_matches_missing_setting(self):
+        c,p=configuration(-.15);f=ParallelFaceFollower(c,p);measured={32:2047.,33:2060.,34:2034.};f.reset(measured,10.)
+        for tick in range(360):
+            now=10+(tick+1)/60
+            for sid in (32,33,34):f.observe(sid,measured[sid],now)
+            goals=f.step(None,'idle',1/60,now);measured.update(goals)
+        np.testing.assert_allclose(list(goals.values()),[2047.,2047.],atol=1e-7)
+        c,p=configuration();legacy=copy.deepcopy(c);del legacy['parallel_neck']['control']['vertical_target_y']
+        followers=[ParallelFaceFollower(config,p) for config in (c,legacy)]
+        for follower in followers:follower.reset({32:2047.,33:2047.,34:2047.},10.)
+        np.testing.assert_allclose(list(followers[0].step(packet(10.01,.2),'tracking',.01,10.01).values()),
+                                   list(followers[1].step(packet(10.01,.2),'tracking',.01,10.01).values()))
+        for value in (math.nan,math.inf,True,.6,-.6):
+            c,p=configuration(value)
+            with self.assertRaisesRegex(ValueError,'vertical_target_y'):validate(c,p)
+
     def test_cad_neutral_and_confirmed_encoder_directions(self):
         c,p=configuration();k=validate(c,p)
         pitch=k.inverse(.01,0.);roll=k.inverse(0.,.01)
