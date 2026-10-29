@@ -1,8 +1,15 @@
 """Explicit software warning thresholds; never alter device protection registers."""
 import time
+import math
+from vivis.hardware.feetech.protocol import DEFERRED_SENSOR_ALARMS,ServoStatusError
 
 
 class CriticalTemperatureError(RuntimeError):pass
+class ConfirmedSensorFaultError(RuntimeError):pass
+
+
+def alarm_bits(state):
+    return state['status_register']|state.get('packet_status_bits',0)
 
 
 def validate_policy(policy):
@@ -16,6 +23,15 @@ def validate_policy(policy):
     count=policy.get('temperature_stop_consecutive_samples',1)
     if type(count) is not int or not 1<=count<=8:
         raise ValueError('Invalid consecutive temperature sample count')
+    enabled=policy.get('sensor_fault_confirmation',False)
+    if type(enabled) is not bool:raise ValueError('Invalid sensor fault confirmation switch')
+    if enabled:
+        for key in ('voltage_stop_consecutive_samples','current_alarm_stop_consecutive_samples','overload_alarm_stop_consecutive_samples'):
+            if type(policy.get(key)) is not int or not 2<=policy[key]<=5:
+                raise ValueError('Sensor fault confirmation requires2..5 observations: '+key)
+        period=policy.get('sensor_fault_confirmation_period_s')
+        if type(period) not in (int,float) or not math.isfinite(period) or not .01<=period<=.1:
+            raise ValueError('Sensor fault confirmation period must be0.01..0.1 seconds')
 
 
 def apply_policy(profile,policy):
@@ -26,11 +42,11 @@ def apply_policy(profile,policy):
                      max_temperature_c=policy['temperature_stop_c'])
 
 
-def evaluate(sid,state,policy):
+def evaluate(sid,state,policy,defer_critical_temperature=False):
     # Policy is validated before opening hardware. Strict > matches the user's
     # requested boundaries: exactly800,80,100 do not cross their thresholds.
     temperature=state['temperature_c']
-    if temperature>policy['temperature_stop_c']:
+    if temperature>policy['temperature_stop_c'] and not defer_critical_temperature:
         raise CriticalTemperatureError(f'{sid}: critical temperature {temperature} C > {policy["temperature_stop_c"]} C')
     warnings=[];load=state['load_raw']&1023
     if load>policy['load_warning_raw']:
@@ -38,6 +54,57 @@ def evaluate(sid,state,policy):
     if temperature>policy['temperature_warning_c']:
         warnings.append(dict(id=sid,kind='temperature',value=temperature,threshold=policy['temperature_warning_c']))
     return warnings
+
+
+class SensorFaultMonitor:
+    """Count same-axis, same-kind faults in independently completed samples.
+
+    No reads, sleeps, writes, interpolation or invented healthy sensor values.
+    Missing/corrupt samples do not call observe and cannot change a streak.
+    """
+    def __init__(self,policy,records):
+        validate_policy(policy)
+        if not policy.get('sensor_fault_confirmation'):raise ValueError('Sensor confirmation is disabled')
+        self.policy=policy;self.records=records;self.active={}
+        self.required=dict(voltage=policy['voltage_stop_consecutive_samples'],
+            temperature=policy['temperature_stop_consecutive_samples'],current=policy['current_alarm_stop_consecutive_samples'],
+            overload=policy['overload_alarm_stop_consecutive_samples'])
+
+    def pending_ids(self):
+        return sorted({sid for sid,kind in self.active})
+
+    def observe(self,sid,state,motor):
+        bits=alarm_bits(state)
+        if bits&~DEFERRED_SENSOR_ALARMS:raise ServoStatusError(sid,bits)
+        voltage=bool(bits&1)
+        if motor.get('max_voltage_raw') is not None:
+            voltage=voltage or not motor['min_voltage_raw']<=state['voltage_raw']<=motor['max_voltage_raw']
+        faults=dict(voltage=voltage,temperature=bool(bits&4) or state['temperature_c']>self.policy['temperature_stop_c'],
+                    current=bool(bits&8),overload=bool(bits&32))
+        now=time.monotonic();confirmed=[]
+        for kind,present in faults.items():
+            key=(sid,kind)
+            if not present:
+                record=self.active.pop(key,None)
+                if record is not None:
+                    record.update(recovered=True,consecutive_fault_samples=0,last_state=dict(state),
+                                  cleared_monotonic=now)
+                    print(f'WARNING ID{sid} {kind} recovered; consecutive counter reset',flush=True)
+                continue
+            if key not in self.active:
+                record=dict(id=sid,kind=kind,required_consecutive=self.required[kind],consecutive_fault_samples=0,
+                            first_monotonic=now,recovered=False,samples=[])
+                self.records.append(record);self.active[key]=record
+            record=self.active[key];record['consecutive_fault_samples']+=1
+            record['peak_consecutive_fault_samples']=record['consecutive_fault_samples']
+            record['samples'].append(dict(monotonic=now,state=dict(state)))
+            record.update(last_monotonic=now,last_state=dict(state))
+            count=record['consecutive_fault_samples'];required=self.required[kind]
+            print(f'WARNING ID{sid} {kind} fault {count}/{required}; hardware protection preserved',flush=True)
+            if count>=required:confirmed.append(kind)
+        if confirmed:
+            details=', '.join(f'{kind}:{self.required[kind]}' for kind in confirmed)
+            raise ConfirmedSensorFaultError(f'ID{sid}: confirmed consecutive sensor fault ({details})')
 
 
 def verify_sample(reader,sid,initial,validate,policy,records,should_stop=lambda:False,on_received=None):

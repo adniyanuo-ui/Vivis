@@ -10,7 +10,7 @@ import getpass
 import shlex
 from pathlib import Path
 from types import SimpleNamespace
-from vivis.hardware.feetech.protocol import Bus, ProtocolError, CorruptResponse, ReadTimeout, ServoStatusError, goal_packet
+from vivis.hardware.feetech.protocol import Bus, ProtocolError, CorruptResponse, ReadTimeout, ServoStatusError, goal_packet,DEFERRED_SENSOR_ALARMS
 
 from vivis.paths import ROOT
 from ._vendor.scservo_sdk import (PortHandler, sms_sts, GroupSyncWrite,
@@ -22,7 +22,7 @@ class OfficialSDKBus(Bus):
         if snapshot_chunk_bytes is not None and (type(snapshot_chunk_bytes) is not int or not 1<=snapshot_chunk_bytes<=8):
             raise ValueError('Snapshot chunks must be1..8 bytes')
         self.snapshot_chunk_bytes=snapshot_chunk_bytes
-        if servo_status_policy not in ('raise','record_only'):
+        if servo_status_policy not in ('raise','record_only','defer_sensor_faults'):
             raise ValueError('Unknown servo status policy')
         self.servo_status_policy=servo_status_policy
         self.servo_status_notifications=[]
@@ -101,7 +101,9 @@ class OfficialSDKBus(Bus):
         if len(data) != count:
             raise CorruptResponse(f'Official SDK ID {sid}: unexpected payload length')
         if error:
-            if getattr(self,'servo_status_policy','raise')!='record_only':
+            policy=getattr(self,'servo_status_policy','raise')
+            deferred=policy=='defer_sensor_faults' and not error&~DEFERRED_SENSOR_ALARMS
+            if policy!='record_only' and not deferred:
                 raise ServoStatusError(sid,error)
             # The SDK has verified checksum/ID/length and COMM_SUCCESS above.
             # An explicit observation policy records alarm bits without throwing
@@ -123,16 +125,29 @@ class OfficialSDKBus(Bus):
         return state
 
     def feedback(self, sid):
+        packet_bits=0
+        def read(address,count):
+            nonlocal packet_bits
+            data=self.read(sid,address,count)
+            response=getattr(self,'last_sdk_response',None)
+            if isinstance(response,dict) and response.get('id')==sid:
+                packet_bits|=response.get('servo_status',0)
+            return data
         if self.feedback_mode == 'block':
-            return super().feedback(sid)
-        # Keep all feedback checks, but compare short register reads with a
-        # 15-byte live RAM read while the servo updates its feedback registers.
-        position = int.from_bytes(self.read(sid,56,2),'little')
-        load = int.from_bytes(self.read(sid,60,2),'little')
-        sensors = self.read(sid,62,2)
-        status = self.read(sid,65,1)[0]
-        return {'position':position,'load_raw':load,'voltage_raw':sensors[0],
-                'temperature_c':sensors[1],'status_register':status}
+            state=super().feedback(sid)
+            response=getattr(self,'last_sdk_response',None)
+            if isinstance(response,dict):packet_bits=response.get('servo_status',0)
+        else:
+            # Keep short reads; packet alarm bits remain separate from the
+            # actual status-register payload so no raw evidence is rewritten.
+            position = int.from_bytes(read(56,2),'little')
+            load = int.from_bytes(read(60,2),'little')
+            sensors = read(62,2)
+            status = read(65,1)[0]
+            state={'position':position,'load_raw':load,'voltage_raw':sensors[0],
+                   'temperature_c':sensors[1],'status_register':status}
+        if packet_bits:state['packet_status_bits']=packet_bits
+        return state
 
     def goals(self, goals, speeds):
         goal_packet(goals, speeds)  # validate all positions/speeds before any write

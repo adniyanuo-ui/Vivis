@@ -4,6 +4,10 @@ References: Feetech FT-SCS protocol and the pinned SMS/STS SDK.
 import struct
 import time
 
+# Verified FT-SCS sensor status bits: voltage, temperature, current and load.
+# Encoder/unknown bits are deliberately excluded from deferred handling.
+DEFERRED_SENSOR_ALARMS=0x01|0x04|0x08|0x20
+
 class ProtocolError(RuntimeError): pass
 class CorruptResponse(ProtocolError): pass
 class ReadTimeout(ProtocolError): pass

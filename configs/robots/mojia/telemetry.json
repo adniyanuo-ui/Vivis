@@ -4,5 +4,10 @@
   "temperature_warning_c": 80,
   "temperature_stop_c": 100,
   "temperature_stop_consecutive_samples": 4,
+  "sensor_fault_confirmation": true,
+  "voltage_stop_consecutive_samples": 4,
+  "current_alarm_stop_consecutive_samples": 4,
+  "overload_alarm_stop_consecutive_samples": 4,
+  "sensor_fault_confirmation_period_s": 0.02,
   "hardware_protection": "preserve"
 }

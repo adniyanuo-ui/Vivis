@@ -9,8 +9,8 @@ import wave
 from pathlib import Path
 import numpy as np
 from vivis.motion.mapping import live_preflight,limit_step
-from vivis.hardware.feetech.protocol import Bus,ServoStatusError,CorruptResponse,ReadTimeout,ProtocolError
-from vivis.runtime.telemetry import evaluate,WarningRecorder,CriticalTemperatureError,verify_sample
+from vivis.hardware.feetech.protocol import Bus,ServoStatusError,CorruptResponse,ReadTimeout,ProtocolError,DEFERRED_SENSOR_ALARMS
+from vivis.runtime.telemetry import evaluate,WarningRecorder,CriticalTemperatureError,verify_sample,SensorFaultMonitor,alarm_bits
 
 class SensorReadingError(RuntimeError):pass
 class PositionEdgeReadingError(RuntimeError):pass
@@ -47,7 +47,7 @@ class AudioClock:
     def time(self):return None if self.first_dac is None else self.stream.time-self.first_dac
     def close(self):self.stream.abort();self.stream.close()
 
-def check_feedback(sid,state,motor):
+def check_feedback(sid,state,motor,defer_sensor_faults=False):
     position_error=None
     if not 0<=state['position']<=4095:raise RuntimeError(f'{sid}: invalid single-turn encoder position')
     low=motor.get('feedback_min',motor['safe_min']);high=motor.get('feedback_max',motor['safe_max'])
@@ -66,13 +66,15 @@ def check_feedback(sid,state,motor):
         else:raise RuntimeError(message)
     policy=motor.get('telemetry_policy')
     if not policy and (state['load_raw']&1023)>=motor['max_load_raw']:raise RuntimeError(f'{sid}: excessive load ({state["load_raw"]&1023})')
-    if state['status_register']:raise ServoStatusError(sid,state['status_register'])
+    bits=alarm_bits(state)
+    if bits and (not defer_sensor_faults or bits&~DEFERRED_SENSOR_ALARMS):raise ServoStatusError(sid,bits)
     if position_error is not None:raise position_error
     if not policy and state['temperature_c']>=motor['max_temperature_c']:raise SensorReadingError(f'{sid}: over temperature ({state["temperature_c"]} C >= {motor["max_temperature_c"]} C)')
     if motor.get('max_voltage_raw') is not None:
-        if not motor['min_voltage_raw']<=state['voltage_raw']<=motor['max_voltage_raw']:
+        if not defer_sensor_faults and not motor['min_voltage_raw']<=state['voltage_raw']<=motor['max_voltage_raw']:
             raise SensorReadingError(f'{sid}: voltage feedback outside configured operating range')
-    return evaluate(sid,state,policy) if policy else []
+    if defer_sensor_faults and not policy:raise ValueError('Deferred sensor faults require an explicit telemetry policy')
+    return evaluate(sid,state,policy,defer_critical_temperature=defer_sensor_faults) if policy else []
 
 def verified_feedback(bus,sid,motor,confirm,records,should_stop=lambda:False,initial=None,on_warnings=None,on_received=None):
     """Hold command transmission while confirming sensor or opted-in edge samples.
@@ -234,6 +236,10 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     result['acceleration_control']='servo_register_41'
     result.update(mouth_command_mode=mouth_command_mode,direct_position_ids=direct_ids)
     warning_recorder=WarningRecorder(result.setdefault('telemetry_warnings',[]))
+    fault_monitor=None
+    if not record_only and profile.get('telemetry_policy',{}).get('sensor_fault_confirmation'):
+        fault_monitor=SensorFaultMonitor(profile['telemetry_policy'],result.setdefault('sensor_fault_confirmations',[]))
+        result['sensor_fault_policy']=dict(profile['telemetry_policy'])
     def received(sid,state):
         result['last_feedback_received']={'id':sid,**state}
     def should_stop():return stop.is_set() or Path(stop_file).exists()
@@ -254,10 +260,18 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             except RuntimeError as exc:
                 result['feedback_notifications'].append({'id':sid,'monotonic':time.monotonic(),
                     'error':str(exc),'valid_payload':True,'state':state})
+        elif fault_monitor is not None and result['phase']=='playing':
+            state=initial if initial is not None else bus.feedback(sid)
+            received(sid,state)
+            warnings=check_feedback(sid,state,motors[sid],defer_sensor_faults=True)
+            warning_recorder.observe(sid,state,warnings)
+            fault_monitor.observe(sid,state,motors[sid])
         else:
             state=verified_feedback(bus,sid,motors[sid],profile.get('confirm_sensor_transients') is True,
                                     result['sensor_confirmations'],should_stop,initial,
                                     on_warnings=warning_recorder.observe,on_received=received)
+        # This clock proves valid communication and position data. Sensor
+        # alarms remain in the raw state and have independent stop counters.
         last_good_feedback[sid]=time.monotonic()
         if not motors[sid]['safe_min']<=state['position']<=motors[sid]['safe_max']:
             result.setdefault('position_tolerance_samples',[]).append({
@@ -397,7 +411,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                                if sid in command_ids) if mojia_gaze else ()
             feedback_requests=int(8*60/control_hz)
             feedback_scheduler=BudgetedFeedback(bus,ids,priority_ids=priority_ids,max_feedback_age_s=feedback_age_limit,
-                                                max_requests_per_step=feedback_requests)
+                max_requests_per_step=feedback_requests,confirmation_period_s=(
+                    profile['telemetry_policy']['sensor_fault_confirmation_period_s'] if fault_monitor else .02))
             result['runtime_feedback_schedule']=dict(timeout_ms=3,budget_ms=1000/control_hz,
                 budget_mode='remaining_control_period',command_guard_ms=1,max_requests_per_tick=feedback_requests,
                 priority_ids=list(priority_ids),priority_period_s=.08,inline_retry=False,
@@ -405,6 +420,11 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 fair_urgent_attempts=True,continue_other_axes_after_read_error=True)
         next_command_at=None
         result['phase']='playing'
+        if fault_monitor is not None and profile.get('serial_backend')=='feetech_python':
+            bus.servo_status_policy='defer_sensor_faults'
+        if fault_monitor is not None:
+            print('PLAYBACK SENSOR POLICY: warn on isolated sensor faults; stop on same-axis '
+                  f'consecutive samples {fault_monitor.required}; hardware protection preserved',flush=True)
         clock.start();last_tick=time.monotonic();previous_index=-1;skipped=0;started=time.monotonic()
         while True:
             if should_stop():raise RuntimeError('Operator stop')
@@ -488,7 +508,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 # dense goal packets left too little time to recover bad reads.
                 deadline=next_command_at-.001
                 events[-1]['feedback_schedule']=feedback_scheduler.step(deadline,last_good_feedback,
-                    scheduled_sample,feedback_error,should_stop)
+                    scheduled_sample,feedback_error,should_stop,
+                    confirmation_ids=fault_monitor.pending_ids() if fault_monitor else ())
             for _ in range(0 if feedback_scheduler is not None else polls_per_frame):
                 clocks=last_feedback_attempt if record_only else last_good_feedback
                 sid=min(ids,key=lambda axis:clocks[axis])

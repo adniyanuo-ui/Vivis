@@ -46,6 +46,13 @@ class DeveloperConfigurationTests(unittest.TestCase):
         for sid in (32,33,34):
             self.assertNotIn('max_acceleration_counts_s2',motors[sid])
             motors[sid]['max_acceleration_counts_s2']=64  # Historical baseline only.
+        # Explicitly authorized runtime fault policy is separate from frozen
+        # historical motion settings; remove only these reviewed additions.
+        fault_policy=dict(sensor_fault_confirmation=True,voltage_stop_consecutive_samples=4,
+            current_alarm_stop_consecutive_samples=4,overload_alarm_stop_consecutive_samples=4,
+            sensor_fault_confirmation_period_s=.02)
+        for motor in motors.values():
+            for key,value in fault_policy.items():self.assertEqual(motor['telemetry_policy'].pop(key),value)
         self.assertEqual(digest(motors),baseline['motors_sha256'])
         startup=robot.startup()['axes']
         neck=next(a for a in startup if a['id']==32)
