@@ -41,7 +41,9 @@
         31,
         35,
         36
-      ]
+      ],
+      "source_clip": "assets/works/0001/source.json",
+      "source_clip_sha256": "d023e6f09cf0a381dd3b12b713a178b5e40a6cf2b32a3e4033352cac86512b96"
     },
     "wz2": {
       "name": "wz2",

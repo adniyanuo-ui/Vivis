@@ -23,6 +23,6 @@
 - YuNet人脸模型：`assets/models/yunet/face_detection_yunet_2023mar.onnx`，约228KB，附MIT许可证与固定版本/哈希清单。示例2/3按哈希核验后加载，不访问网络下载。
 - 完整来源和版本：`assets/third_party.json`。Python依赖由`pyproject.toml`安装，不把虚拟环境提交到Git。
 
-预制回放默认不依赖原始61通道制作数据。`assets/works/wz2/source.json`额外提供约914KB的原始30FPS通道数据，原字节与哈希保留，用于显式`--round-lip-gain`运行时通道增益；它不是另一套硬件配置。该功能以保持采样方式转换到60FPS，只重新映射Funnel/Pucker涉及的轴，其余已接受轨迹列保留。0001暂未随包提供原始通道数据，不能对其使用非1的通道增益。
+预制回放默认不读取原始61通道制作数据。两份作品均随包提供`assets/works/作品名/source.json`，用于显式`--round-lip-gain`运行时通道增益：0001是约8.78MB的原始60FPS数据，wz2是约914KB的原始30FPS数据，原字节与哈希保留；它们不是另一套硬件配置。wz2按原保持采样方式转换到60FPS，0001保持原60FPS；只重新映射Funnel/Pucker涉及的轴，其余已接受轨迹列保留。该功能不依赖原工程目录。
 
 A2F权重不属于预制回放的运行依赖。客户接入自己的素材时可按教程生成新作品。完整AI产品、训练平台和相关模型的分发另行约定。

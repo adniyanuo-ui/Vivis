@@ -11,9 +11,9 @@ from vivis.runtime.trajectory import load_targets
 
 
 class RoundLipGainTests(unittest.TestCase):
-    def fixture(self):
-        robot=Robot();work=robot.work('wz2')
-        ids,positions,fps=load_targets(work['targets'],robot.profile('wz2'),work['audio'],robot.calibration)
+    def fixture(self,name='wz2'):
+        robot=Robot();work=robot.work(name)
+        ids,positions,fps=load_targets(work['targets'],robot.profile(name),work['audio'],robot.calibration)
         return robot,work,ids,positions,fps
 
     def test_default_is_exact_noop_and_needs_no_source(self):
@@ -57,11 +57,25 @@ class RoundLipGainTests(unittest.TestCase):
         from vivis.runtime.developer import run_example
         with patch('vivis.hardware.feetech.sdk.OfficialSDKBus',side_effect=AssertionError('serial opened')), \
              patch('vivis.runtime.developer.subprocess.Popen',side_effect=AssertionError('camera opened')):
-            for mode in ('face','eyes','eyes-neck'):
-                with redirect_stdout(io.StringIO()) as output:
-                    run_example(mode,['--check','--work','wz2','--round-lip-gain','1.2',
-                                      '--mouth-speed','1500','--mouth-command-mode','lips-direct'])
-                report=json.loads(output.getvalue())
-                self.assertEqual(report['round_lip_gain_report']['gain'],1.2)
-                self.assertEqual(report['mouth_speed_override']['speed_counts_s'],1500)
-                self.assertEqual(report['mouth_gain_report']['gain'],1.)
+            for work in ('0001','wz2'):
+                for mode in ('face','eyes','eyes-neck'):
+                    with redirect_stdout(io.StringIO()) as output:
+                        run_example(mode,['--check','--work',work,'--repeat','2','--round-lip-gain','1.2',
+                                          '--mouth-speed','1200','--mouth-command-mode','lips-direct'])
+                    report=json.loads(output.getvalue())
+                    self.assertEqual(report['round_lip_gain_report']['gain'],1.2)
+                    self.assertEqual(report['mouth_speed_override']['speed_counts_s'],1200)
+                    self.assertEqual(report['mouth_gain_report']['gain'],1.)
+                    self.assertEqual(report['repeat'],2)
+
+    def test_work0001_verified_60fps_source_and_only_two_channel_effects(self):
+        robot,work,ids,a,fps=self.fixture('0001');before=a.copy()
+        b,report=round_lip_gain_targets(robot,work,ids,a,fps,1.2)
+        self.assertEqual(report['source_fps'],60.);self.assertEqual(report['baseline_reproduction_max_error_counts'],0.)
+        self.assertEqual(report['changed_ids'],[10,11,12,13,15,25,26,27,28,30])
+        self.assertFalse(any(report['position_clipped_frames_by_id'].values()))
+        for data in report['coefficients'].values():
+            self.assertAlmostEqual(data['peak_after'],1.2*data['peak_before']);self.assertEqual(data['saturated_frames'],0)
+        for column,sid in enumerate(ids):
+            if sid not in report['affected_ids']:np.testing.assert_array_equal(a[:,column],b[:,column])
+        np.testing.assert_array_equal(a,before)
