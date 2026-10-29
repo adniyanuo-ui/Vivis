@@ -122,10 +122,15 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
     return p,monitored,trajectory
 
 
+def tongue_at_startup_goal(position,motor):
+    """Arrival tolerance never substitutes for the actual feedback corridor."""
+    low=max(motor.get('feedback_min',motor['safe_min']),motor.get('device_min',motor['safe_min']))
+    high=min(motor.get('feedback_max',motor['safe_max']),motor.get('device_max',motor['safe_max']))
+    return low<=position<=high and abs(position-motor['neutral'])<=motor.get('initial_settle_tolerance_counts',20)
+
+
 def recover_tongue(bus,motor,guard,events,speed=1000):
     s=bus.snapshot(29)
-    if s['torque_enable']==1 and abs(s['position_raw']-motor['neutral'])<=motor['initial_settle_tolerance_counts']:
-        return
     if s['model_raw']!=521 or s['mode']!=0 or not 0<=s['position_raw']<=4095:
         raise RuntimeError('ID29 startup hardware mismatch')
     if (s['configured_min'],s['configured_max'])!=(motor['device_min'],motor['device_max']):
@@ -139,19 +144,22 @@ def recover_tongue(bus,motor,guard,events,speed=1000):
         warnings.observe(29,fresh,alerts)
         return fresh
     checked(feedback(s))
+    if s['torque_enable']==1 and tongue_at_startup_goal(s['position_raw'],motor):return
     guard();bus.goals({29:2047},{29:speed})
     if bus.read(29,40,1)==b'\x00':
         events.append(dict(kind='enable',**write_ram_verified(bus,29,40,1)))
     guard();bus.goals({29:2047},{29:speed});deadline=time.monotonic()+10;healthy=0;f=feedback(s)
     while time.monotonic()<deadline:
-        guard();f=checked(bus.feedback(29));events.append(f)
-        healthy=healthy+1 if abs(f['position']-2047)<=motor['initial_settle_tolerance_counts'] else 0
+        guard();f=checked(bus.feedback(29));ready=tongue_at_startup_goal(f['position'],motor)
+        events.append({**f,'startup_goal_ready':ready})
+        healthy=healthy+1 if ready else 0
         if healthy>=2:
             check_feedback(29,f,motor)
             return
         time.sleep(.1)
     raise RuntimeError(f'ID29 did not reach its authorized startup corridor: '
         f'target=2047 position={f["position"]} tolerance={motor["initial_settle_tolerance_counts"]} '
+        f'device_limits=[{motor["device_min"]},{motor["device_max"]}] '
         f'load={f["load_raw"]&1023} temperature={f["temperature_c"]} status={f["status_register"]}')
 
 
@@ -176,7 +184,7 @@ def prepare_recovery_clearance(bus,plan,snapshots,motors,guard,report,home_speed
     if plan is None:return
     c,axis,motor=plan;states={s['id']:s for s in snapshots}
     recovering=states[c['recovering_id']];m=motors[c['recovering_id']]
-    if abs(recovering['position_raw']-m['neutral'])<=m.get('initial_settle_tolerance_counts',20):
+    if tongue_at_startup_goal(recovering['position_raw'],m):
         report.update(required=False)
         return
     report.update(required=True,reason='Off-center recovery axis requires the configured mechanical clearance')

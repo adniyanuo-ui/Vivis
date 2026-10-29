@@ -231,11 +231,14 @@ class ColdStartTests(unittest.TestCase):
     def test_enabled_off_center_tongue_is_centered_before_jaw_closes(self):
         self.full_preparation(set(),tongue_enabled=True)
 
+    def test_disabled_tongue2055_needs_clearance_even_within_neutral_tolerance(self):
+        self.full_preparation(set(),tongue_position=2055)
+
     def test_failed_tongue_recovery_never_closes_jaw(self):
         with self.assertRaisesRegex(RuntimeError,'ID29 did not reach its authorized startup corridor'):
             self.full_preparation(set(),tongue_enabled=True,tongue_jammed=True)
 
-    def full_preparation(self,auto_enable_ids,tongue_enabled=False,tongue_jammed=False):
+    def full_preparation(self,auto_enable_ids,tongue_enabled=False,tongue_jammed=False,tongue_position=None):
         import numpy as np
         from vivis.runtime import show
         from vivis.hardware.feetech.protocol import Bus
@@ -247,6 +250,7 @@ class ColdStartTests(unittest.TestCase):
         inventory=robot.home();memory={};positions={};events=[]
         cold={9:2056,21:2106,29:2273,35:1904}
         if tongue_enabled:cold[29]=1800
+        if tongue_position is not None:cold[29]=tongue_position
         for sid in range(2,37):
             m=motors.get(sid,{})
             c=bytearray(40);r=bytearray(31)
@@ -301,7 +305,9 @@ class ColdStartTests(unittest.TestCase):
                 show.recovery_clearance_plan(inventory,motors),robot.telemetry(),lambda:None,
                 report,Path(directory),lambda *_:None)
         self.assertTrue(report['homing']['completed'])
-        self.assertEqual({r['id'] for r in report['disabled_position_recoveries']},{9,21,35})
+        expected={9,21,35}
+        if tongue_position is not None and not motors[29]['device_min']<=tongue_position<=motors[29]['device_max']:expected.add(29)
+        self.assertEqual({r['id'] for r in report['disabled_position_recoveries']},expected)
         self.assertTrue(report['recovery_clearance']['required'])
         self.assertTrue(all(p==2047 for p in positions.values()))
         # The simulated mechanism rejects tongue recovery before jaw clearance,

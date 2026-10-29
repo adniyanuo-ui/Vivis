@@ -112,7 +112,7 @@ class RecoveryClearanceTests(unittest.TestCase):
     def fixture(self):
         from unittest.mock import Mock
         from vivis.runtime.show import recovery_clearance_plan
-        motors={29:dict(id=29,neutral=2047,safe_min=1447,safe_max=2047,device_min=1447,
+        motors={29:dict(id=29,neutral=2047,safe_min=1447,safe_max=2047,device_min=1447,feedback_min=1447,feedback_max=2147,
                        device_max=2147,max_speed_counts_s=900,model_raw_expected=521,initial_settle_tolerance_counts=40),
                 31:dict(id=31,neutral=2047,safe_min=1380,safe_max=2047,device_min=1380,
                        device_max=2050,max_speed_counts_s=900,model_raw_expected=10760)}
