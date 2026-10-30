@@ -1,0 +1,60 @@
+{
+  "schema_version": "vivis-work-media-preparation-1.0",
+  "name": "demo3",
+  "original_source": {
+    "filename": "9.11（16.50）.json",
+    "path": "original_source.json",
+    "sha256": "79c21f28222675f18daa4ccdae24c667f692695de0b4983a081913baf560d155",
+    "frames": 848,
+    "declared_fps": {
+      "den": 1,
+      "num": 30
+    },
+    "declared_duration_s": 28.266666666666666
+  },
+  "original_audio": {
+    "filename": "9.11（16.50）.wav",
+    "sha256": "6717b7f92861662ce8a94e3b958c5c4674991187819498c08077fa608e3ce755",
+    "sample_rate_hz": 44100,
+    "channels": 2,
+    "sample_width_bytes": 2,
+    "sample_frames": 1560576,
+    "duration_s": 35.38721088435374
+  },
+  "source_preparation": {
+    "removed_metadata": {
+      "audioFile": ""
+    },
+    "derived_name": "demo3",
+    "effective_source_fps": {
+      "num": 24000,
+      "den": 1001
+    },
+    "timebase_status": "inferred_not_author_confirmed",
+    "decision_basis": "User requested a reasonable choice prioritizing expression fidelity.848 samples at24000/1001FPS span35.368667s, close to35.387211s audio, unlike declared30FPS.",
+    "inferred_expression_duration_s": 35.36866666666667,
+    "audio_minus_inferred_expression_s": 0.01854421768707483,
+    "resampling": "zero_order_hold",
+    "source_index_formula": "min(floor(output_frame*24000/(1001*60)),847)",
+    "all_original_frames_preserved": true,
+    "original_frames_used": 848,
+    "coefficient_values_and_peaks_preserved": true,
+    "derived_fps": {
+      "num": 60,
+      "den": 1
+    },
+    "derived_frames": 2124,
+    "final_source_frame_held_to_cover_audio": true
+  },
+  "audio_preparation": {
+    "method": "none",
+    "original_file_bytes_preserved": true
+  },
+  "playback": {
+    "fps": 60,
+    "frames": 2124,
+    "duration_s": 35.4,
+    "audio_duration_s": 35.38721088435374
+  },
+  "calibration_sha256": "77de8ab0e57ff8d1d8d88da9b69f9e92737e2d926cb02f5e1e0cf06f7a0efe71"
+}
