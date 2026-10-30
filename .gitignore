@@ -1,4 +1,4 @@
-# Generated environment, logs and build output only.
+# Local inputs, environments, logs and build output.
 .venv/
 venv/
 __pycache__/
@@ -8,6 +8,7 @@ __pycache__/
 .coverage
 htmlcov/
 outputs/
+/incoming/
 build/
 dist/
 .env
