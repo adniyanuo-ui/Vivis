@@ -1,74 +1,107 @@
-# 墨甲开发者快速上手
+# 用自己的JSON和音频播放新作品
 
-版本0.2｜2026-10-26｜示例3已完成wz2一遍运行；新ID32抖动及其他验收项见[验收表](ACCEPTANCE.md)。
+先按[README](../../README.md)完成安装、连接和随包作品播放。本页只说明如何导入、检查和播放自己的作品；所有命令在`Vivis/`源码目录执行。
 
-## 1. 准备环境
+## 1. 准备一份表情JSON和对应音频
 
-机电头、匹配电源、USB串口通信连接、客户自备Linux主机及音频输出。示例2/3需要一只已配置的眼内USB相机，Orin主控可选。需要Python3.10–3.12；本机为3.12。
+例如将两个文件放到：
 
-本体包含35轴和两只眼内相机。USB控制器到TTL/RS485的转接、电平转换及供电应按实际本体线束/控制板连接，不能把不同电平端子直接互连。
-
-## 2. 安装
-
-仓库根目录执行。新Ubuntu主机缺少系统依赖时先安装；已有环境不必重装驱动、CUDA或系统软件。
-
-```bash
-sudo apt-get install python3-venv libportaudio2 alsa-utils build-essential cmake
-./tools/setup.sh
+```text
+/home/james/project/mojia20261029/incoming/my_demo/
+├── my_demo.json
+└── my_demo.wav
 ```
 
-脚本只建立`.venv`、用pip安装Python依赖、核验随包资源并做离线检查，不访问串口或相机，不修改系统服务、USB驱动或舵机参数。模型和SDK已随Git提供，不另行下载。普通Linux主机不要求CUDA；Windows尚未验证。
+这里的JSON是逐帧表情权重序列，不是机器头标定JSON。文件名可以自定，导入时填写实际路径。
 
-启动脚本只将本仓库`src/`加入`PYTHONPATH`，不继承全局ROS或旧工程的Python路径，并禁用用户site-packages注入。额外依赖应安装进本项目`.venv`；该处理不删除系统ROS，也不修改用户的登录环境。
+| 输入 | 要求 |
+|---|---|
+| 表情JSON | 顶层只包含`name`、`fps`、`blendShapes`三个字段；每帧为61个有限数值。 |
+| 帧率 | 支持30FPS或60FPS，如`"fps": {"num": 30, "den": 1}`。 |
+| 通道 | 顺序与`configs/schemas/blendshape_channels_61.csv`中的61个通道一致；CSV前两列`Timecode`和`BlendshapeCount`不放进帧数组。前52维为0～1表情权重，后9维为头部和双眼旋转（弧度）；不使用的通道也要填0，不能省略。 |
+| 音频 | 16位PCM编码的WAV文件；MP3、MP4等应先转换为该格式。 |
+| 时间对齐 | 音频与表情从同一时刻开始，JSON总帧数÷帧率应与音频时长一致，误差不超过一个源帧（30FPS约33.3毫秒，60FPS约16.7毫秒）。 |
 
-手动安装等价操作：
+JSON格式如下。这里只展示一帧61个零值的中性表情，实际作品需包含与音频对应的完整逐帧数据：
 
-```bash
-python3 -m venv .venv
-CMAKE_BUILD_PARALLEL_LEVEL=2 .venv/bin/python -m pip install -e '.[vision,trajectory]'
-.venv/bin/python tools/check_assets.py
+```json
+{"name": "my_demo", "fps": {"num": 30, "den": 1}, "blendShapes": [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]}
 ```
 
-## 3. 素材已包含
+当前三个示例中，眼球和颈部是否参与跟踪由示例模式决定；示例3的颈部姿态来自实时人脸跟踪，不播放JSON中的头部旋转通道。
 
-两份作品的音频和目标轨迹在`assets/works/`，YuNet在`assets/models/yunet/`，舵机SDK子集在源码包内。清单和哈希见[素材说明](../../assets/README.md)，无需从旧目录复制文件或恢复软链接。
-
-## 4. 配置设备
-
-入口为`configs/robots/mojia/robot.json`。核对串口、波特率、音箱和相机节点；示例2/3可用`--camera-device /dev/v4l/by-id/实际节点`指定。串口USB重插后需仍有权限，部署规则见`tools/99-vivis-servo-access.rules`。
-
-默认右眼参考ID23，相机640×480/30FPS、检测目标20Hz、运动60Hz，各频率相互独立。横向双眼1987–2107，颈部32跟踪指令范围1706–2388。用户已确认ID32新增EPROM限位1706–2388；设备与跟踪范围均保存在`hardware.json`，启动核验且不自动改写限位。500kbps候选未启用，默认仍1Mbps。启动器只提示占用服务，不自行停服务、重启USB或切驱动。
-
-音频设备名保存在`hardware.json`的`runtime.audio_device`。默认音量操作针对已核验的USB Audio Device；客户改用其他音箱/声卡时，应在`robot.json`中将`defaults.usb_volume_times_three`设为`false`，配置实际输出后自行设音量。不能把本机USB音箱的固定档位套用到其他声卡。
-
-串口权限可由管理员按实际适配器核对`tools/99-vivis-servo-access.rules`后安装；其中仅匹配当前适配器的厂商/产品ID。使用`dialout`组访问时，将用户加入该组后重新登录，USB重插仍需核验节点及权限。一次性授权可按报错中的`setfacl`命令处理。
-
-## 5. 离线检查
+## 2. 导入作品
 
 ```bash
-./examples/01_face_control/run.sh --check
-./examples/02_face_eye_tracking/run.sh --check
-./examples/03_face_eye_neck_tracking/run.sh --check
-# 完整离线交付检查（包含上述六组入口、素材及回归测试）：
-./tools/check_delivery.sh
+cd ~/project/mojia20261029/Vivis/
+
+PYTHONPATH=src .venv/bin/python -m vivis.motion.export \
+  --name my_demo \
+  --clip "$HOME/project/mojia20261029/incoming/my_demo/my_demo.json" \
+  --audio "$HOME/project/mojia20261029/incoming/my_demo/my_demo.wav"
 ```
 
-检查素材/标定哈希、目标范围、回中清单、速度及轴控制权；不打开串口，不启动音频或相机。通过不代表设备在线或机械动作已验收。
+| 参数 | 含义 |
+|---|---|
+| `--name my_demo` | 注册后的作品名，播放时用`--work my_demo`选择。仅用英文字母、数字、下划线或连字符，首位为字母或数字，长度1～64；不能与已有作品重名。 |
+| `--clip` | 原始61通道表情JSON的路径；路径有空格时保留双引号。 |
+| `--audio` | 对应PCM16 WAV音频的路径。 |
 
-## 6. 真机验收和停止
+导入是离线处理，不驱动机器头，也不修改原始JSON和音频。工具按随箱标定和限位生成电机目标，将源文件副本、音频和目标保存到`outputs/imported_works/my_demo/`，并自动在`assets/works.json`登记新作品。30FPS源数据每帧保持两次生成60FPS轨迹；60FPS源保持原帧率。
 
-核对本体供电、通信及头颈支撑，按三个示例README逐个运行。先wz2，再选择`--work 0001`。每遍独立准备、按需执行既有机构恢复、35轴以速度60回中，恢复任务速度后完整播放。回中会涉及35轴，“保持”指正式播放阶段。
+## 3. 先检查，再播放
 
-使用[验收表](ACCEPTANCE.md)记录，之前版本的效果不直接计作本分支入口已通过。日志为`outputs/developer/时间_模式/`，`performance/summary.json`记录总体结果，`round_N/preparation.json`和`playback_log.json`记录准备和播放；相机日志为`vision.log`及`vision/summary.json`。
+先核验新作品及示例3的运行参数，不打开硬件：
 
-Ctrl+C停止发送和音频，释放接收器、串口及自行启动的相机，保留颈部扭矩，沿用既有舌部卸载策略。舵机可能继续完成最后一个目标；停止发送不等于断电急停。作品结束不按静音停顿改写口型，也不强制面部回中。
+```bash
+./examples/03_face_eye_neck_tracking/run.sh \
+  --work my_demo --repeat 1 --parallel-neck on \
+  --mouth-command-mode lips-direct --mouth-speed 1200 \
+  --check
+```
 
-## 7. 冷启动时未使能轴的小幅偏移
+通过后，确认机器头与音箱上电、串口与右眼相机已连接，并按README停止占用设备的服务，再运行：
 
-上电后舵机可能尚未使能，反馈位置会因被动机构位置超出设备目标范围。当前`homing.json`配置允许未使能轴最多10计数的启动偏移，连续复读2次且相差不超过2计数后，先以不超过60计数/秒的速度预置限位内目标，读回位置目标/速度，再使能并缓慢回中。没有修改设备限位、标定或播放位置范围。
+```bash
+./examples/03_face_eye_neck_tracking/run.sh \
+  --work my_demo --repeat 1 --parallel-neck on \
+  --mouth-command-mode lips-direct --mouth-speed 1200
+```
 
-发送启动目标前核验使能状态为0；本机部分轴在收到合法位置更新后会自行使能，因此目标发出后接受状态为1，仍为0才显式使能。两种路径都读回目标、速度和最终使能状态，记录在回中日志的`startup_primes`中；目标发送前的意外使能仍拒绝继续。ID9/24只临时参加回中，结束后恢复卸载。
+**新导入作品先不加`--round-lip-gain 1.2`，使用默认1.0。** 随包`0001`和`wz2`已登记该功能需要的源文件信息；当前导入工具虽保存源文件副本，但不会登记运行时圆唇增益所需的字段，直接照搬1.2会报`This work has no verified source clip for runtime channel gain`。这不影响按原始表情信号播放新作品。
 
-恢复时限覆盖共同规划的缓慢回中轨迹，再加配置中的恢复余量，并受总回中超时约束。测量进入设备范围即可结束恢复；若仍有边缘编码器残差，仅在已发送并读回中位目标后，允许沿用既有回中容差，记录在`startup_neutral_residuals`。播放阶段的位置检查保持原范围。
+需要简化运动组合时，改用以下入口；上一条运行结束后再执行下一条：
 
-恢复只在回中阶段生效；进入设备范围后撤销临时反馈通道，仍在范围外超过配置时间或最终未回中则停止。已使能轴、无效编码器、异常状态和超出允许幅度的偏移不按此规则放行。本机ID35经现场确认机构正常，其未使能被动偏移单独配置为最多160计数、重入等待5秒，速度仍不超过60；ID29继续沿用既有下颌让位/收舌流程。更大的已知被动行程必须逐轴确认、显式配置，不能通过扩大全部轴阈值处理。
+```bash
+# 示例1：音频＋面部表情，不启动相机；播放时眼球和颈部保持
+./examples/01_face_control/run.sh \
+  --work my_demo --repeat 1 \
+  --mouth-command-mode lips-direct --mouth-speed 1200
+
+# 示例2：音频＋面部表情＋横向眼球跟踪；播放时颈部保持
+./examples/02_face_eye_tracking/run.sh \
+  --work my_demo --repeat 1 \
+  --mouth-command-mode lips-direct --mouth-speed 1200
+```
+
+三个示例每遍均先执行35轴准备与缓慢回中，“保持”指正式播放阶段。示例2、3的摄像头画面在Orin本机`http://127.0.0.1:8765/`查看。播放次数用`--repeat`调整，其余参数含义见README。
+
+正常完成会显示`ROUND 1/1 COMPLETE`，本次日志目录中的`performance/summary.json`应为`"completed": true`。用`Ctrl+C`停止时会清理资源、保留颈部扭矩，停止发送不等于切断舵机电源。
+
+## 4. 保存、修改与转移新作品
+
+- 已导入的作品下次直接用`--work my_demo`播放，无需再次导入。
+- 修改了源JSON或音频后，换一个作品名（例如`my_demo_v2`）重新导入；工具拒绝覆盖同名作品。
+- 保留`outputs/imported_works/my_demo/`整目录及对应的`assets/works.json`。导入素材位于被Git忽略的`outputs/`下，仅推送代码不会自动带走它；不要将整个`outputs/`当作可随意清空的日志目录。
+- 转移到同版本、同标定的另一台设备时，同时复制作品目录和更新后的清单，保持相对路径不变，再运行一次`--check`。
+
+## 5. 常见问题
+
+| 提示或现象 | 处理 |
+|---|---|
+| `Unexpected clip fields`／`Invalid clip array` | 检查JSON顶层字段、每帧61个数值、通道顺序及0～1表情权重。 |
+| `Need PCM16 WAV matching the clip duration within one source frame` | 检查音频编码、JSON帧率、帧数和音频时长是否匹配。 |
+| `Work already exists; use a new name` | 更换`--name`，例如`my_demo_v2`。 |
+| `Unknown work` | 先完成导入，播放时填写导入用的作品名，而非文件名或路径。 |
+| `no verified source clip for runtime channel gain` | 新导入作品省略`--round-lip-gain 1.2`，保留默认1.0。 |
+| 串口缺失、权限被拒绝、相机或音箱打不开 | 按README第3、4步检查设备、权限和占用服务；保留完整报错及终端打印的日志目录。 |

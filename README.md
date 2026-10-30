@@ -1,85 +1,135 @@
-# Vivis 墨甲机电仿生头开发平台
+# 墨甲仿生灵巧脸：安装与播放
 
-版本0.2｜面向开发者的独立源码包。客户负责上游音频、文本、AI和业务逻辑，本包提供最终标定、表情到本体的控制链路及三种完整示例。Jetson Orin为可选主控。
+拿到小盒子（NVIDIA Jetson AGX Orin）后，首次建议接上显示器、键盘和鼠标，便于查看本机IP和摄像头人脸跟踪画面。将仿生灵巧脸自带的USB串口、标记为“Type-B／右”的眼内摄像头接到小盒子，再连接一个USB音箱。确认头颈可靠支撑、外设连接完成后，给小盒子、机器头和音箱上电。
 
-## 1. 安装后直接运行
+**随仿生头寄出的小盒子已完成第1～3步初始化，用户可以直接跳到第4步播放。** 自备或重新安装的Orin按第1～3步准备。播放已有作品只需阅读本页；播放自己的JSON与音频，继续阅读[新作品快速上手](docs/developer/QUICKSTART.md)。
 
-源码、两份作品的音频/目标轨迹、YuNet模型和必要的飞特SDK源码均随Git提供。无需从旧工程复制文件，无需另行clone SDK或下载模型。Python依赖通过pip安装，系统需Python3.10–3.12和PortAudio；已验证主机为Jetson AGX Orin、Ubuntu24.04、Python3.12。
+## 1. 登录并进入源码目录
+
+在小盒子的本机终端操作，或从同一网络的电脑通过SSH登录：
 
 ```bash
-# 新Ubuntu主机缺少系统依赖时先安装；已有环境不必重复执行。
-sudo apt-get install python3-venv libportaudio2 alsa-utils
+ssh james@192.168.31.172
+```
+
+随箱登录用户名为`james`，密码为`james123`。`192.168.31.172`是当前配置的IP；更换网络后，以小盒子实际IP为准。
+
+源码包已放在`/home/james/project/mojia20261029/`。首次解压：
+
+```bash
+cd /home/james/project/mojia20261029
+tar -xzf Vivis-mojia-f3d7bd9.tar.gz
+cd Vivis
+```
+
+已初始化的小盒子无需再次解压，直接进入`/home/james/project/mojia20261029/Vivis/`。
+
+## 2. 安装依赖与离线检查
+
+检查Jetson Orin环境：
+
+```bash
+cat /etc/os-release
+python3 --version
+uname -m
+```
+
+已验证环境为 **Ubuntu24.04、Python3.12、ARM64 Jetson AGX Orin**。
+
+安装系统依赖和项目依赖，需要联网：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  python3-venv libportaudio2 alsa-utils build-essential cmake
+
 ./tools/setup.sh
 ```
 
-安装脚本建立独立`.venv`、安装`.[vision,trajectory]`、核验素材和模型，并检查三个入口。安装/离线检查不打开串口、音频或相机。只跑面部示例也可手动执行`python3 -m venv .venv`和`.venv/bin/python -m pip install -e .`。
-
-核对设备配置后，逐个运行：
-
-```bash
-./examples/01_face_control/run.sh
-./examples/02_face_eye_tracking/run.sh
-./examples/03_face_eye_neck_tracking/run.sh
-```
-
-默认wz2完整一遍，切换完整歌曲加`--work 0001`。每遍独立准备和35轴缓慢回中，然后从音频0开始。示例2/3运行期间监控为`http://127.0.0.1:8765/`。
-
-## 2. 三个示例
-
-| 示例 | 教程 | 播放阶段 |
-|---|---|---|
-| 1 | [面部控制](examples/01_face_control/README.md) | 音频＋表情，不启动相机；眼球/颈部保持 |
-| 2 | [面部＋眼球](examples/02_face_eye_tracking/README.md) | 增加横向双眼ID8/23跟踪，颈部保持 |
-| 3 | [面部＋眼球＋颈部](examples/03_face_eye_neck_tracking/README.md) | 增加ID32协同；可选33/34并联俯仰/翻滚，7/22保持 |
-
-准备/回中会涉及35轴，“保持”指正式播放阶段。一次只运行一个示例。示例自行启动的视觉服务在结束/异常后关闭；复用外部视觉服务需配置、目标协议、相机方向一致，且图像仍新鲜。
-
-## 3. 干净的目录
-
-```text
-Vivis/
-├── README.md
-├── pyproject.toml
-├── src/vivis/
-│   ├── motion/                 # 适配、融合、标定映射、控制权
-│   ├── runtime/                # 音频同步、调度、会话、日志
-│   ├── vision/                 # 相机、人脸检测、眼颈协调
-│   └── hardware/feetech/        # 协议与随包SDK子集
-├── configs/robots/mojia/        # 唯一设备参数与最终标定
-├── configs/schemas/             # 通道名称及顺序
-├── examples/                   # 三个示例及教程
-├── assets/                     # 两份作品、模型、来源清单
-├── docs/developer/              # 架构、本体、接口、排障
-├── tools/                      # 安装、素材/标定检查、作品导入
-└── tests/                      # 控制核心与三模式回归
-```
-
-本分支不包含小白目录、历史播放入口、旧配置副本、A2F训练/渲染实验或历史文档归档。历史版本保留在Git原有提交及备份分支；运行不依赖它们。
-
-## 4. 阅读与修改
-
-[快速上手](docs/developer/QUICKSTART.md) → [整体架构](docs/developer/ARCHITECTURE.md)／[离线架构图](docs/developer/ARCHITECTURE.html) → [本体与标定](docs/developer/HARDWARE_AND_CALIBRATION.md) → [数据与接口](docs/developer/DATA_AND_CONTROL_API.md)。
-
-讨论标定和融合语义前，先阅读[人工标定与表情驱动对齐原则](docs/developer/机电仿生头_人工标定与表情驱动说明.md)。该文档保存用户确认的中位与缺省零位移约定，明确基础叠加公式、当前归一化实现和待部署变更的区别。
-
-- 改算法：`src/vivis/`。editable安装后改源码即生效，示例不复制控制算法。
-- 改设备参数：`configs/robots/mojia/`。运行profile、启动设置及跟踪器使用同一硬件表。
-- 颈部平滑：[上游轨迹规划](docs/developer/UPSTREAM_TRAJECTORY_PLANNING.md)，示例3默认开启，用`--upstream-trajectory off`显式关闭，不影响其他轴。
-- 新增俯仰/侧倾：[33/34并联颈部跟踪](docs/developer/PARALLEL_NECK_TRACKING.md)，示例3用`--parallel-neck on`选择，保留原横向参数；方向已现场确认，33/34采用已标定的硬件行程；新标定0001连续两遍效果获用户认可，见[审查记录](docs/developer/DELIVERY_REVIEW.md)。
-- 改输入：用自己的音频与61通道文件[导入新作品](docs/developer/DATA_AND_CONTROL_API.md#3-接入自己的音频与表情序列)。
-- 核验素材：`.venv/bin/python tools/check_assets.py`；核验标定覆盖：`.venv/bin/python tools/check_calibration.py`。
-- 扩展上游：客户可以接入LLM、TTS、A2F等；已有示例不依赖CUDA，也不等于实时A2F推理已验收。
-
-默认仍60Hz/1Mbps；500kbps候选尚未启用。设备节点、相机侧和音箱按实际本体核对。示例3已完成wz2一遍真机运行，用户反馈成功；随后用户更换ID32并恢复同款PID，颈部抖动尚未解决。示例1/2及新参数的表现仍需[现场验收](docs/developer/ACCEPTANCE.md)。
-
-10-27移除软件固定加减速后，用户完整播放0001三遍：面部正常，32号启动抖动、回中过快。随后按要求将ID32的SRAM41设为128，并加入150ms颈部目标低通和至少3秒平滑回中，其他参数及素材不变。该最新组合尚未真机复测。
-
-## 5. 回归与交接
+安装完成后执行离线检查：
 
 ```bash
 ./tools/check_delivery.sh
 ```
 
-测试使用模拟设备、PTY和合成图像，不驱动真机。运行日志写入被忽略的`outputs/`。不得将控制频率或离线通过描述为机械每帧到位。第三方源码、模型和许可证位置见[素材与依赖](assets/README.md)及`assets/third_party.json`。
+当前版本预期通过264项测试，最后显示“离线交付自检通过”。这里的“离线”指不连接、驱动机器头；安装依赖仍需联网。运行时使用项目自己的`.venv`，无需激活虚拟环境。
 
-离线自检覆盖依赖、资源哈希、标定、六组“示例/作品”入口及模拟设备回归，不打开机器头。已完成从本地Git重新clone、新建`.venv`安装和独立运行核验，源码、SDK、模型和素材均位于新克隆内。最新审查结论及待验收项见[交付自检](docs/developer/DELIVERY_REVIEW.md)；对外交付前须推送相应提交并从GitHub重新clone核对，原Git历史仍保留。
+## 3. 核对USB外设并设置串口权限
+
+首次复现使用随寄的墨甲头及配套外设。检查USB设备、串口、相机和音箱：
+
+```bash
+lsusb
+ls -l /dev/ttyCH343USB0  # 机器头自带的USB串口
+ls -l /dev/v4l/by-id/   # 机器头自带的眼内USB相机
+aplay -l               # 额外连接的USB音箱
+```
+
+首次使用时，需要为串口节点（如`/dev/ttyUSB*`或`/dev/ttyCH343*`）设置访问权限，否则可能报`Permission denied`。随包规则匹配当前配套适配器（`lsusb`中为`1a86:55d3`）：
+
+```bash
+sudo install -m 644 tools/99-vivis-servo-access.rules \
+  /etc/udev/rules.d/99-vivis-servo-access.rules
+
+sudo usermod -aG dialout "$USER"
+sudo udevadm control --reload-rules
+```
+
+随后注销并重新登录，重新插拔USB适配器。若串口节点根本不存在，先检查USB连接和设备识别；权限设置不会创建不存在的设备。
+
+配套设备的配置已保存。更换外设时，串口和音频设备名在`configs/robots/mojia/hardware.json`的`runtime`中，相机节点在`configs/robots/mojia/robot.json`的`cameras.right.device`中。更换其他型号音箱时，还应将`robot.json`的`defaults.usb_volume_times_three`设为`false`，使用实际声卡的音量设置。
+
+## 4. 播放示例
+
+外设接好、机器头与音箱上电后，在小盒子终端执行：
+
+```bash
+cd ~/project/mojia20261029/Vivis/
+sudo systemctl stop dms.service  # 停止可能占用串口的自启动服务
+```
+
+若提示`ies.service`占用相机，再执行`sudo systemctl stop ies.service`。以下两条指令逐条运行，上一条结束后再运行下一条。
+
+**播放作品1：**
+
+```bash
+./examples/03_face_eye_neck_tracking/run.sh \
+  --work 0001 --repeat 1 --parallel-neck on \
+  --mouth-command-mode lips-direct \
+  --mouth-speed 1200 --round-lip-gain 1.2
+```
+
+**播放作品2：**
+
+```bash
+./examples/03_face_eye_neck_tracking/run.sh \
+  --work wz2 --repeat 1 --parallel-neck on \
+  --mouth-command-mode lips-direct \
+  --mouth-speed 1200 --round-lip-gain 1.2
+```
+
+每遍会独立准备、35轴缓慢回中，再从头播放完整音频与表情。若偶发`RuntimeError: IDxx: home did not settle at neutral`，说明本次回中自检未通过；确认连接与机构正常后，重新运行同一条指令即可。若持续出现，请保留报错中的ID和日志目录供排查。
+
+人脸跟踪运行时，在 **Orin本机浏览器** 打开：
+
+```text
+http://127.0.0.1:8765/
+```
+
+可查看摄像头跟踪画面。检查声音与面部表情、眼球跟随，以及颈部左右、俯仰和轻微侧倾跟随。SSH电脑上的`127.0.0.1`指向电脑自身；本说明使用Orin本机浏览器。
+
+### 播放参数说明
+
+| 项目 | 含义 |
+|---|---|
+| `examples/03_face_eye_neck_tracking/run.sh` | 音频与面部表情，加横向眼球和颈部人脸跟踪；默认使用右眼摄像头。 |
+| `--work 0001`／`--work wz2` | 选择已登记的作品名，同时加载对应音频与表情轨迹；不是直接传JSON路径。 |
+| `--repeat 1` | 完整播放1遍；改为2即播放2遍，每遍均独立准备和回中。 |
+| `--parallel-neck on` | 开启ID33/34并联平台的俯仰和轻微侧倾；ID32左右转由示例3原有跟踪负责。 |
+| `--mouth-command-mode lips-direct` | 歌曲阶段将10个圆唇相关轴及ID31下颌的映射目标直接交给发送器，不再经过该组的软件逐帧限速；舵机硬件限速、启动避让和回中仍保留。 |
+| `--mouth-speed 1200` | 本次任务将14个口型相关轴的硬件运行速度设为1200计数/秒；按原启动流程写入、读回SRAM，不改永久配置文件。 |
+| `--round-lip-gain 1.2` | 仅将`MouthFunnel`／`MouthPucker`两个圆口、嘟唇通道乘1.2后按标定映射，权重最高为1；不改变其他表情。省略时为1.0。 |
+
+需要只检查、不播放时，在播放指令末尾加`--check`。正常播放结束显示`ROUND 1/1 COMPLETE`。运行中按`Ctrl+C`停止音频和新位置指令，程序清理本次资源并保留颈部扭矩。
+
+终端会打印本次日志目录，位于`outputs/developer/`下。播放新的作品、选择仅面部或增加眼球跟踪，见[新作品快速上手](docs/developer/QUICKSTART.md)。
