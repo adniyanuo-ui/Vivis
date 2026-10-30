@@ -18,9 +18,12 @@ class DistributionTests(unittest.TestCase):
             self.assertFalse((ROOT / name).exists(), name)
         sdk_path = Path(inspect.getfile(PortHandler)).resolve()
         self.assertTrue(sdk_path.is_relative_to(ROOT / 'src/vivis/hardware/feetech/_vendor'))
-        rows = verify_assets(Robot())
-        self.assertEqual(len([r for r in rows if r['kind'] in ('audio','targets')]),4)
-        self.assertEqual([(r['work'],r['kind']) for r in rows if r['kind']=='source_clip'],[('0001','source_clip'),('wz2','source_clip')])
+        robot = Robot()
+        self.assertTrue({'0001','wz2','Face_ControlBoard_CtrlRig'}.issubset(robot.works['works']))
+        rows = verify_assets(robot)
+        expected = [(name,kind) for name,work in robot.works['works'].items()
+                    for kind in ('audio','targets',*(('source_clip',) if 'source_clip' in work else ()))]
+        self.assertCountEqual([(row['work'],row['kind']) for row in rows],expected)
         self.assertTrue(all(Path(row['path']).stat().st_size > 1000 for row in rows))
         self.assertEqual(verify_model().stat().st_size, 232589)
 

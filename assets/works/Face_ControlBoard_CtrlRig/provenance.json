@@ -1,0 +1,38 @@
+{
+  "schema_version": "vivis-work-media-preparation-1.0",
+  "name": "Face_ControlBoard_CtrlRig",
+  "source_clip": {
+    "filename": "Face_ControlBoard_CtrlRig.json",
+    "sha256": "4942e0d431ec65e4cf09609ba918dcb692d3be5063cc98a4e857c725df0ed02a",
+    "frames": 2010,
+    "fps": {
+      "den": 1,
+      "num": 30
+    },
+    "duration_s": 67.0
+  },
+  "original_audio": {
+    "filename": "Face_ControlBoard_CtrlRig.WAV",
+    "sha256": "4c56b47fb9ddd1b84544882efd7ee5d2d25fb1016916e1b234fd751322c178bb",
+    "sample_rate_hz": 48000,
+    "channels": 2,
+    "sample_width_bytes": 2,
+    "sample_frames": 3168256,
+    "duration_s": 66.00533333333334,
+    "pcm_sha256": "fd337d23bae9d3ecc8523a4b8b65ce2b68e828b4e8fea98db97aa7309863ad4d"
+  },
+  "audio_preparation": {
+    "method": "append_silence_to_end",
+    "added_sample_frames": 47744,
+    "added_duration_s": 0.9946666666666667,
+    "playback_sample_frames": 3216000,
+    "playback_duration_s": 67.0,
+    "original_pcm_prefix_preserved": true
+  },
+  "playback": {
+    "fps": 60,
+    "frames": 4020,
+    "duration_s": 67.0
+  },
+  "calibration_sha256": "77de8ab0e57ff8d1d8d88da9b69f9e92737e2d926cb02f5e1e0cf06f7a0efe71"
+}
