@@ -1,0 +1,2743 @@
+{
+  "schema_version": "vivis-calibration-comparison-report-1.0",
+  "status": "awaiting_commissioning_confirmation",
+  "identity": {
+    "name": "xiaoshuai",
+    "display_name": "小帅",
+    "gender": "male",
+    "age_years": 28
+  },
+  "calibration": {
+    "source_filename": "小帅无色测试版6.22（16.24）.json",
+    "sha256": "599fd7d1518ea0f35b40f7c3265c104fc68230a9027863449ccb8f496d3050ef",
+    "shape_count": 52,
+    "point_count": 181,
+    "mapped_ids": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      30,
+      31
+    ],
+    "neutral_positions_explicitly_declared": false
+  },
+  "reference": {
+    "name": "mojia",
+    "calibration_sha256": "77de8ab0e57ff8d1d8d88da9b69f9e92737e2d926cb02f5e1e0cf06f7a0efe71",
+    "point_count": 135,
+    "mapped_ids": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      35,
+      36
+    ]
+  },
+  "added_mapped_ids": [
+    9,
+    24
+  ],
+  "removed_mapped_ids": [
+    29,
+    35,
+    36
+  ],
+  "changed_shapes": [
+    "EyeBlinkLeft",
+    "EyeLookDownLeft",
+    "EyeLookInLeft",
+    "EyeLookOutLeft",
+    "EyeLookUpLeft",
+    "EyeSquintLeft",
+    "EyeWideLeft",
+    "EyeBlinkRight",
+    "EyeLookDownRight",
+    "EyeLookInRight",
+    "EyeLookOutRight",
+    "EyeLookUpRight",
+    "EyeSquintRight",
+    "EyeWideRight",
+    "JawForward",
+    "JawRight",
+    "JawLeft",
+    "JawOpen",
+    "MouthClose",
+    "MouthFunnel",
+    "MouthPucker",
+    "MouthRight",
+    "MouthLeft",
+    "MouthSmileLeft",
+    "MouthSmileRight",
+    "MouthFrownLeft",
+    "MouthFrownRight",
+    "MouthDimpleLeft",
+    "MouthDimpleRight",
+    "MouthStretchLeft",
+    "MouthStretchRight",
+    "MouthRollLower",
+    "MouthRollUpper",
+    "MouthShrugLower",
+    "MouthShrugUpper",
+    "MouthPressLeft",
+    "MouthPressRight",
+    "MouthLowerDownLeft",
+    "MouthLowerDownRight",
+    "MouthUpperUpLeft",
+    "MouthUpperUpRight",
+    "BrowDownLeft",
+    "BrowDownRight",
+    "BrowInnerUp",
+    "BrowOuterUpLeft",
+    "BrowOuterUpRight",
+    "CheekSquintLeft",
+    "CheekSquintRight",
+    "NoseSneerLeft",
+    "NoseSneerRight",
+    "TongueOut"
+  ],
+  "unchanged_shapes": [
+    "CheekPuff"
+  ],
+  "calibration_entries": {
+    "EyeBlinkLeft": {
+      "xiaoshuai": [
+        {
+          "id": 5,
+          "position": 1830
+        },
+        {
+          "id": 6,
+          "position": 2280
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 5,
+          "position": 2400
+        },
+        {
+          "id": 6,
+          "position": 2150
+        }
+      ]
+    },
+    "EyeLookDownLeft": {
+      "xiaoshuai": [
+        {
+          "id": 5,
+          "position": 1830
+        },
+        {
+          "id": 6,
+          "position": 1950
+        },
+        {
+          "id": 7,
+          "position": 1900
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 5,
+          "position": 2189
+        },
+        {
+          "id": 6,
+          "position": 1964
+        },
+        {
+          "id": 7,
+          "position": 1880
+        }
+      ]
+    },
+    "EyeLookInLeft": {
+      "xiaoshuai": [
+        {
+          "id": 8,
+          "position": 2400
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 8,
+          "position": 2147
+        }
+      ]
+    },
+    "EyeLookOutLeft": {
+      "xiaoshuai": [
+        {
+          "id": 8,
+          "position": 1750
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 8,
+          "position": 1900
+        }
+      ]
+    },
+    "EyeLookUpLeft": {
+      "xiaoshuai": [
+        {
+          "id": 5,
+          "position": 2180
+        },
+        {
+          "id": 6,
+          "position": 2224
+        },
+        {
+          "id": 7,
+          "position": 2147
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 5,
+          "position": 1850
+        },
+        {
+          "id": 7,
+          "position": 2247
+        }
+      ]
+    },
+    "EyeSquintLeft": {
+      "xiaoshuai": [
+        {
+          "id": 5,
+          "position": 1830
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 6,
+          "position": 2150
+        }
+      ]
+    },
+    "EyeWideLeft": {
+      "xiaoshuai": [
+        {
+          "id": 5,
+          "position": 2180
+        },
+        {
+          "id": 6,
+          "position": 1950
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 5,
+          "position": 1850
+        }
+      ]
+    },
+    "EyeBlinkRight": {
+      "xiaoshuai": [
+        {
+          "id": 20,
+          "position": 2347
+        },
+        {
+          "id": 21,
+          "position": 1750
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 20,
+          "position": 1747
+        },
+        {
+          "id": 21,
+          "position": 1943
+        }
+      ]
+    },
+    "EyeLookDownRight": {
+      "xiaoshuai": [
+        {
+          "id": 20,
+          "position": 2347
+        },
+        {
+          "id": 21,
+          "position": 2200
+        },
+        {
+          "id": 22,
+          "position": 2156
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 20,
+          "position": 1903
+        },
+        {
+          "id": 21,
+          "position": 2127
+        },
+        {
+          "id": 22,
+          "position": 2214
+        }
+      ]
+    },
+    "EyeLookInRight": {
+      "xiaoshuai": [
+        {
+          "id": 23,
+          "position": 1700
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 23,
+          "position": 1940
+        }
+      ]
+    },
+    "EyeLookOutRight": {
+      "xiaoshuai": [
+        {
+          "id": 23,
+          "position": 2350
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 23,
+          "position": 2200
+        }
+      ]
+    },
+    "EyeLookUpRight": {
+      "xiaoshuai": [
+        {
+          "id": 20,
+          "position": 1900
+        },
+        {
+          "id": 21,
+          "position": 1840
+        },
+        {
+          "id": 22,
+          "position": 1912
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 20,
+          "position": 2200
+        },
+        {
+          "id": 21,
+          "position": 2049
+        },
+        {
+          "id": 22,
+          "position": 1860
+        }
+      ]
+    },
+    "EyeSquintRight": {
+      "xiaoshuai": [
+        {
+          "id": 20,
+          "position": 2289
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 21,
+          "position": 1943
+        }
+      ]
+    },
+    "EyeWideRight": {
+      "xiaoshuai": [
+        {
+          "id": 20,
+          "position": 1900
+        },
+        {
+          "id": 21,
+          "position": 2200
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 20,
+          "position": 2200
+        }
+      ]
+    },
+    "JawForward": {
+      "xiaoshuai": [
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 31,
+          "position": 1746
+        },
+        {
+          "id": 35,
+          "position": 2247
+        }
+      ]
+    },
+    "JawRight": {
+      "xiaoshuai": [
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 31,
+          "position": 1748
+        },
+        {
+          "id": 36,
+          "position": 1803
+        }
+      ]
+    },
+    "JawLeft": {
+      "xiaoshuai": [
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 31,
+          "position": 1748
+        },
+        {
+          "id": 36,
+          "position": 2278
+        }
+      ]
+    },
+    "JawOpen": {
+      "xiaoshuai": [
+        {
+          "id": 31,
+          "position": 1850
+        }
+      ],
+      "mojia": [
+        {
+          "id": 31,
+          "position": 1547
+        }
+      ]
+    },
+    "MouthClose": {
+      "xiaoshuai": [
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": []
+    },
+    "MouthFunnel": {
+      "xiaoshuai": [
+        {
+          "id": 10,
+          "position": 1850
+        },
+        {
+          "id": 13,
+          "position": 2220
+        },
+        {
+          "id": 15,
+          "position": 1991
+        },
+        {
+          "id": 25,
+          "position": 2250
+        },
+        {
+          "id": 28,
+          "position": 1900
+        },
+        {
+          "id": 30,
+          "position": 2009
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 10,
+          "position": 2149
+        },
+        {
+          "id": 11,
+          "position": 2184
+        },
+        {
+          "id": 12,
+          "position": 2347
+        },
+        {
+          "id": 13,
+          "position": 2600
+        },
+        {
+          "id": 15,
+          "position": 1816
+        },
+        {
+          "id": 25,
+          "position": 1943
+        },
+        {
+          "id": 26,
+          "position": 1947
+        },
+        {
+          "id": 27,
+          "position": 1747
+        },
+        {
+          "id": 28,
+          "position": 1580
+        },
+        {
+          "id": 30,
+          "position": 2250
+        }
+      ]
+    },
+    "MouthPucker": {
+      "xiaoshuai": [
+        {
+          "id": 10,
+          "position": 1850
+        },
+        {
+          "id": 13,
+          "position": 2220
+        },
+        {
+          "id": 15,
+          "position": 2120
+        },
+        {
+          "id": 25,
+          "position": 2250
+        },
+        {
+          "id": 28,
+          "position": 1900
+        },
+        {
+          "id": 30,
+          "position": 2180
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 10,
+          "position": 1894
+        },
+        {
+          "id": 11,
+          "position": 2184
+        },
+        {
+          "id": 12,
+          "position": 2347
+        },
+        {
+          "id": 13,
+          "position": 2600
+        },
+        {
+          "id": 15,
+          "position": 2148
+        },
+        {
+          "id": 25,
+          "position": 2200
+        },
+        {
+          "id": 26,
+          "position": 1947
+        },
+        {
+          "id": 27,
+          "position": 1747
+        },
+        {
+          "id": 28,
+          "position": 1580
+        },
+        {
+          "id": 30,
+          "position": 1957
+        }
+      ]
+    },
+    "MouthRight": {
+      "xiaoshuai": [
+        {
+          "id": 10,
+          "position": 2042
+        },
+        {
+          "id": 15,
+          "position": 1998
+        },
+        {
+          "id": 25,
+          "position": 1890
+        },
+        {
+          "id": 26,
+          "position": 1410
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 12,
+          "position": 2341
+        },
+        {
+          "id": 27,
+          "position": 2343
+        },
+        {
+          "id": 31,
+          "position": 1981
+        },
+        {
+          "id": 36,
+          "position": 1850
+        }
+      ]
+    },
+    "MouthLeft": {
+      "xiaoshuai": [
+        {
+          "id": 10,
+          "position": 2283
+        },
+        {
+          "id": 11,
+          "position": 2650
+        },
+        {
+          "id": 15,
+          "position": 1976
+        },
+        {
+          "id": 26,
+          "position": 2054
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 11,
+          "position": 2049
+        },
+        {
+          "id": 12,
+          "position": 1733
+        },
+        {
+          "id": 27,
+          "position": 1747
+        },
+        {
+          "id": 31,
+          "position": 2046
+        },
+        {
+          "id": 36,
+          "position": 2089
+        }
+      ]
+    },
+    "MouthSmileLeft": {
+      "xiaoshuai": [
+        {
+          "id": 9,
+          "position": 2058
+        },
+        {
+          "id": 10,
+          "position": 2334
+        },
+        {
+          "id": 11,
+          "position": 2650
+        },
+        {
+          "id": 12,
+          "position": 1585
+        },
+        {
+          "id": 15,
+          "position": 1980
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 10,
+          "position": 2256
+        },
+        {
+          "id": 11,
+          "position": 1747
+        },
+        {
+          "id": 12,
+          "position": 1547
+        },
+        {
+          "id": 13,
+          "position": 2345
+        }
+      ]
+    },
+    "MouthSmileRight": {
+      "xiaoshuai": [
+        {
+          "id": 15,
+          "position": 1982
+        },
+        {
+          "id": 25,
+          "position": 1859
+        },
+        {
+          "id": 26,
+          "position": 1410
+        },
+        {
+          "id": 27,
+          "position": 2500
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 15,
+          "position": 2044
+        },
+        {
+          "id": 25,
+          "position": 1808
+        },
+        {
+          "id": 26,
+          "position": 2287
+        },
+        {
+          "id": 27,
+          "position": 2547
+        },
+        {
+          "id": 28,
+          "position": 1706
+        }
+      ]
+    },
+    "MouthFrownLeft": {
+      "xiaoshuai": [
+        {
+          "id": 11,
+          "position": 1700
+        },
+        {
+          "id": 12,
+          "position": 1585
+        },
+        {
+          "id": 13,
+          "position": 1940
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 10,
+          "position": 1948
+        },
+        {
+          "id": 11,
+          "position": 2184
+        },
+        {
+          "id": 12,
+          "position": 1547
+        },
+        {
+          "id": 13,
+          "position": 1941
+        }
+      ]
+    },
+    "MouthFrownRight": {
+      "xiaoshuai": [
+        {
+          "id": 26,
+          "position": 2500
+        },
+        {
+          "id": 27,
+          "position": 2500
+        },
+        {
+          "id": 28,
+          "position": 2150
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 25,
+          "position": 2148
+        },
+        {
+          "id": 26,
+          "position": 1947
+        },
+        {
+          "id": 27,
+          "position": 2547
+        },
+        {
+          "id": 28,
+          "position": 2155
+        }
+      ]
+    },
+    "MouthDimpleLeft": {
+      "xiaoshuai": [
+        {
+          "id": 10,
+          "position": 2278
+        },
+        {
+          "id": 11,
+          "position": 2650
+        },
+        {
+          "id": 12,
+          "position": 1585
+        },
+        {
+          "id": 13,
+          "position": 2147
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 11,
+          "position": 1851
+        },
+        {
+          "id": 12,
+          "position": 1547
+        }
+      ]
+    },
+    "MouthDimpleRight": {
+      "xiaoshuai": [
+        {
+          "id": 25,
+          "position": 1846
+        },
+        {
+          "id": 26,
+          "position": 1410
+        },
+        {
+          "id": 27,
+          "position": 2500
+        },
+        {
+          "id": 28,
+          "position": 2001
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 26,
+          "position": 2244
+        },
+        {
+          "id": 27,
+          "position": 2547
+        }
+      ]
+    },
+    "MouthStretchLeft": {
+      "xiaoshuai": [
+        {
+          "id": 10,
+          "position": 1850
+        },
+        {
+          "id": 11,
+          "position": 1799
+        },
+        {
+          "id": 12,
+          "position": 1585
+        },
+        {
+          "id": 13,
+          "position": 1944
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 10,
+          "position": 1980
+        },
+        {
+          "id": 12,
+          "position": 1547
+        },
+        {
+          "id": 13,
+          "position": 1942
+        }
+      ]
+    },
+    "MouthStretchRight": {
+      "xiaoshuai": [
+        {
+          "id": 25,
+          "position": 2250
+        },
+        {
+          "id": 26,
+          "position": 2300
+        },
+        {
+          "id": 27,
+          "position": 2500
+        },
+        {
+          "id": 28,
+          "position": 2144
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 25,
+          "position": 2123
+        },
+        {
+          "id": 27,
+          "position": 2547
+        },
+        {
+          "id": 28,
+          "position": 2144
+        }
+      ]
+    },
+    "MouthRollLower": {
+      "xiaoshuai": [
+        {
+          "id": 13,
+          "position": 2220
+        },
+        {
+          "id": 28,
+          "position": 1900
+        },
+        {
+          "id": 30,
+          "position": 2180
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": []
+    },
+    "MouthRollUpper": {
+      "xiaoshuai": [
+        {
+          "id": 10,
+          "position": 1850
+        },
+        {
+          "id": 15,
+          "position": 2120
+        },
+        {
+          "id": 25,
+          "position": 2250
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 10,
+          "position": 1950
+        },
+        {
+          "id": 15,
+          "position": 2128
+        },
+        {
+          "id": 25,
+          "position": 2144
+        }
+      ]
+    },
+    "MouthShrugLower": {
+      "xiaoshuai": [
+        {
+          "id": 13,
+          "position": 2220
+        },
+        {
+          "id": 28,
+          "position": 1900
+        },
+        {
+          "id": 30,
+          "position": 2180
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 13,
+          "position": 2600
+        },
+        {
+          "id": 28,
+          "position": 1580
+        },
+        {
+          "id": 30,
+          "position": 1847
+        }
+      ]
+    },
+    "MouthShrugUpper": {
+      "xiaoshuai": [
+        {
+          "id": 10,
+          "position": 2563
+        },
+        {
+          "id": 15,
+          "position": 1880
+        },
+        {
+          "id": 25,
+          "position": 1586
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 10,
+          "position": 2144
+        },
+        {
+          "id": 15,
+          "position": 1751
+        },
+        {
+          "id": 25,
+          "position": 1947
+        }
+      ]
+    },
+    "MouthPressLeft": {
+      "xiaoshuai": [
+        {
+          "id": 10,
+          "position": 2325
+        },
+        {
+          "id": 11,
+          "position": 2650
+        },
+        {
+          "id": 12,
+          "position": 2252
+        },
+        {
+          "id": 13,
+          "position": 2149
+        },
+        {
+          "id": 15,
+          "position": 1991
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 10,
+          "position": 2002
+        },
+        {
+          "id": 11,
+          "position": 2123
+        },
+        {
+          "id": 12,
+          "position": 1949
+        },
+        {
+          "id": 13,
+          "position": 2002
+        }
+      ]
+    },
+    "MouthPressRight": {
+      "xiaoshuai": [
+        {
+          "id": 15,
+          "position": 1982
+        },
+        {
+          "id": 25,
+          "position": 1794
+        },
+        {
+          "id": 26,
+          "position": 1480
+        },
+        {
+          "id": 27,
+          "position": 1827
+        },
+        {
+          "id": 28,
+          "position": 1950
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 25,
+          "position": 2094
+        },
+        {
+          "id": 26,
+          "position": 1980
+        },
+        {
+          "id": 27,
+          "position": 2143
+        },
+        {
+          "id": 28,
+          "position": 2096
+        }
+      ]
+    },
+    "MouthLowerDownLeft": {
+      "xiaoshuai": [
+        {
+          "id": 13,
+          "position": 1820
+        },
+        {
+          "id": 28,
+          "position": 1900
+        },
+        {
+          "id": 30,
+          "position": 1997
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 13,
+          "position": 1700
+        },
+        {
+          "id": 30,
+          "position": 2124
+        }
+      ]
+    },
+    "MouthLowerDownRight": {
+      "xiaoshuai": [
+        {
+          "id": 13,
+          "position": 2220
+        },
+        {
+          "id": 28,
+          "position": 2260
+        },
+        {
+          "id": 30,
+          "position": 1997
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 13,
+          "position": 2050
+        },
+        {
+          "id": 28,
+          "position": 2500
+        },
+        {
+          "id": 30,
+          "position": 2124
+        }
+      ]
+    },
+    "MouthUpperUpLeft": {
+      "xiaoshuai": [
+        {
+          "id": 10,
+          "position": 2563
+        },
+        {
+          "id": 15,
+          "position": 1931
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 10,
+          "position": 2547
+        },
+        {
+          "id": 15,
+          "position": 1770
+        }
+      ]
+    },
+    "MouthUpperUpRight": {
+      "xiaoshuai": [
+        {
+          "id": 15,
+          "position": 1934
+        },
+        {
+          "id": 25,
+          "position": 1586
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 10,
+          "position": 2049
+        },
+        {
+          "id": 15,
+          "position": 1771
+        },
+        {
+          "id": 25,
+          "position": 1547
+        }
+      ]
+    },
+    "BrowDownLeft": {
+      "xiaoshuai": [
+        {
+          "id": 2,
+          "position": 2347
+        },
+        {
+          "id": 3,
+          "position": 2200
+        },
+        {
+          "id": 4,
+          "position": 2150
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 2,
+          "position": 2300
+        },
+        {
+          "id": 3,
+          "position": 2098
+        },
+        {
+          "id": 4,
+          "position": 1954
+        }
+      ]
+    },
+    "BrowDownRight": {
+      "xiaoshuai": [
+        {
+          "id": 17,
+          "position": 1800
+        },
+        {
+          "id": 18,
+          "position": 1847
+        },
+        {
+          "id": 19,
+          "position": 1947
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 17,
+          "position": 1794
+        },
+        {
+          "id": 18,
+          "position": 1994
+        },
+        {
+          "id": 19,
+          "position": 2140
+        }
+      ]
+    },
+    "BrowInnerUp": {
+      "xiaoshuai": [
+        {
+          "id": 2,
+          "position": 1930
+        },
+        {
+          "id": 3,
+          "position": 1347
+        },
+        {
+          "id": 4,
+          "position": 2043
+        },
+        {
+          "id": 17,
+          "position": 2130
+        },
+        {
+          "id": 18,
+          "position": 2747
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 2,
+          "position": 1700
+        },
+        {
+          "id": 3,
+          "position": 1900
+        },
+        {
+          "id": 17,
+          "position": 2394
+        },
+        {
+          "id": 18,
+          "position": 2180
+        }
+      ]
+    },
+    "BrowOuterUpLeft": {
+      "xiaoshuai": [
+        {
+          "id": 2,
+          "position": 2347
+        },
+        {
+          "id": 3,
+          "position": 2247
+        },
+        {
+          "id": 4,
+          "position": 1750
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 2,
+          "position": 2300
+        },
+        {
+          "id": 3,
+          "position": 2100
+        },
+        {
+          "id": 4,
+          "position": 2168
+        }
+      ]
+    },
+    "BrowOuterUpRight": {
+      "xiaoshuai": [
+        {
+          "id": 17,
+          "position": 1800
+        },
+        {
+          "id": 18,
+          "position": 1847
+        },
+        {
+          "id": 19,
+          "position": 2300
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 17,
+          "position": 1794
+        },
+        {
+          "id": 18,
+          "position": 1994
+        },
+        {
+          "id": 19,
+          "position": 1888
+        }
+      ]
+    },
+    "CheekPuff": {
+      "xiaoshuai": [],
+      "mojia": []
+    },
+    "CheekSquintLeft": {
+      "xiaoshuai": [
+        {
+          "id": 6,
+          "position": 2202
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 6,
+          "position": 2150
+        }
+      ]
+    },
+    "CheekSquintRight": {
+      "xiaoshuai": [
+        {
+          "id": 21,
+          "position": 1848
+        },
+        {
+          "id": 24,
+          "position": 2030
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 21,
+          "position": 1943
+        }
+      ]
+    },
+    "NoseSneerLeft": {
+      "xiaoshuai": [
+        {
+          "id": 14,
+          "position": 2300
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 14,
+          "position": 1780
+        }
+      ]
+    },
+    "NoseSneerRight": {
+      "xiaoshuai": [
+        {
+          "id": 16,
+          "position": 1830
+        },
+        {
+          "id": 31,
+          "position": 2050
+        }
+      ],
+      "mojia": [
+        {
+          "id": 16,
+          "position": 2347
+        }
+      ]
+    },
+    "TongueOut": {
+      "xiaoshuai": [],
+      "mojia": [
+        {
+          "id": 29,
+          "position": 1400
+        },
+        {
+          "id": 31,
+          "position": 1747
+        }
+      ]
+    }
+  },
+  "read_only_hardware": {
+    "port": "/dev/ttyCH343USB0",
+    "baud": 1000000,
+    "scan_range": [
+      1,
+      36
+    ],
+    "responding_ids": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34
+    ],
+    "no_response_ids": [
+      1,
+      35,
+      36
+    ],
+    "successful_snapshot_requests": 1188,
+    "snapshot_read_failures": 0,
+    "axis_summary": [
+      {
+        "id": 2,
+        "model_raw": 521,
+        "configured_min": 1990,
+        "configured_max": 2347,
+        "position_raw": 2140,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 3,
+        "model_raw": 521,
+        "configured_min": 1547,
+        "configured_max": 2200,
+        "position_raw": 2092,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 4,
+        "model_raw": 521,
+        "configured_min": 1747,
+        "configured_max": 2150,
+        "position_raw": 2001,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 5,
+        "model_raw": 521,
+        "configured_min": 1850,
+        "configured_max": 2180,
+        "position_raw": 2032,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 6,
+        "model_raw": 521,
+        "configured_min": 1966,
+        "configured_max": 2280,
+        "position_raw": 2035,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 7,
+        "model_raw": 521,
+        "configured_min": 1900,
+        "configured_max": 2147,
+        "position_raw": 2040,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 8,
+        "model_raw": 521,
+        "configured_min": 1780,
+        "configured_max": 2280,
+        "position_raw": 2045,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 9,
+        "model_raw": 521,
+        "configured_min": 2030,
+        "configured_max": 2600,
+        "position_raw": 2043,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 10,
+        "model_raw": 521,
+        "configured_min": 1850,
+        "configured_max": 2450,
+        "position_raw": 2032,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 11,
+        "model_raw": 521,
+        "configured_min": 1700,
+        "configured_max": 2580,
+        "position_raw": 1797,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 12,
+        "model_raw": 521,
+        "configured_min": 1585,
+        "configured_max": 2400,
+        "position_raw": 1992,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 13,
+        "model_raw": 521,
+        "configured_min": 1880,
+        "configured_max": 2220,
+        "position_raw": 2021,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 14,
+        "model_raw": 521,
+        "configured_min": 2000,
+        "configured_max": 2180,
+        "position_raw": 2080,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 15,
+        "model_raw": 521,
+        "configured_min": 1880,
+        "configured_max": 2120,
+        "position_raw": 2023,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 16,
+        "model_raw": 521,
+        "configured_min": 1830,
+        "configured_max": 2050,
+        "position_raw": 1971,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 17,
+        "model_raw": 521,
+        "configured_min": 1800,
+        "configured_max": 2120,
+        "position_raw": 1955,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 18,
+        "model_raw": 521,
+        "configured_min": 1847,
+        "configured_max": 2547,
+        "position_raw": 2006,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 19,
+        "model_raw": 521,
+        "configured_min": 1947,
+        "configured_max": 2300,
+        "position_raw": 2045,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 20,
+        "model_raw": 521,
+        "configured_min": 1900,
+        "configured_max": 2330,
+        "position_raw": 2052,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 21,
+        "model_raw": 521,
+        "configured_min": 1780,
+        "configured_max": 2200,
+        "position_raw": 2114,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 22,
+        "model_raw": 521,
+        "configured_min": 1950,
+        "configured_max": 2156,
+        "position_raw": 2072,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 23,
+        "model_raw": 521,
+        "configured_min": 1847,
+        "configured_max": 2350,
+        "position_raw": 2043,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 24,
+        "model_raw": 521,
+        "configured_min": 1600,
+        "configured_max": 2030,
+        "position_raw": 2045,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 25,
+        "model_raw": 521,
+        "configured_min": 1650,
+        "configured_max": 2250,
+        "position_raw": 2012,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 26,
+        "model_raw": 521,
+        "configured_min": 1480,
+        "configured_max": 2500,
+        "position_raw": 2239,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 27,
+        "model_raw": 521,
+        "configured_min": 1700,
+        "configured_max": 2500,
+        "position_raw": 2068,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 28,
+        "model_raw": 521,
+        "configured_min": 1900,
+        "configured_max": 2230,
+        "position_raw": 2101,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 29,
+        "model_raw": 521,
+        "configured_min": 1378,
+        "configured_max": 2226,
+        "position_raw": 2043,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 30,
+        "model_raw": 521,
+        "configured_min": 1900,
+        "configured_max": 2180,
+        "position_raw": 1978,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          3,
+          10,
+          0
+        ],
+        "phase_raw": 108,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 31,
+        "model_raw": 11272,
+        "configured_min": 1850,
+        "configured_max": 2050,
+        "position_raw": 1978,
+        "torque_enable": 0,
+        "pid_raw": [
+          32,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          2,
+          54,
+          0
+        ],
+        "phase_raw": 44,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 32,
+        "model_raw": 11272,
+        "configured_min": 1650,
+        "configured_max": 2450,
+        "position_raw": 2073,
+        "torque_enable": 0,
+        "pid_raw": [
+          16,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          2,
+          54,
+          0
+        ],
+        "phase_raw": 44,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 33,
+        "model_raw": 11272,
+        "configured_min": 1600,
+        "configured_max": 2300,
+        "position_raw": 1507,
+        "torque_enable": 0,
+        "pid_raw": [
+          16,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          2,
+          54,
+          0
+        ],
+        "phase_raw": 44,
+        "torque_limit_raw": 1000
+      },
+      {
+        "id": 34,
+        "model_raw": 11272,
+        "configured_min": 1762,
+        "configured_max": 2300,
+        "position_raw": 2045,
+        "torque_enable": 0,
+        "pid_raw": [
+          23,
+          32,
+          0
+        ],
+        "acceleration_raw": 0,
+        "running_speed_register_raw": 0,
+        "firmware_bytes": [
+          2,
+          54,
+          0
+        ],
+        "phase_raw": 44,
+        "torque_limit_raw": 800
+      }
+    ]
+  },
+  "calibration_device_limit_conflicts": [
+    {
+      "id": 2,
+      "shape": "BrowInnerUp",
+      "position": 1930,
+      "device_min": 1990,
+      "device_max": 2347
+    },
+    {
+      "id": 3,
+      "shape": "BrowInnerUp",
+      "position": 1347,
+      "device_min": 1547,
+      "device_max": 2200
+    },
+    {
+      "id": 17,
+      "shape": "BrowInnerUp",
+      "position": 2130,
+      "device_min": 1800,
+      "device_max": 2120
+    },
+    {
+      "id": 18,
+      "shape": "BrowInnerUp",
+      "position": 2747,
+      "device_min": 1847,
+      "device_max": 2547
+    },
+    {
+      "id": 3,
+      "shape": "BrowOuterUpLeft",
+      "position": 2247,
+      "device_min": 1547,
+      "device_max": 2200
+    },
+    {
+      "id": 5,
+      "shape": "EyeBlinkLeft",
+      "position": 1830,
+      "device_min": 1850,
+      "device_max": 2180
+    },
+    {
+      "id": 5,
+      "shape": "EyeLookDownLeft",
+      "position": 1830,
+      "device_min": 1850,
+      "device_max": 2180
+    },
+    {
+      "id": 6,
+      "shape": "EyeLookDownLeft",
+      "position": 1950,
+      "device_min": 1966,
+      "device_max": 2280
+    },
+    {
+      "id": 8,
+      "shape": "EyeLookInLeft",
+      "position": 2400,
+      "device_min": 1780,
+      "device_max": 2280
+    },
+    {
+      "id": 8,
+      "shape": "EyeLookOutLeft",
+      "position": 1750,
+      "device_min": 1780,
+      "device_max": 2280
+    },
+    {
+      "id": 5,
+      "shape": "EyeSquintLeft",
+      "position": 1830,
+      "device_min": 1850,
+      "device_max": 2180
+    },
+    {
+      "id": 6,
+      "shape": "EyeWideLeft",
+      "position": 1950,
+      "device_min": 1966,
+      "device_max": 2280
+    },
+    {
+      "id": 20,
+      "shape": "EyeBlinkRight",
+      "position": 2347,
+      "device_min": 1900,
+      "device_max": 2330
+    },
+    {
+      "id": 21,
+      "shape": "EyeBlinkRight",
+      "position": 1750,
+      "device_min": 1780,
+      "device_max": 2200
+    },
+    {
+      "id": 20,
+      "shape": "EyeLookDownRight",
+      "position": 2347,
+      "device_min": 1900,
+      "device_max": 2330
+    },
+    {
+      "id": 23,
+      "shape": "EyeLookInRight",
+      "position": 1700,
+      "device_min": 1847,
+      "device_max": 2350
+    },
+    {
+      "id": 22,
+      "shape": "EyeLookUpRight",
+      "position": 1912,
+      "device_min": 1950,
+      "device_max": 2156
+    },
+    {
+      "id": 11,
+      "shape": "MouthLeft",
+      "position": 2650,
+      "device_min": 1700,
+      "device_max": 2580
+    },
+    {
+      "id": 26,
+      "shape": "MouthRight",
+      "position": 1410,
+      "device_min": 1480,
+      "device_max": 2500
+    },
+    {
+      "id": 11,
+      "shape": "MouthSmileLeft",
+      "position": 2650,
+      "device_min": 1700,
+      "device_max": 2580
+    },
+    {
+      "id": 26,
+      "shape": "MouthSmileRight",
+      "position": 1410,
+      "device_min": 1480,
+      "device_max": 2500
+    },
+    {
+      "id": 11,
+      "shape": "MouthDimpleLeft",
+      "position": 2650,
+      "device_min": 1700,
+      "device_max": 2580
+    },
+    {
+      "id": 26,
+      "shape": "MouthDimpleRight",
+      "position": 1410,
+      "device_min": 1480,
+      "device_max": 2500
+    },
+    {
+      "id": 10,
+      "shape": "MouthShrugUpper",
+      "position": 2563,
+      "device_min": 1850,
+      "device_max": 2450
+    },
+    {
+      "id": 25,
+      "shape": "MouthShrugUpper",
+      "position": 1586,
+      "device_min": 1650,
+      "device_max": 2250
+    },
+    {
+      "id": 11,
+      "shape": "MouthPressLeft",
+      "position": 2650,
+      "device_min": 1700,
+      "device_max": 2580
+    },
+    {
+      "id": 13,
+      "shape": "MouthLowerDownLeft",
+      "position": 1820,
+      "device_min": 1880,
+      "device_max": 2220
+    },
+    {
+      "id": 28,
+      "shape": "MouthLowerDownRight",
+      "position": 2260,
+      "device_min": 1900,
+      "device_max": 2230
+    },
+    {
+      "id": 10,
+      "shape": "MouthUpperUpLeft",
+      "position": 2563,
+      "device_min": 1850,
+      "device_max": 2450
+    },
+    {
+      "id": 25,
+      "shape": "MouthUpperUpRight",
+      "position": 1586,
+      "device_min": 1650,
+      "device_max": 2250
+    },
+    {
+      "id": 14,
+      "shape": "NoseSneerLeft",
+      "position": 2300,
+      "device_min": 2000,
+      "device_max": 2180
+    }
+  ],
+  "assumed_2047_neutral_outside_device_limits": [
+    {
+      "id": 24,
+      "device_min": 1600,
+      "device_max": 2030
+    }
+  ],
+  "measured_unpowered_outside_device_limits": [
+    {
+      "id": 24,
+      "position": 2045,
+      "device_min": 1600,
+      "device_max": 2030
+    },
+    {
+      "id": 33,
+      "position": 1507,
+      "device_min": 1600,
+      "device_max": 2300
+    }
+  ],
+  "motion_commands_sent": false,
+  "actuators_enabled": false
+}
