@@ -2739,5 +2739,75 @@
     }
   ],
   "motion_commands_sent": false,
-  "actuators_enabled": false
+  "actuators_enabled": false,
+  "identification_confirmation": {
+    "date": "2026-11-05",
+    "source": "User confirmed same actuator distribution as Xiaobai; corrected the ID31..34 label to SM45BL.",
+    "same_actuator_distribution_as": "xiaobai",
+    "ids": [
+      31,
+      32,
+      33,
+      34
+    ],
+    "reported_model": "SM45BL",
+    "model_raw_observed": 11272,
+    "firmware_bytes_observed": [
+      2,
+      54,
+      0
+    ],
+    "hardware_motion_on_this_robot_verified": false,
+    "historical_compatibility": {
+      "robot": "xiaobai",
+      "axis_ids": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34
+      ],
+      "ids31_34_model_raw": 11272,
+      "id31_evidence": "Existing Xiaobai commissioning helper and saved profile record a bounded12-count motion plus exact RAM42..47 position/time/speed readback.",
+      "firmware_scope": "Historical evidence does not constitute a new Xiaoshuai motion or physical speed test."
+    }
+  },
+  "eeprom_limit_readout": {
+    "source": "read_only_servo_register_snapshot",
+    "minimum_address": 9,
+    "minimum_width_bytes": 2,
+    "maximum_address": 11,
+    "maximum_width_bytes": 2,
+    "byte_order": "little",
+    "meaning": "servo_firmware_configured_position_limits; distinct from mechanical stops",
+    "device_registers_written": false
+  }
 }
