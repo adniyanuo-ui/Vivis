@@ -85,7 +85,7 @@ class IndependentTrackingTests(unittest.TestCase):
             self.assertGreater(sign*(last[ids.index(23)]-2047),0)
             self.assertLess(sign*(last[ids.index(7)]-2047),0)
             self.assertGreater(sign*(last[ids.index(22)]-2047),0)
-            self.assertLess(sign*(last[ids.index(32)]-2047),0)  # Increasing yaw goes robot-left.
+            self.assertGreater(sign*(last[ids.index(32)]-2047),0)  # Onsite image-to-yaw direction correction.
             self.assertGreater(sign*(last[ids.index(33)]-2047),0)  # Increasing pitch looks down.
             self.assertGreater(sign*(last[ids.index(34)]-2047),0)  # Increasing roll tilts robot-right.
             self.assertIsNone(c['control']['camera_eye']);self.assertEqual(c['control']['camera_mount'],'fixed')
