@@ -5,6 +5,7 @@ import hashlib
 import json
 import threading
 import time
+import numpy as np
 
 from vivis.vision.policy import VERSION
 
@@ -144,13 +145,21 @@ class FaceVision:
         sequence, stamp, frame = sample
         begin = time.monotonic()
         max_width = self.config['detector']['max_width']
+        height,width=frame.shape[:2]
+        inference=frame
         if frame.shape[1] > max_width:
             scale = max_width / frame.shape[1]
-            frame = self.cv2.resize(frame, (max_width, round(frame.shape[0] * scale)))
+            inference = self.cv2.resize(frame, (max_width, round(frame.shape[0] * scale)))
         frame = frame.copy()
-        height, width = frame.shape[:2]
-        self.detector.setInputSize((width, height))
-        _, faces = self.detector.detect(frame)
+        ih,iw=inference.shape[:2]
+        self.detector.setInputSize((iw,ih))
+        _, faces = self.detector.detect(inference)
+        if faces is not None and len(faces) and (iw!=width or ih!=height):
+            # Infer on a smaller image, but keep original-resolution preview,
+            # landmark geometry and normalized control coordinates consistent.
+            faces=np.asarray(faces,dtype=float).copy()
+            faces[:,[0,2,4,6,8,10,12]]*=width/iw
+            faces[:,[1,3,5,7,9,11,13]]*=height/ih
         selected, candidates = select_largest(
             faces, width, height, self.config['detector']['min_face_area_ratio'],
             self.config['detector']['score_threshold'])

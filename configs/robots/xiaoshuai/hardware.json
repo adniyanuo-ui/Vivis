@@ -245,7 +245,7 @@
         1900,
         2147
       ],
-      "max_speed_counts_s": 100,
+      "max_speed_counts_s": 300,
       "acceleration_raw": 0,
       "model_raw_expected": 521,
       "register_layout_confirmed": true,
@@ -270,7 +270,7 @@
         1750,
         2400
       ],
-      "max_speed_counts_s": 300,
+      "max_speed_counts_s": 600,
       "acceleration_raw": 0,
       "model_raw_expected": 521,
       "register_layout_confirmed": true,
@@ -620,7 +620,7 @@
         1912,
         2156
       ],
-      "max_speed_counts_s": 100,
+      "max_speed_counts_s": 300,
       "acceleration_raw": 0,
       "model_raw_expected": 521,
       "register_layout_confirmed": true,
@@ -645,7 +645,7 @@
         1700,
         2350
       ],
-      "max_speed_counts_s": 300,
+      "max_speed_counts_s": 600,
       "acceleration_raw": 0,
       "model_raw_expected": 521,
       "register_layout_confirmed": true,
@@ -872,7 +872,7 @@
         2047,
         2047
       ],
-      "max_speed_counts_s": 300,
+      "max_speed_counts_s": 600,
       "acceleration_raw": 0,
       "model_raw_expected": 11272,
       "register_layout_confirmed": true,
@@ -881,9 +881,7 @@
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,
       "position_feedback_tolerance_counts": 5,
-      "playback_enabled": true,
-      "tracking_min": 1967,
-      "tracking_max": 2127
+      "playback_enabled": true
     },
     {
       "id": 33,
@@ -899,7 +897,7 @@
         2047,
         2047
       ],
-      "max_speed_counts_s": 150,
+      "max_speed_counts_s": 400,
       "acceleration_raw": 0,
       "model_raw_expected": 11272,
       "register_layout_confirmed": true,
@@ -908,9 +906,7 @@
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,
       "position_feedback_tolerance_counts": 5,
-      "playback_enabled": true,
-      "tracking_min": 1987,
-      "tracking_max": 2107
+      "playback_enabled": true
     },
     {
       "id": 34,
@@ -926,7 +922,7 @@
         2047,
         2047
       ],
-      "max_speed_counts_s": 100,
+      "max_speed_counts_s": 300,
       "acceleration_raw": 0,
       "model_raw_expected": 11272,
       "register_layout_confirmed": true,
@@ -935,9 +931,7 @@
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,
       "position_feedback_tolerance_counts": 5,
-      "playback_enabled": true,
-      "tracking_min": 2007,
-      "tracking_max": 2087
+      "playback_enabled": true
     }
   ]
 }

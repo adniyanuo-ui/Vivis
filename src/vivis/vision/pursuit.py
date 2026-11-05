@@ -10,7 +10,7 @@ import math
 import numpy as np
 
 from vivis.vision.policy import GazePolicy, axis_normalized, axis_position, finite, validate_config
-from vivis.motion.mapping import limit_step
+from vivis.motion.mapping import limit_step,read_json,calibrated_eye_endpoints
 from vivis.motion.upstream import settings as upstream_settings,require_engine,UpstreamTrajectory
 
 
@@ -61,6 +61,9 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
     if neck and not trial and not config['neck']['direction_confirmed']:
         raise ValueError('Confirm ID32 direction before normal neck following')
     axes = c['axes']
+    calibrated_range=generic and c.get('endpoint_source')=='calibration_device_clipped'
+    if calibrated_range:
+        shapes={s['shape']:{p['id']:p['position'] for p in s['positions']} for s in read_json(calibration)['blendShapes']}
     expected=[('left_yaw',8,'x'),('right_yaw',23,'x')]
     if c.get('vertical_enabled') is True:
         expected += [('left_pitch',7,'y'),('right_pitch',22,'y')]
@@ -75,18 +78,24 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
             raise ValueError('Invalid per-axis eye speed')
         values = [a[k] for k in ('negative', 'neutral', 'positive')]
         m = motors[a['id']]
+        if calibrated_range:
+            endpoints=calibrated_eye_endpoints(a,shapes,m)
+            if any(a[key]!=endpoints[key] for key in ('negative','neutral','positive')):
+                raise ValueError('Eye endpoints differ from calibration/device clipping')
         if (any(not finite(v) for v in values) or values[1] != 2047
                 or not (values[0] < values[1] < values[2] or values[2] < values[1] < values[0])
                 or min(values) < m['safe_min'] or max(values) > m['safe_max']
                 or m['model_raw_expected'] != 521):
             raise ValueError('Eye endpoints exceed reviewed Mojia limits')
         cap=30 if a['coordinate']=='y' else 60
-        if trial and max(abs(v-2047) for v in values) > cap:
+        if trial and not calibrated_range and max(abs(v-2047) for v in values) > cap:
             raise ValueError('Eye trial exceeds coordinate-specific limits')
     n = config['neck']
     plan=upstream_settings(n)
     if neck and plan['enabled']:require_engine()
-    if n.get('coordination_mode') != 'visual_error_assist' or 'eye_lead_s' in n:
+    mode=n.get('coordination_mode')
+    if (mode not in ('visual_error_assist','fixed_camera_eye_offset') or 'eye_lead_s' in n
+            or mode=='fixed_camera_eye_offset' and (not generic or c['camera_mount']!='fixed')):
         raise ValueError('Mojia neck requires visual_error_assist without a fixed eye delay')
     if type(config['camera']['width']) is not int or config['camera']['width'] <= 0:
         raise ValueError('Need positive camera width for image growth threshold')
@@ -107,7 +116,7 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
             or not finite(low) or not finite(high)
             or not motors[32]['device_min']<=low<2047<high<=motors[32]['device_max']):
         raise ValueError('Invalid bounded Mojia neck setup')
-    for key,default,low,high in [('gain_counts_s',n['speed_counts_s'],1,180),
+    for key,default,low,high in [('gain_counts_s',n['speed_counts_s'],1,n['speed_counts_s'] if generic else 180),
                                 ('deadband',.18,.05,.5),
                                 ('stop_deadband',.08,0,.3),('filter_tau_s',.12,.01,1)]:
         value=n.get(key,default)
@@ -181,6 +190,12 @@ class VisualNeckAssist:
                     # The eye-mounted camera can reduce image error while
                     # eye travel is being consumed. Do not wait for saturation.
                     self.direction,self.reason=sign,'eye_reserve'
+                elif (n.get('coordination_mode')=='fixed_camera_eye_offset'
+                      and abs(raw)>=n['deadband'] and eye*sign>=n.get('eye_assist_ratio',.25)):
+                    # A fixed camera is unaffected by eye rotation. Once the
+                    # measured eye has settled on an off-centre face, the neck
+                    # must still assist; renewed eye motion is not required.
+                    self.direction,self.reason=sign,'fixed_camera_eye_offset'
                 elif abs(raw) > n['stop_deadband'] and saturated:
                     self.direction, self.reason = sign, 'eye_limit'
             if self.direction:

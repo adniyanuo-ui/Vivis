@@ -37,14 +37,15 @@ def validate(config,profile):
     motors={m['id']:m for m in profile['motors']}
     for role,sid in (('pitch',33),('roll',34)):
         a=plan[role];m=motors[sid]
+        low,high=joint_limits(plan,m)
         if (a['id']!=sid or type(a['sign']) is not int or a['sign'] not in (-1,1)
                 or m['model_raw_expected']!=11272
-                or not m['device_min']<=m['tracking_min']<2047<m['tracking_max']<=m['device_max']
+                or not m['device_min']<=low<2047<high<=m['device_max']
                 or not 0<m['max_speed_counts_s']<=1000):
             raise ValueError('Invalid independent neck actuator: '+role)
     if not config['control'].get('vertical_enabled') or camera_axes(config)[1] is None:
         raise ValueError('Independent pitch needs the vertical eye reference')
-    if not finite(plan['pitch']['gain_counts_s']) or not 1<=plan['pitch']['gain_counts_s']<=180:
+    if not finite(plan['pitch']['gain_counts_s']) or not 1<=plan['pitch']['gain_counts_s']<=motors[33]['max_speed_counts_s']:
         raise ValueError('Invalid independent pitch gain')
     for key,low,high in (('roll_follow_ratio',0.,.5),('roll_reference_rad',.1,math.pi/2),
                          ('roll_gain_s',.1,5.),('roll_filter_tau_s',.01,1.),('return_duration_s',1.,10.)):
@@ -54,9 +55,16 @@ def validate(config,profile):
     return motors
 
 
+def joint_limits(plan,motor):
+    mode=plan.get('range_mode','configured')
+    if mode=='device':return motor['device_min'],motor['device_max']
+    if mode=='configured':return motor['tracking_min'],motor['tracking_max']
+    raise ValueError('Unknown independent neck range mode')
+
+
 class IndependentReference:
     def __init__(self,plan,motors):
-        self.planners={sid:UpstreamTrajectory(motors[sid]['tracking_min'],motors[sid]['tracking_max'],
+        self.planners={sid:UpstreamTrajectory(*joint_limits(plan,motors[sid]),
             motors[sid]['max_speed_counts_s'],settings(plan),plan['return_duration_s']) for sid in (33,34)}
 
     def reset(self,measured):
@@ -115,7 +123,7 @@ class IndependentFaceFollower:
             if self.stamp is None or stamp>self.stamp:
                 alpha=1. if self.stamp is None else -math.expm1(-(stamp-self.stamp)/self.plan['roll_filter_tau_s'])
                 self.filtered_roll+=alpha*(line-self.filtered_roll);self.stamp=stamp
-            m=self.motors[34];extent=min(2047-m['tracking_min'],m['tracking_max']-2047)
+            ref=self.reference.planners[34];extent=min(2047-ref.low,ref.high-2047)
             offset=max(-1.,min(1.,self.filtered_roll/self.plan['roll_reference_rad']))
             target=2047+self.plan['roll']['sign']*extent*self.plan['roll_follow_ratio']*offset
             velocity[34]=self.plan['roll_gain_s']*(target-self.reference.planners[34].position)

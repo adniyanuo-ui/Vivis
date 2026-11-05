@@ -19,6 +19,19 @@ def read_json(path):
     return json.loads(Path(path).read_text(),object_pairs_hook=pairs,
                       parse_constant=lambda x:(_ for _ in ()).throw(ValueError('Nonfinite '+x)))
 
+
+def calibrated_eye_endpoints(axis,shapes,motor):
+    """Resolve named EyeLook endpoints and clip to the reviewed device range."""
+    values={}
+    for side in ('negative','positive'):
+        name=axis.get(side+'_shape')
+        if not isinstance(name,str) or not name.startswith('EyeLook') or axis['id'] not in shapes.get(name,{}):
+            raise ValueError('Missing calibrated eye endpoint: '+str(axis['id'])+' '+side)
+        raw=shapes[name][axis['id']]
+        values[side]=max(motor['device_min'],min(motor['device_max'],raw))
+    values['neutral']=motor['neutral']
+    return values
+
 def inputs(clip,calibration,header,allowed_motor_ids=None):
     allowed_motor_ids=set(range(2,37)) if allowed_motor_ids is None else set(allowed_motor_ids)
     if not allowed_motor_ids or any(type(sid) is not int or not 0<=sid<=253 for sid in allowed_motor_ids):

@@ -13,7 +13,7 @@ import numpy as np
 from vivis.motion.mapping import ROOT
 from vivis.vision.pursuit import validate_mojia, MojiaPursuit, NeckCommandScheduler,neck_command_limits
 from vivis.vision.parallel_follow import validate as validate_parallel,ParallelFaceFollower
-from vivis.vision.independent_follow import validate as validate_independent,IndependentFaceFollower
+from vivis.vision.independent_follow import validate as validate_independent,IndependentFaceFollower,joint_limits
 
 
 class PreviewPublisher:
@@ -66,7 +66,9 @@ def tracking_profile(config, profile, ids, neck=True):
     if parallel:
         for b in k.branches:motors[b['id']].update(safe_min=int(b['low']),safe_max=int(b['high']))
     if independent:
-        for sid in (33,34):motors[sid].update(safe_min=motors[sid]['tracking_min'],safe_max=motors[sid]['tracking_max'])
+        for sid in (33,34):
+            low,high=joint_limits(config['independent_neck'],motors[sid])
+            motors[sid].update(safe_min=low,safe_max=high)
     feedback_range=profile.get('tracking_feedback_range','command')
     if feedback_range not in ('command','device'):raise ValueError('Unknown tracking feedback range')
     if feedback_range=='device':

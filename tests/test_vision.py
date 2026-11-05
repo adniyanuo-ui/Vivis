@@ -28,6 +28,25 @@ def face(x, y, width, height, score=.95):
 
 
 class SelectionTests(unittest.TestCase):
+    def test_small_inference_preserves_original_preview_and_landmark_coordinates(self):
+        import cv2
+        from vivis.vision.detection import FaceVision
+        c=Robot(ROOT/'configs/robots/xiaoshuai/robot.json').tracking();c['detector']['max_width']=320
+        for width,height in ((640,480),(641,481)):
+            image=np.zeros((height,width,3),dtype=np.uint8);small_height=round(height*320/width)
+            detector=Mock();detector.detect.return_value=(1,np.array([face(10,20,100,80)],dtype=np.float32))
+            factory=Mock();factory.create.return_value=detector
+            with patch('cv2.FaceDetectorYN',factory):
+                vision=FaceVision(c,ROOT);packet,jpeg,metrics=vision.detect((1,time.monotonic(),image))
+            detector.setInputSize.assert_called_once_with((320,small_height))
+            self.assertEqual(detector.detect.call_args.args[0].shape[:2],(small_height,320))
+            self.assertEqual(cv2.imdecode(np.frombuffer(jpeg,np.uint8),cv2.IMREAD_COLOR).shape[:2],(height,width))
+            target=packet['target']
+            np.testing.assert_allclose(target['bbox'],[10*width/320,20*height/small_height,100*width/320,80*height/small_height])
+            np.testing.assert_allclose(target['point'],[60*width/320,48*height/small_height])
+            self.assertAlmostEqual(target['x'],2*60/320-1);self.assertAlmostEqual(target['y'],2*48/small_height-1)
+            self.assertFalse(image.any())
+
     def test_eye_line_roll_measures_tilt_without_changing_existing_face_target(self):
         for degrees in (-25.,0.,25.):
             row=face(100,100,100,100);angle=math.radians(degrees)

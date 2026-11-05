@@ -27,10 +27,17 @@ class Receiver:
         return dict(schema_version=VERSION,sequence=int(now*1000),timestamp_monotonic=now,target=self.target)
 
 
-def fixture(mode='eyes-neck'):
+def fixture(mode='eyes-neck',narrow=False):
     robot=Robot(CONFIG);work=robot.work('0001');config=robot.tracking()
     ids,positions,fps=load_targets(work['targets'],robot.profile('0001'),work['audio'],robot.calibration)
-    profile,ids,data=prepare(config,robot.profile('0001'),ids,positions,telemetry_policy=robot.telemetry(),
+    base=robot.profile('0001')
+    if narrow:
+        config['neck']['range_mode']='configured';config['independent_neck']['range_mode']='configured'
+        for motor in base['motors']:
+            if motor['id'] in (32,33,34):
+                span={32:80,33:60,34:40}[motor['id']]
+                motor.update(tracking_min=2047-span,tracking_max=2047+span)
+    profile,ids,data=prepare(config,base,ids,positions,telemetry_policy=robot.telemetry(),
         mode=mode,mouth_command_mode='lips-direct')
     return robot,config,profile,ids,data
 
@@ -46,14 +53,52 @@ def snapshots(profile,positions):
     return rows
 
 
-def controller():
-    robot,c,p,ids,data=fixture();receiver=Receiver();g=MojiaPlaybackGaze(c,p,ids,receiver,neck=True)
+def controller(narrow=False):
+    robot,c,p,ids,data=fixture(narrow=narrow);receiver=Receiver();g=MojiaPlaybackGaze(c,p,ids,receiver,neck=True)
     initial={m['id']:m['neutral'] for m in p['motors']};last=np.array([initial[sid] for sid in ids],float)
     g.prepare(data,last,snapshots(p,initial),10.);g.set_audio_time(0.,1000.)
     return robot,c,p,ids,data,receiver,g,last
 
 
 class IndependentTrackingTests(unittest.TestCase):
+    def test_all_neck_reference_and_command_bounds_use_device_limits(self):
+        robot,c,p,ids,data,receiver,g,last=controller();motors={m['id']:m for m in p['motors']}
+        for sid,bounds,speed in ((32,(1650,2450),600),(33,(1600,2300),400),(34,(1762,2300),300)):
+            m=motors[sid];self.assertEqual((m['safe_min'],m['safe_max']),bounds)
+            self.assertEqual(m['max_speed_counts_s'],speed)
+            self.assertNotIn('tracking_min',robot.axes[sid]);self.assertNotIn('tracking_max',robot.axes[sid])
+            ref=g.controller.upstream if sid==32 else g.platform.reference.planners[sid]
+            self.assertEqual((ref.low,ref.high),bounds)
+
+    def test_fixed_camera_absolute_eyes_use_calibration_and_never_integrate_image_error(self):
+        from vivis.vision.policy import GazePolicy,axis_position
+        robot,c,p,ids,data=fixture();axes={a['id']:a for a in c['control']['axes']}
+        for sid,ends in ((8,(1780,2280)),(23,(1847,2350)),(7,(2147,1900)),(22,(1950,2156))):
+            self.assertEqual((axes[sid]['negative'],axes[sid]['positive']),ends)
+        policy=GazePolicy(c);receiver=Receiver();receiver.target=dict(x=.3,y=-.4)
+        for tick in range(300):
+            now=10+(tick+1)/60;xy,weight,state=policy.step(receiver.poll(now),now,1/60,policy.xy)
+        np.testing.assert_allclose(xy,[.265,-.365],atol=1e-8)
+        self.assertGreater(axis_position(axes[8],xy[0])-2047,60.)
+        self.assertGreater(axis_position(axes[7],xy[1])-2047,30.)
+
+    def test_fixed_camera_neck_can_recruit_from_settled_measured_eyes(self):
+        from vivis.vision.pursuit import VisualNeckAssist
+        c=Robot(CONFIG).tracking();receiver=Receiver();receiver.target=dict(x=.3,y=0.)
+        assist=VisualNeckAssist(c)
+        value=assist.step(receiver.poll(10.),'tracking',.2,0.,233,True)
+        self.assertGreater(value,0.);self.assertEqual(assist.reason,'fixed_camera_eye_offset')
+        self.assertEqual(assist.step(receiver.poll(10.1),'tracking',.2,0.,233,False),0.)
+        moving=copy.deepcopy(c);moving['neck']['coordination_mode']='visual_error_assist'
+        moving['control'].update(camera_mount='eye',camera_eye='right')
+        self.assertEqual(VisualNeckAssist(moving).step(receiver.poll(10.),'tracking',.2,0.,233,True),0.)
+
+    def test_calibration_endpoint_source_is_verified_not_a_trial_range_bypass(self):
+        from vivis.vision.pursuit import validate_mojia
+        robot,c,p,ids,data=fixture();c['control']['axes'][0]['positive']=2200
+        with self.assertRaisesRegex(ValueError,'calibration/device clipping'):
+            validate_mojia(c,robot.motion_profile(),robot.calibration,True,True)
+
     def test_all_modes_check_without_devices_and_use_distinct_home_inventories(self):
         from vivis.runtime.developer import run_example
         robot=Robot(CONFIG)
@@ -159,7 +204,7 @@ class IndependentTrackingTests(unittest.TestCase):
 
     def test_tracking_span_is_not_the_device_feedback_boundary(self):
         from vivis.runtime.playback import check_feedback
-        robot,c,p,ids,data=fixture();motors={m['id']:m for m in p['motors']}
+        robot,c,p,ids,data=fixture(narrow=True);motors={m['id']:m for m in p['motors']}
         for sid in p['gaze_owner_ids']:
             m=motors[sid]
             self.assertEqual((m['feedback_min'],m['feedback_max']),(m['device_min'],m['device_max']))
@@ -174,7 +219,7 @@ class IndependentTrackingTests(unittest.TestCase):
         self.run_timed_player()
 
     def test_sample2113_continues_without_expanding_command_span(self):
-        result=self.run_timed_player(feedback33=2113)
+        result=self.run_timed_player(feedback33=2113,narrow=True)
         samples=result['feedback_outside_command_range_samples']
         self.assertTrue(any(s['id']==33 and s['position']==2113 for s in samples))
         self.assertTrue(all(1987<=e['goals'][33]<=2107 for e in result['events']))
@@ -182,10 +227,10 @@ class IndependentTrackingTests(unittest.TestCase):
     def test_sample_beyond_device_range_still_stops_the_player(self):
         with self.assertRaisesRegex(RuntimeError,'outside safe range'):self.run_timed_player(feedback33=2301)
 
-    def run_timed_player(self,feedback33=None):
+    def run_timed_player(self,feedback33=None,narrow=False):
         import test_runtime
         from vivis.runtime.playback import play
-        robot,c,p,ids,data,receiver,g,last=controller()
+        robot,c,p,ids,data,receiver,g,last=controller(narrow=narrow)
         p['changed_goals_only']=False  # Sparse SDK packet accounting has its own transport tests.
         _,bus,clock=test_runtime.PlaybackTests().fixture();clock.duration=.5
         positions={sid:int(round(last[j])) for j,sid in enumerate(ids)}

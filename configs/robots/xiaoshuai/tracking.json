@@ -13,7 +13,7 @@
     "model": "assets/models/yunet/face_detection_yunet_2023mar.onnx",
     "score_threshold": 0.8,
     "min_face_area_ratio": 0.002,
-    "max_width": 640,
+    "max_width": 320,
     "hz": 20
   },
   "transport": {
@@ -40,65 +40,62 @@
         "name": "left_yaw",
         "coordinate": "x",
         "id": 8,
-        "negative": 1987,
-        "neutral": 2047,
-        "positive": 2107
+        "negative_shape": "EyeLookOutLeft",
+        "positive_shape": "EyeLookInLeft"
       },
       {
         "name": "right_yaw",
         "coordinate": "x",
         "id": 23,
-        "negative": 1987,
-        "neutral": 2047,
-        "positive": 2107
+        "negative_shape": "EyeLookInRight",
+        "positive_shape": "EyeLookOutRight"
       },
       {
         "name": "left_pitch",
         "coordinate": "y",
         "id": 7,
-        "negative": 2067,
-        "neutral": 2047,
-        "positive": 2027
+        "negative_shape": "EyeLookUpLeft",
+        "positive_shape": "EyeLookDownLeft"
       },
       {
         "name": "right_pitch",
         "coordinate": "y",
         "id": 22,
-        "negative": 2027,
-        "neutral": 2047,
-        "positive": 2067
+        "negative_shape": "EyeLookUpRight",
+        "positive_shape": "EyeLookDownRight"
       }
     ],
     "mount_confirmation_source": "2026-11-05 user confirmed fixed brow camera; upright image requires180-degree correction before detection and preview",
     "vertical_enabled": true,
     "vertical_direction_confirmed": false,
-    "validated_source": "Initial eye spans for commissioning; not a claim of completed onsite eye tracking acceptance",
-    "reference_eye": "right"
+    "validated_source": "User requested visible eye tracking with fixed brow camera: absolute proportional image targets use original EyeLook endpoints clipped to read device limits; onsite angular accuracy pending.",
+    "reference_eye": "right",
+    "endpoint_source": "calibration_device_clipped"
   },
   "neck": {
     "id": 32,
     "sign": 1,
-    "range_mode": "configured",
+    "range_mode": "device",
     "direction_confirmed": true,
-    "gain_counts_s": 120,
-    "eye_assist_ratio": 0.25,
-    "deadband": 0.14,
-    "stop_deadband": 0.07,
+    "gain_counts_s": 360,
+    "eye_assist_ratio": 0.15,
+    "deadband": 0.1,
+    "stop_deadband": 0.04,
     "filter_tau_s": 0.12,
     "target_filter_tau_s": 0.15,
     "upstream_trajectory": {
       "enabled": true,
-      "max_acceleration_counts_s2": 800.0,
-      "max_jerk_counts_s3": 8000.0
+      "max_acceleration_counts_s2": 1600.0,
+      "max_jerk_counts_s3": 16000.0
     },
     "return_duration_s": 3.0,
     "adaptive_speed": false,
-    "coordination_mode": "visual_error_assist",
+    "coordination_mode": "fixed_camera_eye_offset",
     "observed_direction": "User probe: increasing count turns robot-left; image-to-yaw sign is set separately from integrated onsite feedback.",
     "parameter_basis": "User observed two bounded neck probes; no PID/deadband/acceleration writes requested",
     "tracking_direction_revision": "2026-11-05 upright-camera integrated test: user reported ID32 reversed; flip sign from-1 to+1 only, pending replay observation."
   },
-  "parameter_revision_source": "2026-11-05 Xiaoshuai fixed brow camera and independent32 yaw/33 pitch/34 roll. User confirmed support and safe2047 return; two fixed probes completed without alarms. Do not use Mojia CAD,108px bias or parallel equations.",
+  "parameter_revision_source": "2026-11-05 user requested full EEPROM neck travel and faster following; fixed-camera settled-eye recruitment, calibration-derived eye endpoints, higher reference gains/speeds. YuNet320 detection with640 preview benchmark ~20ms vs640 ~67ms; preserve640 preview and original-frame coordinates. Onsite response tuning pending.",
   "neck_topology": "independent",
   "independent_neck": {
     "schema_version": "vivis-independent-neck-tracking-1.0",
@@ -107,7 +104,7 @@
     "pitch": {
       "id": 33,
       "sign": 1,
-      "gain_counts_s": 80
+      "gain_counts_s": 240
     },
     "roll": {
       "id": 34,
@@ -115,14 +112,15 @@
     },
     "upstream_trajectory": {
       "enabled": true,
-      "max_acceleration_counts_s2": 400.0,
-      "max_jerk_counts_s3": 4000.0
+      "max_acceleration_counts_s2": 800.0,
+      "max_jerk_counts_s3": 8000.0
     },
     "return_duration_s": 3.0,
     "roll_follow_ratio": 0.25,
     "roll_reference_rad": 0.5235987755982988,
-    "roll_gain_s": 1.5,
+    "roll_gain_s": 3.0,
     "roll_filter_tau_s": 0.15,
-    "direction_source": "User:33 increasing looks down;34 increasing tilts robot right. Image roll response pending integrated onsite observation."
+    "direction_source": "User:33 increasing looks down;34 increasing tilts robot right. Image roll response pending integrated onsite observation.",
+    "range_mode": "device"
   }
 }

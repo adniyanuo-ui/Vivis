@@ -9,7 +9,7 @@ import hashlib
 from pathlib import Path
 
 from vivis.paths import ROOT
-from vivis.motion.mapping import read_json
+from vivis.motion.mapping import read_json,calibrated_eye_endpoints
 from vivis.runtime.telemetry import apply_policy
 
 
@@ -127,6 +127,11 @@ class Robot:
         c['camera']['device'] = selected
         c['control']['camera_eye'] = None if mount.get('mount')=='fixed' else camera
         c['control']['speed_counts_s'] = self.axes[8]['max_speed_counts_s']
+        endpoint_source=c['control'].get('endpoint_source','configured')
+        if endpoint_source not in ('configured','calibration_device_clipped'):raise ValueError('Unknown eye endpoint source')
+        if endpoint_source=='calibration_device_clipped':
+            shapes={s['shape']:{p['id']:p['position'] for p in s['positions']} for s in read_json(self.calibration)['blendShapes']}
+            for axis in c['control']['axes']:axis.update(calibrated_eye_endpoints(axis,shapes,self.axes[axis['id']]))
         for a in c['control']['axes']:
             # Explicit per-axis overrides are sourced from the same hardware table.
             a['speed_counts_s'] = self.axes[a['id']]['max_speed_counts_s']
