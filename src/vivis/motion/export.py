@@ -24,7 +24,7 @@ def export_work(robot, name, clip, audio):
         raise ValueError('Work already exists; use a new name')
     clip, audio = Path(clip), Path(audio)
     values, fps, order, shapes = inputs(clip, robot.calibration, robot.resolve('channels'),
-                                       allowed_motor_ids=set(range(2, 37)))
+                                       allowed_motor_ids=set(robot.axes))
     if fps not in (30, 60):
         raise ValueError('Developer examples currently accept30/60FPS sources')
     with wave.open(str(audio)) as wav:

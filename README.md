@@ -52,7 +52,7 @@ sudo apt-get install -y \
 ./tools/check_delivery.sh
 ```
 
-当前版本预期通过264项测试，最后显示“离线交付自检通过”。这里的“离线”指不连接、驱动机器头；安装依赖仍需联网。运行时使用项目自己的`.venv`，无需激活虚拟环境。
+预期全部测试通过，最后显示“离线交付自检通过”。这里的“离线”指不连接、驱动机器头；安装依赖仍需联网。运行时使用项目自己的`.venv`，无需激活虚拟环境。
 
 ## 3. 核对USB外设并设置串口权限
 
@@ -133,3 +133,16 @@ http://127.0.0.1:8765/
 需要只检查、不播放时，在播放指令末尾加`--check`。正常播放结束显示`ROUND 1/1 COMPLETE`。运行中按`Ctrl+C`停止音频和新位置指令，程序清理本次资源并保留颈部扭矩。
 
 终端会打印本次日志目录，位于`outputs/developer/`下。播放新的作品、选择仅面部或增加眼球跟踪，见[新作品快速上手](docs/developer/QUICKSTART.md)。
+
+## 切换到小帅机器头
+
+本页前述随箱播放指令默认使用墨甲。小帅需显式选择自己的配置；首轮仅播放面部和音频，25个面部轴缓慢准备，眼球和颈部不参与使能或位置发送：
+
+```bash
+./examples/01_face_control/run.sh \
+  --robot configs/robots/xiaoshuai/robot.json \
+  --work 0001 --repeat 1 \
+  --mouth-command-mode lips-direct --mouth-speed 600
+```
+
+末尾加`--check`做离线检查。小帅仍以2047作为表情换算基准，颧骨ID24按当前限位采用2030回中；完整说明见[小帅配置](configs/robots/xiaoshuai/README.md)。切回墨甲可使用前述原播放指令。

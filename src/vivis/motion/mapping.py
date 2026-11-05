@@ -68,7 +68,7 @@ def compile_trajectory(values,order,shapes,profile,scope='full',draft=False):
                     weights[:,lookup[name]]=np.clip((angle if positive else -angle)/endpoint,0,1)
     result=np.zeros((len(values),len(active)));raw=result.copy();clipping={}
     for j,sid in enumerate(active):
-        motor=motors[sid];neutral=motor['neutral']
+        motor=motors[sid];neutral=motor.get('mapping_neutral',motor['neutral'])
         delta=np.zeros(len(values));weight_sum=np.zeros(len(values))
         blink_name='EyeBlinkLeft' if sid in [5,6] else 'EyeBlinkRight' if sid in [20,21] else None
         for name,positions in shapes.items():

@@ -4,8 +4,6 @@ import numpy as np
 from pathlib import Path
 from vivis.motion.mapping import read_json
 
-MOJIA_IDS = set(range(2,32)) | {35,36}
-
 def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -51,7 +49,9 @@ def load_targets(targets_path,profile,audio,calibration):
     if payload['calibration_sha256']!=profile['calibration_sha256'] or payload['audio_sha256']!=profile['audio_sha256']:
         raise ValueError('Target provenance mismatch')
     ids=payload['motor_ids'];positions=np.asarray(payload['positions'],dtype=float)
-    if (not ids or len(set(ids))!=len(ids) or any(type(sid) is not int or sid not in MOJIA_IDS for sid in ids)
+    configured_ids={m['id'] for m in profile['motors']}
+    if (not ids or len(set(ids))!=len(ids) or any(type(sid) is not int or not 0<=sid<=253 for sid in ids)
+            or not set(ids)<=configured_ids
             or positions.shape!=(payload['frames'],len(ids)) or not len(positions) or not np.isfinite(positions).all()):
         raise ValueError('Invalid Mojia target matrix')
     if set(ids)!=set(profile['diagnostic_command_ids']):raise ValueError('Command IDs differ from profile')

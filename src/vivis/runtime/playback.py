@@ -196,7 +196,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     scheduled_feedback=profile.get('scheduled_feedback',False)
     if type(scheduled_feedback) is not bool:
         raise ValueError('Invalid scheduled feedback flag')
-    reviewed_face=(profile.get('schema_version')=='mojia-playback-0.1'
+    reviewed_face=(profile.get('schema_version') in ('mojia-playback-0.1','vivis-face-playback-1.0')
                    and profile.get('developer_mode')=='face' and gaze_override is None)
     if scheduled_feedback and ((not mojia_gaze and not reviewed_face) or record_only or feedback_age_limit is None
             or profile.get('serial_backend')!='feetech_python' or profile.get('feedback_mode')!='short_registers'):

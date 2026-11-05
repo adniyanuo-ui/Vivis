@@ -131,6 +131,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     if args.upstream_trajectory=='on' and (mode!='eyes-neck' or args.home_only):
         parser.error('上游轨迹规划只能用于示例3的眼颈跟踪播放')
     robot = Robot(args.robot)
+    robot.require_mode(mode)
     if args.mouth_speed is not None:robot.set_mouth_speed(args.mouth_speed)
     if mode != 'face' and not args.home_only:
         from vivis.runtime.assets import verify_model
@@ -190,13 +191,14 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         config['control']['held_eye_ids'] = [7, 22]
         config_path = output / 'tracking_effective.json'
         config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n')
-        print(f'模式：{mode}；作品：{args.work}；每遍独立准备、35轴缓慢回中。', flush=True)
+        print(f'模式：{mode}；作品：{args.work}；每遍独立准备、{len(robot.home()["axes"])}轴缓慢回中。', flush=True)
         if args.mouth_speed is not None:
             print(f'口部速度对照：{args.mouth_speed}计数/秒；通过原启动流程写入并核验SRAM，默认配置不改。',flush=True)
         if args.round_lip_gain!=1.:
             print(f'圆唇通道增益：MouthFunnel/MouthPucker ×{args.round_lip_gain}；原素材及其他通道保持。',flush=True)
         if args.mouth_command_mode=='lips-direct' and not args.home_only:
-            print('口型对照：歌曲阶段直接发送10个圆唇轴及ID31下颌原目标；启动避让、回中和硬件限速保留。',flush=True)
+            p=robot.motion_profile();direct=set(p['round_lip_motion_ids'])|set(p['jaw_open_motion_ids'])
+            print(f'口型对照：歌曲阶段直接发送{len(direct)}个口型轴的映射目标；启动避让、回中和硬件限速保留。',flush=True)
         if mode=='eyes-neck' and not args.home_only:
             print('上游轨迹规划：'+('开启（仅ID32）' if trajectory['enabled'] else '关闭（使用原150ms位置低通）'),flush=True)
             print('并联颈部：'+('开启（ID33/34俯仰及轻微侧倾）' if parallel['enabled'] else '关闭（ID33/34保持）'),flush=True)

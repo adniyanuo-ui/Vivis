@@ -1,6 +1,6 @@
 {
   "schema_version": "vivis-calibration-comparison-report-1.0",
-  "status": "awaiting_commissioning_confirmation",
+  "status": "configured_face_only_pending_onsite_acceptance",
   "identity": {
     "name": "xiaoshuai",
     "display_name": "小帅",
@@ -2809,5 +2809,29 @@
     "byte_order": "little",
     "meaning": "servo_firmware_configured_position_limits; distinct from mechanical stops",
     "device_registers_written": false
+  },
+  "commissioning_decisions": {
+    "user_neutral_reference": 2047,
+    "id31_neutral_reference": 2047,
+    "id24": {
+      "role": "cheek",
+      "mapping_neutral": 2047,
+      "reachable_home": 2030,
+      "basis": "User allowed nearest feasible home; clamp2047 to EEPROM upper2030"
+    },
+    "limits": "clip_to_current_eeprom_limits",
+    "first_mode": "face",
+    "held_uncommanded_ids": [
+      7,
+      8,
+      22,
+      23,
+      29,
+      32,
+      33,
+      34
+    ],
+    "initial_face_speed_counts_s": 600,
+    "home_speed_counts_s": 60
   }
 }

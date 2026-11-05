@@ -17,7 +17,7 @@ def round_lip_gain_targets(robot,work,ids,positions,fps,gain=1.):
         raise ValueError('This work has no verified source clip for runtime channel gain')
     digest=hashlib.sha256(source.read_bytes()).hexdigest()
     if digest!=work['source_clip_sha256']:raise ValueError('Channel gain source SHA256 mismatch')
-    values,source_fps,order,shapes=inputs(source,robot.calibration,robot.resolve('channels'))
+    values,source_fps,order,shapes=inputs(source,robot.calibration,robot.resolve('channels'),set(robot.axes))
     if source_fps==30 and fps==60:values=np.repeat(values,2,axis=0)
     elif source_fps!=fps:raise ValueError('Channel gain requires matching FPS or30-to60 held samples')
     if result.shape!=(len(values),len(ids)):raise ValueError('Channel gain source timing/shape mismatch')

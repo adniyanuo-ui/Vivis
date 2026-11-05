@@ -1,0 +1,44 @@
+{
+  "home_speed_counts_s": 60,
+  "axis_ids": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    24,
+    25,
+    26,
+    27,
+    28,
+    30,
+    31
+  ],
+  "disabled_position_recovery": {
+    "max_outside_counts": 10,
+    "confirmation_samples": 2,
+    "max_sample_spread_counts": 2,
+    "max_speed_counts_s": 60,
+    "timeout_s": 2.0,
+    "axis_overrides": {
+      "24": {
+        "max_outside_counts": 20,
+        "timeout_s": 2.0
+      }
+    }
+  },
+  "basis": "Face-only commissioning; no eye, neck or unmapped axis priming. ID24 observed disabled15 counts above max; bounded recovery with two confirmations."
+}

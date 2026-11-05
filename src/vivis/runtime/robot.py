@@ -26,21 +26,41 @@ class Robot:
             raise ValueError('Robot calibration changed; review derived assets before playback')
         self.hardware = read_json(self.resolve('hardware'))
         axes = self.hardware['axes']
-        if [a['id'] for a in axes] != list(range(2, 37)):
+        legacy = self.hardware.get('schema_version') == 'vivis-mojia-hardware-1.0'
+        if legacy and [a['id'] for a in axes] != list(range(2, 37)):
             raise ValueError('Mojia requires the complete ordered 35-axis inventory')
-        if self.hardware.get('schema_version') != 'vivis-mojia-hardware-1.0':
+        if self.hardware.get('schema_version') not in ('vivis-mojia-hardware-1.0','vivis-feetech-hardware-1.0'):
             raise ValueError('Unsupported hardware definition')
+        ids=[a['id'] for a in axes]
+        if (not ids or any(type(sid) is not int or not 0<=sid<=253 for sid in ids)
+                or ids!=sorted(set(ids))):
+            raise ValueError('Robot requires an ordered unique actuator inventory')
         self.axes = {a['id']: a for a in axes}
         for a in axes:
-            if (a['neutral'] != 2047 or a.get('neutral_confirmed') is not True
+            if legacy and (a['neutral'] != 2047 or a.get('neutral_confirmed') is not True
                     or a['model_raw_expected'] != (10760 if 31 <= a['id'] <= 35 else 521)):
                 raise ValueError('Mojia neutral/model inventory mismatch')
+            if not legacy:
+                neutral=a['neutral'];home=a.get('home_position',neutral)
+                if (type(neutral) is not int or not 0<=neutral<=4095 or a.get('neutral_confirmed') is not True
+                        or a['model_raw_expected'] not in (521,10760,11272)
+                        or not 0<=a['device_min']<=a['safe_min']<=a['safe_max']<=a['device_max']<=4095
+                        or type(home) is not int or home!=max(a['safe_min'],min(a['safe_max'],neutral))):
+                    raise ValueError('Robot neutral/model/device envelope mismatch')
+        modes=self.definition.get('supported_modes',['face','eyes','eyes-neck'])
+        if not modes or len(set(modes))!=len(modes) or not set(modes)<={'face','eyes','eyes-neck'}:
+            raise ValueError('Invalid supported robot modes')
         self.works = read_json(self.resolve('works'))
         if self.works.get('schema_version') != 'vivis-works-1.0':
             raise ValueError('Unsupported work manifest')
 
     def resolve(self, key):
         return (self.directory / self.definition[key]).resolve()
+
+    def require_mode(self,mode):
+        if mode not in self.definition.get('supported_modes',['face','eyes','eyes-neck']):
+            raise ValueError('Robot '+self.definition['name']+' currently supports only: '+
+                             ', '.join(self.definition['supported_modes']))
 
     def work(self, name):
         if name not in self.works['works']:
@@ -58,6 +78,10 @@ class Robot:
         p['motors'] = [{k: copy.deepcopy(v) for k, v in a.items()
                         if k not in ('role', 'playback_enabled', 'acceleration_raw', 'pid_raw', 'deadband_raw')}
                        for a in self.axes.values() if a['playback_enabled']]
+        for motor in p['motors']:
+            if motor.get('home_position',motor['neutral'])!=motor['neutral']:
+                motor['mapping_neutral']=motor['neutral']
+                motor['neutral']=motor['home_position']
         p.update(calibration_sha256=self.calibration_sha256, calibration_path=str(self.calibration))
         shapes=read_json(self.calibration)['blendShapes']
         p['mouth_motion_ids']=sorted({point['id'] for shape in shapes
@@ -110,21 +134,29 @@ class Robot:
         a = self.axes[32]
         c['neck'].update(speed_counts_s=a['max_speed_counts_s'],
                          observed_acceleration_raw=a['acceleration_raw'],
-                         observed_pid_raw=a['pid_raw'], observed_deadband_counts=a['deadband_raw'])
+                         observed_pid_raw=a.get('pid_raw'), observed_deadband_counts=a.get('deadband_raw'))
         return c
 
     def home(self):
         data = read_json(self.resolve('homing'))
+        ids=data.get('axis_ids',list(self.axes))
+        if not ids or len(set(ids))!=len(ids) or not set(ids)<=set(self.axes):
+            raise ValueError('Invalid configured home inventory')
         return dict(schema_version='actuator-neutral-inventory-1.0',
-                    axes=[{k: a[k] for k in ('id', 'neutral', 'neutral_confirmed', 'model_raw_expected')}
-                          for a in self.axes.values()],
+                    axes=[dict(id=sid,neutral=self.axes[sid].get('home_position',self.axes[sid]['neutral']),
+                               neutral_confirmed=self.axes[sid]['neutral_confirmed'],
+                               model_raw_expected=self.axes[sid]['model_raw_expected']) for sid in ids],
                     recovery_clearance=data.get('recovery_clearance'),
                     disabled_position_recovery=data.get('disabled_position_recovery'))
 
-    def startup(self):
+    def startup(self,active_ids=None,inventory_ids=None):
+        inventory=set(self.axes) if inventory_ids is None else set(inventory_ids)
+        selected={a['id'] for a in self.axes.values() if a['playback_enabled']} if active_ids is None else set(active_ids)
+        if not selected<=inventory<=set(self.axes) or any(not self.axes[sid]['playback_enabled'] for sid in selected):
+            raise ValueError('Invalid startup actuator selection')
         axes = []
         for a in self.axes.values():
-            if not a['playback_enabled']:
+            if a['id'] not in selected:
                 continue
             row = dict(id=a['id'], model_raw=a['model_raw_expected'],
                        device_limits=[a['device_min'], a['device_max']],
@@ -133,8 +165,8 @@ class Robot:
                 if key in a:
                     row[key] = copy.deepcopy(a[key])
             axes.append(row)
-        return dict(schema_version='mojia-startup-hardware-1.0', axes=axes,
-                    excluded_ids=[a['id'] for a in self.axes.values() if not a['playback_enabled']])
+        schema='mojia-startup-hardware-1.0' if self.hardware['schema_version']=='vivis-mojia-hardware-1.0' else 'vivis-feetech-startup-hardware-1.0'
+        return dict(schema_version=schema,axes=axes,excluded_ids=sorted(inventory-selected))
 
     def telemetry(self):
         return read_json(self.resolve('telemetry'))

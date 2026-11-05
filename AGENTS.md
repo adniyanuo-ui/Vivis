@@ -5,7 +5,7 @@ This branch is the standalone Mojia developer delivery. Keep only active source,
 ## Structure and sources
 
 - `src/vivis/`: shared motion/runtime/vision/Feetech implementation; never copy algorithms into examples.
-- `configs/robots/mojia/`: canonical hardware, final calibration, tracking, homing and telemetry.
+- `configs/robots/<robot>/`: independent canonical hardware, calibration, tracking, homing, telemetry and work references per head; Mojia remains the default.
 - `assets/works/` and `assets/models/`: actual tracked media/model files, not external pointers.
 - `src/vivis/hardware/feetech/_vendor/`: required pinned SDK subset with its license.
 - `tests/`: regression tests using mocks and PTYs.
@@ -29,6 +29,8 @@ Use clear Chinese documentation and local links. Distinguish source targets, tra
 
 ## Calibration background
 
+The following historical MouthClose, tongue recovery and tuning decisions concern Mojia. Do not apply those device-specific exceptions to another robot merely because its actuator IDs overlap.
+
 Read [人工标定与表情驱动对齐原则](docs/developer/机电仿生头_人工标定与表情驱动说明.md) when discussing or changing calibration semantics. This records the user's confirmed background, with current implementation and future deployment kept distinct:
 
 - Neutral is added once. An unlisted motor has the neutral endpoint and contributes zero delta for that shape; contributions from other shapes remain. Sparse JSON and dense AFS are position-equivalent under direct delta summation. Do not treat normalization-specific membership effects as missing basic calibration information. Direct delta summation is the reference principle; the accepted runtime currently uses `bounded_weighted_deltas` with additional eye/ownership rules. A documentation change does not switch that algorithm.
@@ -44,5 +46,12 @@ Startup tongue/jaw order is physically validated: slowly open ID31 slightly (con
 Tongue startup arrival requires BOTH the neutral-distance tolerance and reentry into the configured device/feedback corridor, twice consecutively. Near-neutral unpowered2055/2052 readings outside the2050 upper limit are not arrival and must not skip jaw clearance. Retain the bounded initial recovery envelope and10-second deadline; never expand command/device limits to make this check pass.
 
 On2026-10-29 the user explicitly corrected JawOpen ID31's full-weight endpoint from1380 to1547 in 墨甲10.29.json. Neutral remains2047. Recompute calibration mapping from the corrected endpoint; do not retain the1380 curve and merely clip its end. Both works were regenerated with only ID31 positions changing. This correction does not authorize any additional hardware or gain changes.
+
+## Xiaoshuai commissioning (2026-11-05)
+
+- Select `configs/robots/xiaoshuai/robot.json` with `--robot`; share the implementation and upstream0001 media, but keep its target trajectory under `assets/works/xiaoshuai/0001/`. Its33-axis inventory is2..34, with31..34 user-confirmed SM45BL/model11272.
+- The user confirmed a2047 expression mapping reference and authorized clipping to current EEPROM limits. ID24 is a cheek axis; its stored upper limit2030 excludes2047. Keep the source mapping reference2047, record `home_position=2030`, and use the profile's explicit `mapping_neutral` when calculating expression deltas. Never rewrite the calibration endpoints or EEPROM bounds to hide this difference.
+- The first supported mode is face/audio only:25 face axes prepare and play; eye axes7/8/22/23, unmapped29 and neck32/33/34 receive no goals, priming or enable writes. The passive unpowered ID33 reading1507 below1600 is not authorization to recover it. ID24's disabled15-count passive offset has a bounded20-count, two-read startup policy only; playback bounds remain unchanged.
+- Initial task speed600 and homing cap60 are engineering choices pending user observation, not measured dynamic performance. Do not inherit Mojia's ID29 recovery/unload, PID/deadband writes, fixed USB volume or parallel-platform geometry. Eye/neck tracking modes stay disabled until independently commissioned.
 
 The user subsequently authorized weaker software sensor protection because the calibrator has verified hardware travel/torque protection. During song playback, voltage/current/load/temperature status bits and numeric voltage or >100C faults require four consecutive complete valid samples of the same axis and fault kind; normal readings reset that kind. Numeric load>800 and temperature>80C remain warnings. Preserve raw register and packet alarm bits, checksum/ID/length validation, communication watchdogs, position bounds and strict startup/homing behavior. Hardware protection registers must not be disabled. Count complete samples, never the several packets making up one sample.

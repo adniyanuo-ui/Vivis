@@ -1,6 +1,6 @@
 """Restore explicitly configured tuning before homing, without enabling axes.
 
-Both commissioned models use these addresses. Limits, phase, EEPROM lock,
+The supported magnetic-encoder model revisions use these addresses. Limits, phase, EEPROM lock,
 torque enable and position targets are never written by this module.
 """
 import time
@@ -10,7 +10,7 @@ from vivis.runtime.playback import startup_feedback
 
 
 def startup_plan(preset, snapshots, home_speed):
-    if preset.get('schema_version')!='mojia-startup-hardware-1.0':
+    if preset.get('schema_version') not in ('mojia-startup-hardware-1.0','vivis-feetech-startup-hardware-1.0'):
         raise ValueError('Unsupported startup hardware schema')
     if type(home_speed) is not int or not 1<=home_speed<=32767:
         raise ValueError('Invalid startup home speed')
@@ -26,7 +26,7 @@ def startup_plan(preset, snapshots, home_speed):
     plan=[]
     for a in axes:
         sid=a['id'];s=states[sid]
-        if (a['model_raw'] not in (521,10760) or s['model_raw']!=a['model_raw']
+        if (a['model_raw'] not in (521,10760,11272) or s['model_raw']!=a['model_raw']
                 or s['mode']!=0 or s['status_register']
                 or [s['configured_min'],s['configured_max']]!=a['device_limits']):
             raise RuntimeError(f'ID{sid}: startup model/mode/limits/status mismatch')

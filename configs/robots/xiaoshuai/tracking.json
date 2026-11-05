@@ -1,0 +1,24 @@
+{
+  "schema_version": "mojia-person-gaze-1.0",
+  "camera": {
+    "device": "/dev/v4l/by-id/usb-RXSX_Technology_Co.__Ltd._USB_Camera_4K_RXSX001-video-index0",
+    "width": 640,
+    "height": 480,
+    "fps": 30,
+    "rotation_deg": 0,
+    "mirror_x": false
+  },
+  "control": {
+    "axes": [],
+    "mount_confirmed": false,
+    "calibration_confirmed": false,
+    "vertical_enabled": false
+  },
+  "neck": {
+    "id": 32,
+    "upstream_trajectory": {
+      "enabled": false
+    }
+  },
+  "status": "Face mode only; camera mounting and eye/neck directions not commissioned."
+}

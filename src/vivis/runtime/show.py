@@ -81,12 +81,15 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
         raise ValueError('Unknown developer mode')
     if mouth_command_mode not in ('limited','lips-direct'):
         raise ValueError('Unknown mouth command mode')
-    monitored=list(ids)+[32,33,34]
+    extra=profile.get('additional_monitor_ids',[32,33,34])
+    monitored=list(ids)+list(extra)
     if len(set(monitored))!=len(monitored):raise ValueError('Repeated motor ownership')
     if mode=='face':
         p=copy.deepcopy(profile)
-        p['diagnostic_command_ids']=[sid for sid in profile['diagnostic_command_ids'] if sid not in (7,8,22,23)]
-        p.update(gaze_owner_ids=[],held_eye_ids=[7,8,22,23],held_neck_ids=[32,33,34])
+        p['diagnostic_command_ids']=[sid for sid in profile['diagnostic_command_ids']
+                                     if sid not in profile.get('held_eye_ids',[7,8,22,23])]
+        p.update(gaze_owner_ids=[],held_eye_ids=profile.get('held_eye_ids',[7,8,22,23]),
+                 held_neck_ids=profile.get('held_neck_ids',[32,33,34]))
     else:
         p=tracking_profile(config,profile,monitored,neck=mode=='eyes-neck')
     p['developer_mode']=mode
@@ -107,9 +110,17 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
         if authorize_tongue:
             p['acceptance_exception']=dict(id=29,initial_settle_tolerance_counts=40,
                 basis='Existing authorized startup residual; load/temperature use the common telemetry policy')
-    trajectory=np.column_stack([positions,np.full((len(positions),3),2047.)])
-    for sid in p['gaze_owner_ids']:trajectory[:,monitored.index(sid)]=2047.
-    for sid in p.get('held_eye_ids',[]):trajectory[:,monitored.index(sid)]=2047.
+    trajectory=np.column_stack([positions,*[np.full(len(positions),motors[sid]['neutral']) for sid in extra]])
+    for sid in p['gaze_owner_ids']:trajectory[:,monitored.index(sid)]=motors[sid]['neutral']
+    for sid in p.get('held_eye_ids',[]):
+        if sid in monitored:trajectory[:,monitored.index(sid)]=motors[sid]['neutral']
+    if p.get('exclude_held_axes_from_session',False):
+        if mode!='face':raise ValueError('Excluding held axes is only commissioned for face mode')
+        held=set(p['held_eye_ids'])|set(p['held_neck_ids'])
+        columns=[j for j,sid in enumerate(monitored) if sid not in held]
+        monitored=[monitored[j] for j in columns];trajectory=trajectory[:,columns]
+        p['motors']=[m for m in p['motors'] if m['id'] in monitored]
+        p['diagnostic_command_ids']=[sid for sid in p['diagnostic_command_ids'] if sid in monitored]
     trajectory,p['mouth_gain_report']=mouth_gain_targets(p,monitored,trajectory,mouth_gain)
     p['mouth_motion_gain']=mouth_gain
     direct=sorted(set(p.get('round_lip_motion_ids',[]))|set(p.get('jaw_open_motion_ids',[]))) if mouth_command_mode=='lips-direct' else []
@@ -314,6 +325,7 @@ def main(argv=None):
     if not 1<=args.home_speed<=32767:parser.error('Home speed must be within 1..32767')
     from vivis.runtime.robot import Robot
     robot=Robot(args.robot)
+    robot.require_mode(args.mode)
     if args.mouth_speed is not None:robot.set_mouth_speed(args.mouth_speed)
     work=robot.work(args.work)
     args.targets,args.audio=work['targets'],work['audio']
@@ -347,7 +359,9 @@ def main(argv=None):
         parser.error('Home inventory must cover every task axis with confirmed neutrals')
     motors={m['id']:m for m in profile['motors']}
     clearance_plan=recovery_clearance_plan(home_inventory,motors)
-    hardware_preset=robot.startup() if not args.home_only else None
+    if profile.get('exclude_held_axes_from_session') and set(home_ids)!=set(ids):
+        parser.error('Face-only home inventory must match session axes; held axes must remain untouched')
+    hardware_preset=robot.startup(active_ids=motors,inventory_ids=home_ids) if not args.home_only else None
     if hardware_preset is not None:
         expected={a['id']:a for a in hardware_preset['axes']}
         if set(expected)!=set(motors) or any(expected[sid]['speed_raw']!=m['max_speed_counts_s'] for sid,m in motors.items()):

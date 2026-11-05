@@ -34,3 +34,11 @@
 预制回放默认不读取61通道制作数据。四份作品均随包提供`assets/works/作品名/source.json`，用于显式`--round-lip-gain`运行时通道增益：0001是约8.78MB的原始60FPS数据，wz2是约914KB的原始30FPS数据，作品3是约1.32MB的原始30FPS数据，这三份源文件的原字节与哈希保留；作品4使用上述派生60FPS数据，并另存原始JSON。它们不是另一套硬件配置。30FPS源数据按逐帧保持转换到60FPS，0001保持原60FPS；只重新映射Funnel/Pucker涉及的轴，其余轨迹列保留。该功能不依赖原工程目录。
 
 A2F权重不属于预制回放的运行依赖。客户接入自己的素材时可按教程生成新作品。完整AI产品、训练平台和相关模型的分发另行约定。
+
+## 3. 机器人专属轨迹
+
+上表四份作品属于默认墨甲清单`assets/works.json`。小帅有独立清单`configs/robots/xiaoshuai/works.json`，作品1复用`assets/works/0001/`的原音频与源JSON，按小帅标定和设备范围重新计算的目标位于`assets/works/xiaoshuai/0001/targets.json`。运行时通过`--robot configs/robots/xiaoshuai/robot.json`选择，两个机器人的电机轨迹和硬件参数不混用。
+
+```bash
+.venv/bin/python tools/check_assets.py --robot configs/robots/xiaoshuai/robot.json
+```
