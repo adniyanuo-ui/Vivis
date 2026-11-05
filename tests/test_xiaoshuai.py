@@ -172,7 +172,7 @@ class XiaoshuaiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder,redirect_stdout(io.StringIO()), \
              patch.object(launcher,'ROOT',Path(folder)),patch.object(show,'ROOT',Path(folder)), \
              patch.object(launcher,'check_competitors'), \
-             patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus), \
+             patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus) as constructor, \
              patch('vivis.runtime.homing.time.monotonic',side_effect=lambda:clock.now), \
              patch('vivis.runtime.homing.time.sleep',side_effect=sleep), \
              patch.object(show,'play',side_effect=played),patch.object(show,'unload_tongue') as unload, \
@@ -185,6 +185,8 @@ class XiaoshuaiTests(unittest.TestCase):
             self.assertTrue(summary['completed']);self.assertTrue(prep['homing']['completed'])
             self.assertEqual(prep['homing']['neutral_targets']['24'],2030)
             self.assertTrue(any(r['id']==24 and r['confirmed'] for r in prep['homing']['disabled_position_recoveries']))
+            self.assertEqual(constructor.call_args.kwargs['feedback_mode'],'short_registers')
+            self.assertEqual(constructor.call_args.kwargs['post_goal_quiet_ms'],1)
             unload.assert_not_called()
         self.assertTrue(writes);self.assertTrue(goals)
         self.assertEqual(positions[24],2030)

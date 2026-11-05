@@ -139,15 +139,19 @@ class Robot:
 
     def home(self):
         data = read_json(self.resolve('homing'))
+        if type(data.get('sensor_fault_confirmation',False)) is not bool:
+            raise ValueError('Invalid homing sensor confirmation switch')
         ids=data.get('axis_ids',list(self.axes))
         if not ids or len(set(ids))!=len(ids) or not set(ids)<=set(self.axes):
             raise ValueError('Invalid configured home inventory')
-        return dict(schema_version='actuator-neutral-inventory-1.0',
+        result=dict(schema_version='actuator-neutral-inventory-1.0',
                     axes=[dict(id=sid,neutral=self.axes[sid].get('home_position',self.axes[sid]['neutral']),
                                neutral_confirmed=self.axes[sid]['neutral_confirmed'],
                                model_raw_expected=self.axes[sid]['model_raw_expected']) for sid in ids],
                     recovery_clearance=data.get('recovery_clearance'),
                     disabled_position_recovery=data.get('disabled_position_recovery'))
+        if 'sensor_fault_confirmation' in data:result['sensor_fault_confirmation']=data['sensor_fault_confirmation']
+        return result
 
     def startup(self,active_ids=None,inventory_ids=None):
         inventory=set(self.axes) if inventory_ids is None else set(inventory_ids)

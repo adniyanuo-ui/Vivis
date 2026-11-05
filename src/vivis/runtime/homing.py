@@ -1,7 +1,8 @@
 """Configured neutral poses and a shared smooth startup move; no axis IDs here."""
 import math
 import time
-from vivis.runtime.telemetry import evaluate,WarningRecorder,verify_sample
+from vivis.runtime.telemetry import evaluate,WarningRecorder,verify_sample,SensorFaultMonitor,alarm_bits
+from vivis.hardware.feetech.protocol import DEFERRED_SENSOR_ALARMS
 
 
 def write_ram_verified(bus,sid,address,value,width=1):
@@ -58,7 +59,7 @@ def recovery_policy(policy):
     return policy
 
 
-def home_check(state,snapshot,neutral=None,tolerance=0,telemetry_policy=None,position_recovery=None):
+def home_check(state,snapshot,neutral=None,tolerance=0,telemetry_policy=None,position_recovery=None,defer_sensor_faults=False):
     sid=snapshot['id']
     position=state['position']
     near_home=neutral is not None and abs(position-neutral)<=tolerance
@@ -68,12 +69,15 @@ def home_check(state,snapshot,neutral=None,tolerance=0,telemetry_policy=None,pos
         raise RuntimeError(f'ID{sid}: home position outside device limits; position={position} '
                            f'limits=[{snapshot["configured_min"]},{snapshot["configured_max"]}] '
                            f'initial_torque={snapshot["torque_enable"]}')
-    if state['status_register']:raise RuntimeError(f'ID{sid}: home servo alarm {state["status_register"]}')
+    if defer_sensor_faults and not telemetry_policy:raise ValueError('Homing sensor confirmation requires a telemetry policy')
+    bits=alarm_bits(state)
+    if bits and (not defer_sensor_faults or bits&~DEFERRED_SENSOR_ALARMS):
+        raise RuntimeError(f'ID{sid}: home servo alarm {bits}')
     if not telemetry_policy and state['temperature_c']>=snapshot['configured_max_temperature']:
         raise RuntimeError(f'ID{sid}: home hardware temperature threshold reached')
-    if not snapshot['configured_min_voltage_raw']<=state['voltage_raw']<=snapshot['configured_max_voltage_raw']:
+    if not defer_sensor_faults and not snapshot['configured_min_voltage_raw']<=state['voltage_raw']<=snapshot['configured_max_voltage_raw']:
         raise RuntimeError(f'ID{sid}: home voltage outside device limits')
-    return evaluate(sid,state,telemetry_policy) if telemetry_policy else []
+    return evaluate(sid,state,telemetry_policy,defer_critical_temperature=defer_sensor_faults) if telemetry_policy else []
 
 
 def homing_feedback_motor(motor,snapshot,position_recovery=None):
@@ -151,7 +155,7 @@ def smooth_home_targets(start,neutral,speed):
     return duration,at
 
 
-def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,keep_enabled=(),telemetry_policy=None,position_recovery=None):
+def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,keep_enabled=(),telemetry_policy=None,position_recovery=None,sensor_fault_confirmation=False):
     """Home the configured inventory; restore speed RAM and temporary enables.
 
     Hardware acceleration/PID/deadband are preserved. Existing task protection
@@ -159,6 +163,8 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
     device thresholds, with no new per-axis software tuning.
     """
     from vivis.runtime.playback import check_feedback,startup_feedback
+    if type(sensor_fault_confirmation) is not bool:raise ValueError('Invalid homing sensor confirmation switch')
+    monitor=SensorFaultMonitor(telemetry_policy,report.setdefault('sensor_fault_confirmations',[])) if sensor_fault_confirmation else None
     recoveries=report.setdefault('communication_recoveries',[])
     guard();snapshot_deadline=time.monotonic()+10
     snapshots=[startup_feedback(bus.snapshot,a['id'],snapshot_deadline,recoveries,
@@ -191,6 +197,17 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
                   samples=[],communication_recoveries=recoveries,ram_writes=[],restored_speeds=False)
     warning_recorder=WarningRecorder(report.setdefault('telemetry_warnings',[]))
     recovery_deadlines={};reentered=set();neutral_sent=set()
+    deadline=time.monotonic()+duration+10
+    def sample(sid):
+        if monitor is None:return bus.feedback(sid)
+        # Only complete motion feedback may defer sensor alarms. Snapshot,
+        # parameter/enable writes and their independent readbacks stay strict.
+        previous=getattr(bus,'servo_status_policy',None)
+        bus.servo_status_policy='defer_sensor_faults'
+        try:return bus.feedback(sid)
+        finally:
+            if previous is None:del bus.servo_status_policy
+            else:bus.servo_status_policy=previous
     def check(sid,state):
         tolerance=task_motors.get(sid,{}).get('initial_settle_tolerance_counts',20)
         def validate(sample):
@@ -209,19 +226,34 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
                 elif sid in recovery_deadlines and time.monotonic()>recovery_deadlines[sid]:
                     raise RuntimeError(f'ID{sid}: startup recovery did not reenter device limits or settle at neutral; '
                         f'position={sample["position"]} neutral={neutral[sid]} tolerance={tolerance}')
-            warnings=home_check(sample,states[sid],neutral[sid],tolerance,telemetry_policy,plan)
-            if sid in task_motors:warnings=check_feedback(sid,sample,homing_feedback_motor(task_motors[sid],states[sid],plan))
+            warnings=home_check(sample,states[sid],neutral[sid],tolerance,telemetry_policy,plan,
+                                defer_sensor_faults=monitor is not None)
+            if sid in task_motors:warnings=check_feedback(sid,sample,homing_feedback_motor(task_motors[sid],states[sid],plan),
+                                                         defer_sensor_faults=monitor is not None)
             return warnings
-        state,warnings=verify_sample(bus.feedback,sid,state,validate,telemetry_policy,
-            report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
+        if monitor is None:
+            state,warnings=verify_sample(bus.feedback,sid,state,validate,telemetry_policy,
+                report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
+        else:
+            limits=dict(min_voltage_raw=states[sid]['configured_min_voltage_raw'],
+                        max_voltage_raw=states[sid]['configured_max_voltage_raw'])
+            while True:
+                guard()
+                if time.monotonic()>deadline:raise RuntimeError('Homing sensor confirmation timeout')
+                warnings=validate(state)
+                monitor.observe(sid,state,limits)
+                if sid not in monitor.pending_ids():break
+                # Keep the last bounded goals while taking fresh whole samples.
+                # Missing/corrupt replies never count as healthy or faulty votes.
+                time.sleep(telemetry_policy['sensor_fault_confirmation_period_s'])
+                guard();state=sample(sid)
         warning_recorder.observe(sid,state,warnings)
         return state
     def read(sid):
         guard()
-        return check(sid,bus.feedback(sid))
+        return check(sid,sample(sid))
     for s in snapshots:
         check(s['id'],confirmed.get(s['id'],dict(position=s['position_raw'],**{k:s[k] for k in ('load_raw','temperature_c','voltage_raw','status_register')})))
-    deadline=time.monotonic()+duration+10
     restored=[];motion_complete=False;begin=None
     try:
         # Prime each disabled axis at its measured position before enabling it.

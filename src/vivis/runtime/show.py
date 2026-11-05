@@ -222,6 +222,8 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
             (directory/'profile.json').write_text(json.dumps(profile,ensure_ascii=False,indent=2)+'\n')
         from vivis.hardware.feetech.sdk import OfficialSDKBus
         bus=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20,
+                           feedback_mode=profile.get('feedback_mode','block'),
+                           post_goal_quiet_ms=profile.get('post_goal_quiet_ms',0),
                            trace_path=directory/'homing_serial_trace.json',
                            snapshot_chunk_bytes=profile.get('snapshot_chunk_bytes'))
         snapshot_deadline=time.monotonic()+10
@@ -272,7 +274,8 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
         publish('homing')
         print(f'HOME {len(home_axes)} AXES START speed_cap={args.home_speed}',flush=True)
         home_all(bus,home_axes,motors,guard,report['homing'],args.home_speed,original_speeds,keep_enabled=ids,
-                 telemetry_policy=telemetry_policy,position_recovery=position_policy)
+                 telemetry_policy=telemetry_policy,position_recovery=position_policy,
+                 sensor_fault_confirmation=getattr(args,'home_sensor_fault_confirmation',False))
         print('HOME COMPLETE; original speed settings restored',flush=True)
         bus.close();bus=None
     finally:
@@ -353,6 +356,9 @@ def main(argv=None):
     if args.baud is not None:profile['baud']=args.baud
     home_inventory=robot.home()
     args.home_position_recovery=recovery_policy(home_inventory.get('disabled_position_recovery'))
+    args.home_sensor_fault_confirmation=home_inventory.get('sensor_fault_confirmation',False)
+    if args.home_sensor_fault_confirmation and not telemetry_policy.get('sensor_fault_confirmation'):
+        parser.error('Homing sensor confirmation requires the shared telemetry confirmation policy')
     home_axes=home_inventory['axes'];home_ids=[a['id'] for a in home_axes]
     if (len(set(home_ids))!=len(home_ids) or not set(ids)<=set(home_ids)
             or any(type(a.get('neutral')) is not int or a.get('neutral_confirmed') is not True for a in home_axes)):
@@ -376,6 +382,7 @@ def main(argv=None):
                              scheduled_feedback=profile['scheduled_feedback'],
                              home_ids=home_ids,home_speed=args.home_speed,home_only=args.home_only,
                              disabled_position_recovery=args.home_position_recovery,
+                             home_sensor_fault_confirmation=args.home_sensor_fault_confirmation,
                              hardware_preset=str(robot.resolve('hardware')) if hardware_preset is not None else None,
                              telemetry_policy=telemetry_policy,
                              repeat_mode='independent_full_cycle',preparation_each_round=True,

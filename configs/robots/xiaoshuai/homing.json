@@ -1,5 +1,6 @@
 {
   "home_speed_counts_s": 60,
+  "sensor_fault_confirmation": true,
   "axis_ids": [
     2,
     3,
