@@ -55,6 +55,29 @@ class XiaoshuaiTests(unittest.TestCase):
         ids,positions,_=compile_trajectory(values,order,shapes,p,'face_eyes')
         self.assertEqual(positions[0,ids.index(24)],2047+.5*(1950-2047))
 
+    def test_jaw_open_is_not_diluted_by_neutral_records_from_unrelated_shapes(self):
+        robot=Robot(CONFIG);work=robot.work('0001');p=robot.motion_profile()
+        values,fps,order,shapes=inputs(work['source_clip'],robot.calibration,robot.resolve('channels'),set(robot.axes))
+        ids,targets,_=compile_trajectory(values,order,shapes,p,'face_eyes')
+        jaw=ids.index(31);expected=2047+values[:,order.index('JawOpen')]*(1850-2047)
+        np.testing.assert_allclose(targets[:,jaw],expected,rtol=0,atol=1e-10)
+        legacy=copy.deepcopy(p);legacy['jaw_owner']='all_calibrated'
+        old_ids,old,_=compile_trajectory(values,order,shapes,legacy,'face_eyes')
+        self.assertEqual(ids,old_ids)
+        np.testing.assert_array_equal(np.delete(targets,jaw,axis=1),np.delete(old,jaw,axis=1))
+        self.assertLess(targets[:,jaw].min(),1920);self.assertGreater(old[:,jaw].min(),1990)
+        self.assertEqual(sum(31 in points for points in shapes.values()),50)
+        self.assertEqual(Robot().motion_profile()['jaw_owner'],'all_calibrated')
+        self.assertTrue(all(robot.axes[sid]['max_speed_counts_s']==600 for sid in (5,6,20,21,31)))
+
+    def test_round_lip_gain_does_not_reintroduce_cross_channel_jaw_dilution(self):
+        from vivis.motion.channel_gain import round_lip_gain_targets
+        robot=Robot(CONFIG);work=robot.work('0001')
+        ids,positions,fps=load_targets(work['targets'],robot.profile('0001'),work['audio'],robot.calibration)
+        adjusted,report=round_lip_gain_targets(robot,work,ids,positions,fps,1.2)
+        np.testing.assert_array_equal(adjusted[:,ids.index(31)],positions[:,ids.index(31)])
+        self.assertNotIn(31,report['changed_ids'])
+
     def test_session_and_home_exclude_every_held_and_unmapped_axis(self):
         robot,p,ids,trajectory=face_fixture()
         self.assertEqual(len(ids),25);self.assertFalse(set(ids)&HELD)

@@ -6,7 +6,7 @@
       "targets": "assets/works/xiaoshuai/0001/targets.json",
       "audio": "assets/works/0001/audio.wav",
       "source_clip": "assets/works/0001/source.json",
-      "targets_sha256": "1e1d2f6728f4f7c7727d33509a9de05c725a51a5c9e05490e145bf08b785f6e6",
+      "targets_sha256": "6b8f3a00072f71572810d6ed3fbca6abfc27569c8313001d62419117e50b83d2",
       "audio_sha256": "cbd18a1080ce5c1830df8c4e1cbc3cacbcbee37f5075e18ab344549e0a36e3a6",
       "source_clip_sha256": "d023e6f09cf0a381dd3b12b713a178b5e40a6cf2b32a3e4033352cac86512b96",
       "calibration_sha256": "599fd7d1518ea0f35b40f7c3265c104fc68230a9027863449ccb8f496d3050ef",

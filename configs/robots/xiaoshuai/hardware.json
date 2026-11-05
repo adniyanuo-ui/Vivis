@@ -3,7 +3,7 @@
   "identity_source": "User confirmed same actuator distribution as Xiaobai; ID31..34 SM45BL; live read-only model/limit snapshots.",
   "runtime": {
     "mixing": "bounded_weighted_deltas",
-    "jaw_owner": "all_calibrated",
+    "jaw_owner": "JawOpen",
     "paired_eye_look_is_already_in_lids": true,
     "eye_angle_endpoints_rad": {
       "EyeLookDownLeft": 0.5235987755982988,
@@ -97,7 +97,8 @@
       22,
       23
     ],
-    "exclude_held_axes_from_session": true
+    "exclude_held_axes_from_session": true,
+    "jaw_owner_source": "Xiaoshuai face adaptation: prior Xiaobai uses JawOpen ownership;49 other ID31 endpoints are2050, near confirmed2047 neutral, and must not dilute jaw opening through dense normalization."
   },
   "axes": [
     {
