@@ -125,7 +125,7 @@ class Robot:
         if not selected:
             raise ValueError('Camera device is not configured; supply --camera-device')
         c['camera']['device'] = selected
-        c['control']['camera_eye'] = camera
+        c['control']['camera_eye'] = None if mount.get('mount')=='fixed' else camera
         c['control']['speed_counts_s'] = self.axes[8]['max_speed_counts_s']
         for a in c['control']['axes']:
             # Explicit per-axis overrides are sourced from the same hardware table.
@@ -137,11 +137,11 @@ class Robot:
                          observed_pid_raw=a.get('pid_raw'), observed_deadband_counts=a.get('deadband_raw'))
         return c
 
-    def home(self):
+    def home(self,mode=None):
         data = read_json(self.resolve('homing'))
         if type(data.get('sensor_fault_confirmation',False)) is not bool:
             raise ValueError('Invalid homing sensor confirmation switch')
-        ids=data.get('axis_ids',list(self.axes))
+        ids=data.get('mode_axis_ids',{}).get(mode,data.get('axis_ids',list(self.axes)))
         if not ids or len(set(ids))!=len(ids) or not set(ids)<=set(self.axes):
             raise ValueError('Invalid configured home inventory')
         result=dict(schema_version='actuator-neutral-inventory-1.0',

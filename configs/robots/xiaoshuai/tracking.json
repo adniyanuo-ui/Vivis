@@ -1,24 +1,127 @@
 {
-  "schema_version": "mojia-person-gaze-1.0",
+  "schema_version": "vivis-person-gaze-1.0",
   "camera": {
     "device": "/dev/v4l/by-id/usb-RXSX_Technology_Co.__Ltd._USB_Camera_4K_RXSX001-video-index0",
     "width": 640,
     "height": 480,
     "fps": 30,
     "rotation_deg": 0,
-    "mirror_x": false
+    "mirror_x": false,
+    "autofocus": true
+  },
+  "detector": {
+    "model": "assets/models/yunet/face_detection_yunet_2023mar.onnx",
+    "score_threshold": 0.8,
+    "min_face_area_ratio": 0.002,
+    "max_width": 640,
+    "hz": 20
+  },
+  "transport": {
+    "host": "127.0.0.1",
+    "port": 14787,
+    "max_age_s": 0.3
   },
   "control": {
-    "axes": [],
-    "mount_confirmed": false,
-    "calibration_confirmed": false,
-    "vertical_enabled": false
+    "camera_mount": "fixed",
+    "camera_eye": null,
+    "mount_confirmed": true,
+    "calibration_confirmed": true,
+    "direction_confirmation_source": "Eye signs inferred from Xiaoshuai EyeLook calibration; first integrated onsite verification pending",
+    "deadband": 0.035,
+    "filter_tau_s": 0.06,
+    "fixed_gain": 1.0,
+    "eye_velocity_gain": 3.2,
+    "max_axis_speed": 5.0,
+    "acquire_s": 0.12,
+    "lost_hold_s": 0.4,
+    "release_s": 0.8,
+    "axes": [
+      {
+        "name": "left_yaw",
+        "coordinate": "x",
+        "id": 8,
+        "negative": 1987,
+        "neutral": 2047,
+        "positive": 2107
+      },
+      {
+        "name": "right_yaw",
+        "coordinate": "x",
+        "id": 23,
+        "negative": 1987,
+        "neutral": 2047,
+        "positive": 2107
+      },
+      {
+        "name": "left_pitch",
+        "coordinate": "y",
+        "id": 7,
+        "negative": 2067,
+        "neutral": 2047,
+        "positive": 2027
+      },
+      {
+        "name": "right_pitch",
+        "coordinate": "y",
+        "id": 22,
+        "negative": 2027,
+        "neutral": 2047,
+        "positive": 2067
+      }
+    ],
+    "mount_confirmation_source": "2026-11-05 user confirmed camera fixed at brow center",
+    "vertical_enabled": true,
+    "vertical_direction_confirmed": false,
+    "validated_source": "Initial eye spans for commissioning; not a claim of completed onsite eye tracking acceptance",
+    "reference_eye": "right"
   },
   "neck": {
     "id": 32,
+    "sign": -1,
+    "range_mode": "configured",
+    "direction_confirmed": true,
+    "gain_counts_s": 120,
+    "eye_assist_ratio": 0.25,
+    "deadband": 0.14,
+    "stop_deadband": 0.07,
+    "filter_tau_s": 0.12,
+    "target_filter_tau_s": 0.15,
     "upstream_trajectory": {
-      "enabled": false
-    }
+      "enabled": true,
+      "max_acceleration_counts_s2": 800.0,
+      "max_jerk_counts_s3": 8000.0
+    },
+    "return_duration_s": 3.0,
+    "adaptive_speed": false,
+    "coordination_mode": "visual_error_assist",
+    "observed_direction": "Increasing count turns robot left; camera image right needs decreasing yaw count",
+    "parameter_basis": "User observed two bounded neck probes; no PID/deadband/acceleration writes requested"
   },
-  "status": "Face mode only; camera mounting and eye/neck directions not commissioned."
+  "parameter_revision_source": "2026-11-05 Xiaoshuai fixed brow camera and independent32 yaw/33 pitch/34 roll. User confirmed support and safe2047 return; two fixed probes completed without alarms. Do not use Mojia CAD,108px bias or parallel equations.",
+  "neck_topology": "independent",
+  "independent_neck": {
+    "schema_version": "vivis-independent-neck-tracking-1.0",
+    "enabled": true,
+    "directions_confirmed": true,
+    "pitch": {
+      "id": 33,
+      "sign": 1,
+      "gain_counts_s": 80
+    },
+    "roll": {
+      "id": 34,
+      "sign": 1
+    },
+    "upstream_trajectory": {
+      "enabled": true,
+      "max_acceleration_counts_s2": 400.0,
+      "max_jerk_counts_s3": 4000.0
+    },
+    "return_duration_s": 3.0,
+    "roll_follow_ratio": 0.25,
+    "roll_reference_rad": 0.5235987755982988,
+    "roll_gain_s": 1.5,
+    "roll_filter_tau_s": 0.15,
+    "direction_source": "User:33 increasing looks down;34 increasing tilts robot right. Image roll response pending integrated onsite observation."
+  }
 }

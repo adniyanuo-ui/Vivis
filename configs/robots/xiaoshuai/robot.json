@@ -7,7 +7,9 @@
     "age_years": 28
   },
   "supported_modes": [
-    "face"
+    "face",
+    "eyes",
+    "eyes-neck"
   ],
   "calibration": "calibration.json",
   "calibration_sha256": "599fd7d1518ea0f35b40f7c3265c104fc68230a9027863449ccb8f496d3050ef",
@@ -23,18 +25,20 @@
     "mouth_gain": 1.0,
     "repeat": 1,
     "usb_volume_times_three": false,
-    "authorized_tongue_observation": false
+    "authorized_tongue_observation": false,
+    "hold_vertical_eyes": false
   },
   "cameras": {
     "right": {
       "device": "/dev/v4l/by-id/usb-RXSX_Technology_Co.__Ltd._USB_Camera_4K_RXSX001-video-index0",
-      "mount": "unconfirmed",
+      "mount": "fixed",
       "eye_id": 23,
-      "validated": false
+      "validated": true,
+      "location": "brow_center"
     }
   },
   "calibration_source": "小帅无色测试版6.22（16.24）.json",
   "compatibility": {
-    "verified_transport": "Read-only1Mbps; ID2..30 model521,31..34 model11272; physical playback pending"
+    "verified_transport": "Read-only33-axis1Mbps; face playback observed;2026-11-05 independent neck direction probes passed; integrated tracking pending onsite acceptance."
   }
 }

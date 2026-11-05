@@ -140,7 +140,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     output = args.output or ROOT / 'outputs/developer' / (datetime.now().strftime('%Y%m%d_%H%M%S_%f') + '_' + mode)
     command = ['--robot', str(robot.path), '--work', args.work, '--mode', mode,
                '--repeat', str(args.repeat), '--output', str(output / 'performance'),
-               '--hold-vertical-eyes', '--camera', args.camera,
+               '--camera', args.camera,
                '--mouth-gain', str(args.mouth_gain if args.mouth_gain is not None else defaults['mouth_gain']),
                '--mouth-command-mode',args.mouth_command_mode,
                '--round-lip-gain',str(args.round_lip_gain),
@@ -148,6 +148,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
                                     json.loads(robot.resolve('homing').read_text())['home_speed_counts_s']),
                '--control-fps', str(args.control_fps or defaults['control_hz']),
                '--face-fps', str(args.face_fps or defaults['face_hz'])]
+    if defaults.get('hold_vertical_eyes',True):command+=['--hold-vertical-eyes']
     if defaults['authorized_tongue_observation']:
         command += ['--authorized-tongue-observation']
     if defaults['usb_volume_times_three']:
@@ -186,12 +187,15 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         trajectory=configure(config,mode,args.upstream_trajectory,args.home_only)
         from vivis.vision.parallel_follow import configure as configure_parallel
         parallel=configure_parallel(config,mode,args.parallel_neck,args.home_only)
-        config['control']['vertical_enabled'] = False
-        config['control']['axes'] = [a for a in config['control']['axes'] if a['id'] not in (7, 22)]
-        config['control']['held_eye_ids'] = [7, 22]
+        from vivis.vision.independent_follow import configure as configure_independent
+        independent=configure_independent(config,mode,args.home_only)
+        if defaults.get('hold_vertical_eyes',True):
+            config['control']['vertical_enabled'] = False
+            config['control']['axes'] = [a for a in config['control']['axes'] if a['id'] not in (7, 22)]
+            config['control']['held_eye_ids'] = [7, 22]
         config_path = output / 'tracking_effective.json'
         config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n')
-        print(f'模式：{mode}；作品：{args.work}；每遍独立准备、{len(robot.home()["axes"])}轴缓慢回中。', flush=True)
+        print(f'模式：{mode}；作品：{args.work}；每遍独立准备、{len(robot.home(mode)["axes"])}轴缓慢回中。', flush=True)
         if args.mouth_speed is not None:
             print(f'口部速度对照：{args.mouth_speed}计数/秒；通过原启动流程写入并核验SRAM，默认配置不改。',flush=True)
         if args.round_lip_gain!=1.:
@@ -201,7 +205,8 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
             print(f'口型对照：歌曲阶段直接发送{len(direct)}个口型轴的映射目标；启动避让、回中和硬件限速保留。',flush=True)
         if mode=='eyes-neck' and not args.home_only:
             print('上游轨迹规划：'+('开启（仅ID32）' if trajectory['enabled'] else '关闭（使用原150ms位置低通）'),flush=True)
-            print('并联颈部：'+('开启（ID33/34俯仰及轻微侧倾）' if parallel['enabled'] else '关闭（ID33/34保持）'),flush=True)
+            if independent['enabled']:print('独立颈部：ID32左右、ID33俯仰、ID34轻微侧倾；眉心固定相机。',flush=True)
+            else:print('并联颈部：'+('开启（ID33/34俯仰及轻微侧倾）' if parallel['enabled'] else '关闭（ID33/34保持）'),flush=True)
         print('日志：' + str(output), flush=True)
         def interrupt(*_):
             raise KeyboardInterrupt

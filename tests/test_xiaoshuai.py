@@ -92,12 +92,12 @@ class XiaoshuaiTests(unittest.TestCase):
         self.assertTrue(np.all(trajectory[:,ids.index(24)]==2030))
         self.assertNotIn(29,p['mouth_gain_ids'])
 
-    def test_uncommissioned_tracking_modes_fail_before_opening_devices(self):
+    def test_wrong_topology_or_unconfigured_camera_fails_before_opening_devices(self):
         from vivis.runtime.developer import run_example
         with patch('vivis.hardware.feetech.sdk.OfficialSDKBus',side_effect=AssertionError('serial opened')):
-            for mode in ('eyes','eyes-neck'):
-                with self.assertRaisesRegex(ValueError,'currently supports only: face'):
-                    run_example(mode,['--robot',str(CONFIG),'--work','0001','--check'])
+            for options,reason in ((['--parallel-neck','on'],'Independent joints'),(['--camera','left'],'Unknown camera')):
+                with self.assertRaisesRegex(ValueError,reason):
+                    run_example('eyes-neck',['--robot',str(CONFIG),'--work','0001','--check',*options])
 
     def test_invalid_home_or_model_is_rejected_in_robot_loader(self):
         robot=Robot(CONFIG);definition=copy.deepcopy(robot.definition)

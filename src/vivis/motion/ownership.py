@@ -1,4 +1,8 @@
-"""Single-owner Mojia music and live eye/neck arbitration; no serial ownership."""
+"""Shared single-owner face/eye/neck arbitration; no serial I/O here.
+
+The historical MojiaPlaybackGaze name is retained for callers. Configuration
+selects a parallel platform or independent pitch/roll without copying playback.
+"""
 import copy
 import json
 import time
@@ -9,6 +13,7 @@ import numpy as np
 from vivis.motion.mapping import ROOT
 from vivis.vision.pursuit import validate_mojia, MojiaPursuit, NeckCommandScheduler,neck_command_limits
 from vivis.vision.parallel_follow import validate as validate_parallel,ParallelFaceFollower
+from vivis.vision.independent_follow import validate as validate_independent,IndependentFaceFollower
 
 
 class PreviewPublisher:
@@ -45,8 +50,11 @@ def tracking_profile(config, profile, ids, neck=True):
     p=copy.deepcopy(profile)
     motors={m['id']:m for m in p['motors']}
     parallel=neck and config.get('parallel_neck',{}).get('enabled') is True
+    independent=neck and config.get('independent_neck',{}).get('enabled') is True
     k=validate_parallel(config,profile) if parallel else None
-    owned=[a['id'] for a in config['control']['axes']]+([32] if neck else [])+([33,34] if parallel else [])
+    if independent:validate_independent(config,profile)
+    extra=parallel or independent
+    owned=[a['id'] for a in config['control']['axes']]+([32] if neck else [])+([33,34] if extra else [])
     if not set(owned)<=set(ids):raise ValueError('Missing Mojia tracking axes')
     for a in config['control']['axes']:
         motors[a['id']].update(safe_min=min(a['negative'],a['positive']),
@@ -57,11 +65,13 @@ def tracking_profile(config, profile, ids, neck=True):
     motors[32].update(safe_min=low,safe_max=high,max_speed_counts_s=n['speed_counts_s'])
     if parallel:
         for b in k.branches:motors[b['id']].update(safe_min=int(b['low']),safe_max=int(b['high']))
+    if independent:
+        for sid in (33,34):motors[sid].update(safe_min=motors[sid]['tracking_min'],safe_max=motors[sid]['tracking_max'])
     held=set(config['control'].get('held_eye_ids',[]))
     if not held<={7,22} or held&set(owned):raise ValueError('Invalid held eye ownership')
-    p['diagnostic_command_ids']=sorted((set(profile['diagnostic_command_ids'])|({32} if neck else set())|({33,34} if parallel else set()))-held)
+    p['diagnostic_command_ids']=sorted((set(profile['diagnostic_command_ids'])|({32} if neck else set())|({33,34} if extra else set()))-held)
     p['held_eye_ids']=sorted(held)
-    p['held_neck_ids']=[] if parallel else [33,34] if neck else [32,33,34]
+    p['held_neck_ids']=[] if extra else [33,34] if neck else [32,33,34]
     p['gaze_owner_ids']=owned
     if parallel:p['coordinated_goal_ids']=[33,34]
     return p
@@ -75,8 +85,10 @@ class MojiaPlaybackGaze:
         self.command_ids=list(profile['diagnostic_command_ids'])
         self.neck=neck
         parallel=neck and config.get('parallel_neck',{}).get('enabled') is True
+        independent=neck and config.get('independent_neck',{}).get('enabled') is True
+        self.independent=independent
         self.controller_ids=[a['id'] for a in config['control']['axes']]+([32] if neck else [])
-        self.axes=list(config['control']['axes'])+([dict(id=32)] if neck else [])+([dict(id=33),dict(id=34)] if parallel else [])
+        self.axes=list(config['control']['axes'])+([dict(id=32)] if neck else [])+([dict(id=33),dict(id=34)] if parallel or independent else [])
         self.owned=[a['id'] for a in self.axes]
         self.columns=[self.ids.index(sid) for sid in self.owned]
         self.controller_columns=[self.ids.index(sid) for sid in self.controller_ids]
@@ -90,8 +102,10 @@ class MojiaPlaybackGaze:
         self.speeds=[motors[sid]['max_speed_counts_s'] for sid in self.controller_ids]
         self.controller=MojiaPursuit(config,self.controller_ids,self.speeds,neck,
                                      neck_bounds=(motors[32]['safe_min'],motors[32]['safe_max']))
-        self.platform=ParallelFaceFollower(config,profile) if parallel else None
+        self.platform=ParallelFaceFollower(config,profile) if parallel else IndependentFaceFollower(config,profile) if independent else None
         self.camera_eye_id=self.controller.camera_eye_id
+        self.feedback_priority_ids=tuple(dict.fromkeys([self.camera_eye_id]+([32] if neck else [])+
+            ([33,34] if self.platform is not None else [])+([self.platform.eye_id] if independent else [])))
         self.previous=None;self.scheduler=None;self.last_diagnostic={};self.speed_overrides={}
         self.status_path=status_path;self.last_publish=0.;self.round=round_number;self.repeat=repeat
         self.publisher=PreviewPublisher(status_path) if status_path is not None else None
@@ -105,7 +119,8 @@ class MojiaPlaybackGaze:
             if not raw[18]&4:raise RuntimeError('Tracking speed unit changed')
             if s['id']==32:
                 ram=bytes.fromhex(s['state_40_70_hex']);n=self.config['neck']
-                if (list(raw[21:24])!=n['observed_pid_raw'] or list(raw[26:28])!=n['observed_deadband_counts']
+                if ((n['observed_pid_raw'] is not None and list(raw[21:24])!=n['observed_pid_raw'])
+                        or (n['observed_deadband_counts'] is not None and list(raw[26:28])!=n['observed_deadband_counts'])
                         or ram[1]!=n['observed_acceleration_raw']):
                     raise RuntimeError('ID32 no longer matches saved hardware preset')
         self.previous=np.asarray(measured,dtype=float)[self.controller_columns].copy()
@@ -145,7 +160,7 @@ class MojiaPlaybackGaze:
             goals=self.platform.step(packet,d['state'],dt,now,
                                      returning=self.platform_returning or d['returning_to_center'])
             for sid,value in goals.items():result[self.ids.index(sid)]=value
-            d['parallel_neck']=self.platform.diagnostic
+            d['independent_neck' if self.independent else 'parallel_neck']=self.platform.diagnostic
         speed=None
         if self.neck:
             neck_column=self.ids.index(32)

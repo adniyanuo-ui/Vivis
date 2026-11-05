@@ -1,7 +1,9 @@
-"""Mojia-only bounded eye pursuit, with eye-mounted or head-fixed vision.
+"""Shared bounded eye/yaw pursuit, with eye-mounted or head-fixed vision.
 
 No serial I/O. Neck motion is closed through the camera image, never subtracted
 from eye commands as if commanded head rotation were measured rotation.
+Historical public names remain import-compatible; configuration selects the
+reviewed hardware family, and independent pitch/roll lives in its own backend.
 """
 import hashlib
 import math
@@ -14,7 +16,7 @@ from vivis.motion.upstream import settings as upstream_settings,require_engine,U
 
 def camera_axes(config):
     """Select the moving camera's encoder reference from its physical mount."""
-    c=config['control'];side=c.get('camera_eye') or 'right'
+    c=config['control'];side=c.get('reference_eye') or c.get('camera_eye') or 'right'
     if side not in ('left','right'):raise ValueError('Unknown camera eye')
     axes={a['name']:a for a in c['axes']}
     if side+'_yaw' not in axes:raise ValueError('Missing camera eye yaw axis')
@@ -37,7 +39,11 @@ def neck_command_limits(config,profile=None):
 
 def validate_mojia(config, profile, calibration, neck=False, trial=False):
     validate_config(config)
-    if config.get('schema_version') != 'mojia-person-gaze-1.0' or profile.get('schema_version') != 'mojia-playback-0.1':
+    legacy=profile.get('schema_version')=='mojia-playback-0.1'
+    generic=(profile.get('schema_version')=='vivis-feetech-playback-1.0'
+             and config.get('neck_topology')=='independent')
+    if (not (legacy and config.get('schema_version')=='mojia-person-gaze-1.0')
+            and not (generic and config.get('schema_version')=='vivis-person-gaze-1.0')):
         raise ValueError('Need Mojia configuration and profile')
     digest = hashlib.sha256(calibration.read_bytes()).hexdigest()
     if config.get('calibration_sha256') != digest or profile.get('calibration_sha256') != digest:
@@ -97,7 +103,7 @@ def validate_mojia(config, profile, calibration, neck=False, trial=False):
         raise ValueError('Invalid bounded Mojia neck setup')
     if (n['id'] != 32 or n['sign'] not in (-1, 1) or type(n['sign']) is not int
             or not finite(n['speed_counts_s']) or not 0 < n['speed_counts_s'] <= 1000
-            or motors[32]['model_raw_expected'] != 10760
+            or motors[32]['model_raw_expected'] != (10760 if legacy else 11272)
             or not finite(low) or not finite(high)
             or not motors[32]['device_min']<=low<2047<high<=motors[32]['device_max']):
         raise ValueError('Invalid bounded Mojia neck setup')

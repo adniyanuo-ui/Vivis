@@ -130,7 +130,7 @@ def main(argv=None):
                            'actuators_opened': False,
                            'mount': config['control']['camera_mount']}
                 current['camera_eye']=config['control'].get('camera_eye')
-                if config.get('schema_version')=='mojia-person-gaze-1.0':
+                if config.get('schema_version') in ('mojia-person-gaze-1.0','vivis-person-gaze-1.0'):
                     # The camera service has no actuator feedback; show image direction,
                     # not an integrator pretending the eye moved with its commands.
                     current['simulated_xy']=[packet['target']['x'],packet['target']['y'] if config['control'].get('vertical_enabled') else 0.] if fresh and packet['target'] else [0.,0.]

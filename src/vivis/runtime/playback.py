@@ -160,7 +160,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         raise ValueError('Diagnostic command IDs must be a nonempty unique subset of monitored IDs')
     command_ids=set(command_ids)
     mojia_gaze=False
-    if gaze_override is not None and profile.get('schema_version') == 'mojia-playback-0.1':
+    if gaze_override is not None and profile.get('schema_version') in ('mojia-playback-0.1','vivis-feetech-playback-1.0'):
         from vivis.motion.ownership import MojiaPlaybackGaze
         if not isinstance(gaze_override,MojiaPlaybackGaze):
             raise ValueError('Mojia tracking requires its own reviewed calibration')
@@ -196,7 +196,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     scheduled_feedback=profile.get('scheduled_feedback',False)
     if type(scheduled_feedback) is not bool:
         raise ValueError('Invalid scheduled feedback flag')
-    reviewed_face=(profile.get('schema_version') in ('mojia-playback-0.1','vivis-face-playback-1.0')
+    reviewed_face=(profile.get('schema_version') in ('mojia-playback-0.1','vivis-face-playback-1.0','vivis-feetech-playback-1.0')
                    and profile.get('developer_mode')=='face' and gaze_override is None)
     if scheduled_feedback and ((not mojia_gaze and not reviewed_face) or record_only or feedback_age_limit is None
             or profile.get('serial_backend')!='feetech_python' or profile.get('feedback_mode')!='short_registers'):
@@ -325,7 +325,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         else:
             bus=Bus(profile['port'],profile['baud'])
         result['serial_backend']=profile.get('serial_backend','local')
-        if mojia_gaze and gaze_override.platform is not None:
+        if mojia_gaze and gaze_override.platform is not None and not getattr(gaze_override,'independent',False):
             bus.coordinated_goal_ids=(33,34)
         result['sdk_transaction_timeout_ms']=profile.get('sdk_transaction_timeout_ms')
         positions=[];snapshot_deadline=time.monotonic()+10
@@ -407,7 +407,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             # Startup checks use the original timeout/retry. Playback reads are
             # individually bounded and retried by scheduling a fresh sample.
             bus.set_read_policy(3,retry=False)
-            priority_ids=tuple(sid for sid in (gaze_override.camera_eye_id,32,*((33,34) if gaze_override.platform is not None else ()))
+            priority_ids=tuple(sid for sid in gaze_override.feedback_priority_ids
                                if sid in command_ids) if mojia_gaze else ()
             feedback_requests=int(8*60/control_hz)
             feedback_scheduler=BudgetedFeedback(bus,ids,priority_ids=priority_ids,max_feedback_age_s=feedback_age_limit,

@@ -115,7 +115,6 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
     for sid in p.get('held_eye_ids',[]):
         if sid in monitored:trajectory[:,monitored.index(sid)]=motors[sid]['neutral']
     if p.get('exclude_held_axes_from_session',False):
-        if mode!='face':raise ValueError('Excluding held axes is only commissioned for face mode')
         held=set(p['held_eye_ids'])|set(p['held_neck_ids'])
         columns=[j for j,sid in enumerate(monitored) if sid not in held]
         monitored=[monitored[j] for j in columns];trajectory=trajectory[:,columns]
@@ -338,6 +337,8 @@ def main(argv=None):
     trajectory_settings=configure(config,args.mode,args.upstream_trajectory,args.home_only)
     from vivis.vision.parallel_follow import configure as configure_parallel
     parallel_settings=configure_parallel(config,args.mode,args.parallel_neck,args.home_only)
+    from vivis.vision.independent_follow import configure as configure_independent
+    independent_settings=configure_independent(config,args.mode,args.home_only)
     telemetry_policy=robot.telemetry()
     calibration=robot.calibration
     if args.hold_vertical_eyes:
@@ -354,7 +355,10 @@ def main(argv=None):
     profile['control_hz']=args.control_fps
     profile['snapshot_chunk_bytes']=2
     if args.baud is not None:profile['baud']=args.baud
-    home_inventory=robot.home()
+    home_inventory=robot.home(args.mode)
+    if profile.get('exclude_held_axes_from_session') and not args.home_only:
+        held=set(profile.get('held_eye_ids',[]))|set(profile.get('held_neck_ids',[]))
+        home_inventory['axes']=[a for a in home_inventory['axes'] if a['id'] not in held]
     args.home_position_recovery=recovery_policy(home_inventory.get('disabled_position_recovery'))
     args.home_sensor_fault_confirmation=home_inventory.get('sensor_fault_confirmation',False)
     if args.home_sensor_fault_confirmation and not telemetry_policy.get('sensor_fault_confirmation'):
@@ -365,8 +369,8 @@ def main(argv=None):
         parser.error('Home inventory must cover every task axis with confirmed neutrals')
     motors={m['id']:m for m in profile['motors']}
     clearance_plan=recovery_clearance_plan(home_inventory,motors)
-    if profile.get('exclude_held_axes_from_session') and set(home_ids)!=set(ids):
-        parser.error('Face-only home inventory must match session axes; held axes must remain untouched')
+    if profile.get('exclude_held_axes_from_session') and not args.home_only and set(home_ids)!=set(ids):
+        parser.error('Home inventory must match session axes; held axes must remain untouched')
     hardware_preset=robot.startup(active_ids=motors,inventory_ids=home_ids) if not args.home_only else None
     if hardware_preset is not None:
         expected={a['id']:a for a in hardware_preset['axes']}
@@ -394,6 +398,7 @@ def main(argv=None):
                              acceleration_control='servo_register_41',
                              upstream_trajectory=trajectory_settings,
                              parallel_neck=parallel_settings['enabled'],
+                             independent_neck=independent_settings['enabled'],
                              volume_times_three=args.usb_volume_times_three and not args.home_only)))
         return
     args.output.mkdir(parents=True,exist_ok=False)

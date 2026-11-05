@@ -146,3 +146,14 @@ http://127.0.0.1:8765/
 ```
 
 末尾加`--check`做离线检查。小帅仍以2047作为表情换算基准，颧骨ID24按当前限位采用2030回中；完整说明见[小帅配置](configs/robots/xiaoshuai/README.md)。切回墨甲可使用前述原播放指令。
+
+小帅的眉心固定相机和独立三轴颈部已接入示例3，首次联合验收指令如下；**不要添加墨甲的`--parallel-neck on`**：
+
+```bash
+./examples/03_face_eye_neck_tracking/run.sh \
+  --robot configs/robots/xiaoshuai/robot.json \
+  --work 0001 --repeat 1 \
+  --mouth-command-mode lips-direct --mouth-speed 900
+```
+
+监控画面仍为`http://127.0.0.1:8765/`。900是单次口部速度对照；眼颈方向、首轮行程和验收要点见[小帅配置](configs/robots/xiaoshuai/README.md)。

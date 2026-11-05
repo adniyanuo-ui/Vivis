@@ -9,7 +9,7 @@ VERSION = 'vivis-person-target-1.0'
 
 
 def validate_config(config):
-    if config.get('schema_version') != 'mojia-person-gaze-1.0':
+    if config.get('schema_version') not in ('mojia-person-gaze-1.0','vivis-person-gaze-1.0'):
         raise ValueError('Unsupported person gaze configuration')
     transport = config['transport']
     if (transport['host'] != '127.0.0.1' or type(transport['port']) is not int
@@ -98,7 +98,7 @@ class GazePolicy:
     def __init__(self, config):
         validate_config(config)
         self.control = config['control']
-        self.vertical_enabled=(config.get('schema_version')=='mojia-person-gaze-1.0' and self.control.get('vertical_enabled') is True)
+        self.vertical_enabled=self.control.get('vertical_enabled') is True
         self.max_age = config['transport']['max_age_s']
         self.xy = np.zeros(2)
         self.error = np.zeros(2)
@@ -117,7 +117,7 @@ class GazePolicy:
             except (ValueError, KeyError, TypeError, AttributeError):
                 pass
         if visible:
-            vertical = self.vertical_enabled and self.control.get('camera_eye') in ('left','right')
+            vertical = self.vertical_enabled and (c['camera_mount']=='fixed' or c.get('camera_eye') in ('left','right'))
             target = np.array([packet['target']['x'], packet['target']['y'] if vertical else 0.])
             error = np.sign(target) * np.maximum(0, np.abs(target) - c['deadband'])
             alpha = -math.expm1(-dt / c['filter_tau_s'])

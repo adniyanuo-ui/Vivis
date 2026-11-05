@@ -17,7 +17,7 @@
     },
     "neck_angle_position_maps": null,
     "motion_gain": 1.0,
-    "schema_version": "vivis-face-playback-1.0",
+    "schema_version": "vivis-feetech-playback-1.0",
     "port": "/dev/ttyCH343USB0",
     "baud": 1000000,
     "mixing_confirmed": true,
@@ -90,7 +90,11 @@
       30,
       31
     ],
-    "additional_monitor_ids": [],
+    "additional_monitor_ids": [
+      32,
+      33,
+      34
+    ],
     "held_eye_ids": [
       7,
       8,
@@ -240,7 +244,7 @@
         1900,
         2147
       ],
-      "max_speed_counts_s": 600,
+      "max_speed_counts_s": 100,
       "acceleration_raw": 0,
       "model_raw_expected": 521,
       "register_layout_confirmed": true,
@@ -265,7 +269,7 @@
         1750,
         2400
       ],
-      "max_speed_counts_s": 600,
+      "max_speed_counts_s": 300,
       "acceleration_raw": 0,
       "model_raw_expected": 521,
       "register_layout_confirmed": true,
@@ -615,7 +619,7 @@
         1912,
         2156
       ],
-      "max_speed_counts_s": 600,
+      "max_speed_counts_s": 100,
       "acceleration_raw": 0,
       "model_raw_expected": 521,
       "register_layout_confirmed": true,
@@ -640,7 +644,7 @@
         1700,
         2350
       ],
-      "max_speed_counts_s": 600,
+      "max_speed_counts_s": 300,
       "acceleration_raw": 0,
       "model_raw_expected": 521,
       "register_layout_confirmed": true,
@@ -855,7 +859,7 @@
     },
     {
       "id": 32,
-      "role": "颈部旋转",
+      "role": "颈部左右转（独立轴）",
       "reported_model": "SM45BL",
       "neutral": 2047,
       "neutral_confirmed": true,
@@ -867,7 +871,7 @@
         2047,
         2047
       ],
-      "max_speed_counts_s": 600,
+      "max_speed_counts_s": 300,
       "acceleration_raw": 0,
       "model_raw_expected": 11272,
       "register_layout_confirmed": true,
@@ -876,11 +880,13 @@
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,
       "position_feedback_tolerance_counts": 5,
-      "playback_enabled": false
+      "playback_enabled": true,
+      "tracking_min": 1967,
+      "tracking_max": 2127
     },
     {
       "id": 33,
-      "role": "并联颈部短拉杆（俯仰/翻滚耦合）",
+      "role": "颈部俯仰（独立轴）",
       "reported_model": "SM45BL",
       "neutral": 2047,
       "neutral_confirmed": true,
@@ -892,7 +898,7 @@
         2047,
         2047
       ],
-      "max_speed_counts_s": 600,
+      "max_speed_counts_s": 150,
       "acceleration_raw": 0,
       "model_raw_expected": 11272,
       "register_layout_confirmed": true,
@@ -901,11 +907,13 @@
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,
       "position_feedback_tolerance_counts": 5,
-      "playback_enabled": false
+      "playback_enabled": true,
+      "tracking_min": 1987,
+      "tracking_max": 2107
     },
     {
       "id": 34,
-      "role": "并联颈部长拉杆（俯仰/翻滚耦合）",
+      "role": "颈部翻滚（独立轴）",
       "reported_model": "SM45BL",
       "neutral": 2047,
       "neutral_confirmed": true,
@@ -917,7 +925,7 @@
         2047,
         2047
       ],
-      "max_speed_counts_s": 600,
+      "max_speed_counts_s": 100,
       "acceleration_raw": 0,
       "model_raw_expected": 11272,
       "register_layout_confirmed": true,
@@ -926,7 +934,9 @@
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,
       "position_feedback_tolerance_counts": 5,
-      "playback_enabled": false
+      "playback_enabled": true,
+      "tracking_min": 2007,
+      "tracking_max": 2087
     }
   ]
 }
