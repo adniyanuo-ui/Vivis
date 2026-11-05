@@ -274,10 +274,16 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         # alarms remain in the raw state and have independent stop counters.
         last_good_feedback[sid]=time.monotonic()
         if not motors[sid]['safe_min']<=state['position']<=motors[sid]['safe_max']:
-            result.setdefault('position_tolerance_samples',[]).append({
-                'id':sid,'position':state['position'],'safe_min':motors[sid]['safe_min'],
-                'safe_max':motors[sid]['safe_max'],
-                'tolerance_counts':motors[sid].get('position_feedback_tolerance_counts',0)})
+            if profile.get('tracking_feedback_range')=='device' and sid in profile.get('gaze_owner_ids',[]):
+                result.setdefault('feedback_outside_command_range_samples',[]).append(dict(
+                    id=sid,position=state['position'],command_min=motors[sid]['safe_min'],
+                    command_max=motors[sid]['safe_max'],feedback_min=motors[sid]['feedback_min'],
+                    feedback_max=motors[sid]['feedback_max']))
+            else:
+                result.setdefault('position_tolerance_samples',[]).append({
+                    'id':sid,'position':state['position'],'safe_min':motors[sid]['safe_min'],
+                    'safe_max':motors[sid]['safe_max'],
+                    'tolerance_counts':motors[sid].get('position_feedback_tolerance_counts',0)})
         result['last_feedback']={'id':sid,**state}
         result.setdefault('last_feedback_by_id',{})[str(sid)]=dict(state)
         if mojia_gaze:

@@ -157,7 +157,32 @@ class IndependentTrackingTests(unittest.TestCase):
             if kind=='camera':cc['control']['camera_mount']='eye'
             with self.assertRaises(ValueError):validate(cc,pp)
 
+    def test_tracking_span_is_not_the_device_feedback_boundary(self):
+        from vivis.runtime.playback import check_feedback
+        robot,c,p,ids,data=fixture();motors={m['id']:m for m in p['motors']}
+        for sid in p['gaze_owner_ids']:
+            m=motors[sid]
+            self.assertEqual((m['feedback_min'],m['feedback_max']),(m['device_min'],m['device_max']))
+            state=dict(position=m['feedback_max'],temperature_c=30,load_raw=0,voltage_raw=235 if sid>=32 else 60,status_register=0)
+            check_feedback(sid,state,m)
+            for outside in (m['feedback_min']-1,m['feedback_max']+1):
+                with self.assertRaisesRegex(RuntimeError,'outside safe range'):check_feedback(sid,{**state,'position':outside},m)
+        self.assertEqual((motors[33]['safe_min'],motors[33]['safe_max']),(1987,2107))
+        self.assertNotIn('feedback_min',motors[31])
+
     def test_actual_timed_player_supports_all_independent_axes_with_one_bus_owner(self):
+        self.run_timed_player()
+
+    def test_sample2113_continues_without_expanding_command_span(self):
+        result=self.run_timed_player(feedback33=2113)
+        samples=result['feedback_outside_command_range_samples']
+        self.assertTrue(any(s['id']==33 and s['position']==2113 for s in samples))
+        self.assertTrue(all(1987<=e['goals'][33]<=2107 for e in result['events']))
+
+    def test_sample_beyond_device_range_still_stops_the_player(self):
+        with self.assertRaisesRegex(RuntimeError,'outside safe range'):self.run_timed_player(feedback33=2301)
+
+    def run_timed_player(self,feedback33=None):
         import test_runtime
         from vivis.runtime.playback import play
         robot,c,p,ids,data,receiver,g,last=controller()
@@ -165,12 +190,16 @@ class IndependentTrackingTests(unittest.TestCase):
         _,bus,clock=test_runtime.PlaybackTests().fixture();clock.duration=.5
         positions={sid:int(round(last[j])) for j,sid in enumerate(ids)}
         rows={s['id']:s for s in snapshots(p,positions)}
+        playing=[False];start=clock.start
+        def begin():playing[0]=True;start()
+        clock.start=begin
         def state(sid):return dict(position=positions[sid],temperature_c=30,load_raw=0,status_register=0,voltage_raw=rows[sid]['voltage_raw'])
         bus.snapshot.side_effect=lambda sid:{**rows[sid],'position_raw':positions[sid]}
         bus.feedback.side_effect=state
         def read(sid,address,count):
             self.assertNotEqual(sid,29)
-            return {56:positions[sid].to_bytes(2,'little'),60:b'\0\0',62:bytes([rows[sid]['voltage_raw'],30]),65:b'\0'}[address]
+            position=feedback33 if sid==33 and playing[0] and feedback33 is not None else positions[sid]
+            return {56:position.to_bytes(2,'little'),60:b'\0\0',62:bytes([rows[sid]['voltage_raw'],30]),65:b'\0'}[address]
         bus.read.side_effect=read;bus.goals.side_effect=lambda goals,speeds:positions.update(goals)
         with tempfile.TemporaryDirectory() as folder, \
              patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus), \
@@ -180,6 +209,7 @@ class IndependentTrackingTests(unittest.TestCase):
         self.assertEqual(set(result['runtime_feedback_schedule']['priority_ids']),{22,23,32,33,34})
         self.assertTrue(all(set(event['goals'])==set(ids) for event in result['events']))
         self.assertTrue(any(event['person_gaze']['independent_neck']['enabled'] for event in result['events']))
+        return result
 
 
 if __name__=='__main__':unittest.main()

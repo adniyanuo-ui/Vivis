@@ -5,7 +5,7 @@
     "width": 640,
     "height": 480,
     "fps": 30,
-    "rotation_deg": 0,
+    "rotation_deg": 180,
     "mirror_x": false,
     "autofocus": true
   },
@@ -69,7 +69,7 @@
         "positive": 2067
       }
     ],
-    "mount_confirmation_source": "2026-11-05 user confirmed camera fixed at brow center",
+    "mount_confirmation_source": "2026-11-05 user confirmed fixed brow camera; upright image requires180-degree correction before detection and preview",
     "vertical_enabled": true,
     "vertical_direction_confirmed": false,
     "validated_source": "Initial eye spans for commissioning; not a claim of completed onsite eye tracking acceptance",

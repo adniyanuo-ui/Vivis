@@ -71,6 +71,24 @@ class SelectionTests(unittest.TestCase):
 
 
 class CameraOpenTests(unittest.TestCase):
+    def test_xiaoshuai_rotates_capture_before_detection_and_preview(self):
+        import cv2
+        config=Robot(ROOT/'configs/robots/xiaoshuai/robot.json').tracking()
+        self.assertEqual(config['camera']['rotation_deg'],180)
+        camera_config={**config['camera'],'device':0}
+        frame=np.arange(12*16*3,dtype=np.uint8).reshape(12,16,3)
+        capture=Mock();capture.isOpened.return_value=True;capture.get.return_value=30.
+        with patch('cv2.VideoCapture',return_value=capture),patch('vivis.vision.detection.threading.Thread') as thread:
+            thread.return_value.is_alive.return_value=False
+            camera=LatestCamera(camera_config)
+            def once():
+                camera.stop.set();return True,frame.copy()
+            capture.read.side_effect=once
+            camera._capture()
+            np.testing.assert_array_equal(camera.get()[2],frame[::-1,::-1])
+            camera.close()
+        capture.release.assert_called_once()
+
     def test_missing_camera_is_reported_before_capture(self):
         cv=Mock()
         with patch.dict('sys.modules',{'cv2':cv}),patch('vivis.vision.detection.os.path.exists',return_value=False):

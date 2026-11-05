@@ -67,6 +67,14 @@ def tracking_profile(config, profile, ids, neck=True):
         for b in k.branches:motors[b['id']].update(safe_min=int(b['low']),safe_max=int(b['high']))
     if independent:
         for sid in (33,34):motors[sid].update(safe_min=motors[sid]['tracking_min'],safe_max=motors[sid]['tracking_max'])
+    feedback_range=profile.get('tracking_feedback_range','command')
+    if feedback_range not in ('command','device'):raise ValueError('Unknown tracking feedback range')
+    if feedback_range=='device':
+        # A commissioning target span is not a physical encoder boundary.
+        # Keep every command/planner bound above; validate measured positions
+        # against the separately verified device envelope, without extra slack.
+        for sid in owned:
+            motors[sid].update(feedback_min=motors[sid]['device_min'],feedback_max=motors[sid]['device_max'])
     held=set(config['control'].get('held_eye_ids',[]))
     if not held<={7,22} or held&set(owned):raise ValueError('Invalid held eye ownership')
     p['diagnostic_command_ids']=sorted((set(profile['diagnostic_command_ids'])|({32} if neck else set())|({33,34} if extra else set()))-held)

@@ -102,7 +102,8 @@
       23
     ],
     "exclude_held_axes_from_session": true,
-    "jaw_owner_source": "Xiaoshuai face adaptation: prior Xiaobai uses JawOpen ownership;49 other ID31 endpoints are2050, near confirmed2047 neutral, and must not dilute jaw opening through dense normalization."
+    "jaw_owner_source": "Xiaoshuai face adaptation: prior Xiaobai uses JawOpen ownership;49 other ID31 endpoints are2050, near confirmed2047 neutral, and must not dilute jaw opening through dense normalization.",
+    "tracking_feedback_range": "device"
   },
   "axes": [
     {
