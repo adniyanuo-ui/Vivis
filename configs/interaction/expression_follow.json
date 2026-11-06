@@ -3,6 +3,7 @@
   "perception": "configs/perception/face_landmarker.json",
   "face_selection": "largest",
   "control_hz": 60,
+  "tracking_enabled": false,
   "gain": 1.0,
   "mirror_expression": false,
   "filter_tau_s": 0.06,

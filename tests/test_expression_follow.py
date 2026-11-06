@@ -106,6 +106,72 @@ class SourceTests(unittest.TestCase):
 
 
 class OwnershipTests(unittest.TestCase):
+    def test_saved_original_configuration_remains_face_only(self):
+        config=settings();del config['tracking_enabled']
+        p=plan(Robot(ROOT/'configs/robots/xiaoshuai/robot.json'),config,1.)
+        self.assertEqual(p['mode'],'face');self.assertEqual(len(p['ids']),25)
+
+    def test_optional_tracking_uses_robot_topology_and_preserves_face_mapping(self):
+        config=settings();config['tracking_enabled']=True
+        rng=np.random.default_rng(42)
+        for head,count,owned in [('xiaoshuai',32,{7,8,22,23,32,33,34}),('mojia',31,{7,8,22,23,32})]:
+            robot=Robot(ROOT/f'configs/robots/{head}/robot.json')
+            files={p:p.read_bytes() for p in robot.directory.glob('*.json')}
+            face=plan(robot,settings(),1.);combined=plan(robot,config,1.)
+            profile=combined['profile']
+            self.assertEqual(len(combined['ids']),count)
+            self.assertEqual(set(profile['gaze_owner_ids']),owned)
+            self.assertEqual(set(a['id'] for a in combined['home']['axes']),set(combined['ids']))
+            self.assertFalse(set(profile['direct_position_ids'])&owned)
+            self.assertEqual(profile['developer_mode'],'eyes-neck')
+            self.assertEqual(combined['tracking'].get('independent_neck',{}).get('enabled',False),head=='xiaoshuai')
+            self.assertFalse(combined['tracking']['parallel_neck']['enabled'])
+            for values in rng.random((12,52)).tolist():
+                a=face['mapper'].map_weights(values);b=combined['mapper'].map_weights(values)
+                for j,sid in enumerate(face['ids']):self.assertEqual(a[j],b[combined['ids'].index(sid)])
+            for file,raw in files.items():self.assertEqual(file.read_bytes(),raw)
+
+    def test_configured_parallel_neck_and_held_vertical_eyes_use_same_router(self):
+        from vivis.motion.ownership import MojiaPlaybackGaze
+        robot=Robot(ROOT/'configs/robots/mojia/robot.json')
+        robot.definition['defaults']['hold_vertical_eyes']=True
+        tracking=robot.tracking();tracking['parallel_neck']['enabled']=True
+        config=settings();config['tracking_enabled']=True
+        with patch.object(robot,'tracking',return_value=tracking):p=plan(robot,config,60.)
+        self.assertEqual(set(p['profile']['gaze_owner_ids']),{8,23,32,33,34})
+        self.assertFalse(set(p['ids'])&{7,22})
+        g=MojiaPlaybackGaze(p['tracking'],p['profile'],p['ids'],SimpleNamespace(poll=lambda now:None))
+        self.assertIsNotNone(g.platform);self.assertFalse(g.independent)
+
+    def test_joint_expression_and_gaze_sources_never_overwrite_each_others_axes(self):
+        from test_independent_follow import snapshots
+        from vivis.motion.ownership import MojiaPlaybackGaze
+        from vivis.vision.policy import VERSION
+        config=settings();config['tracking_enabled']=True
+        p=plan(Robot(ROOT/'configs/robots/xiaoshuai/robot.json'),config,60.)
+        receiver=SimpleNamespace(max_age=.3,tick=0)
+        def packet(now):
+            o=observation(sequence=receiver.tick,stamp=now,jawOpen=.6,eyeBlinkLeft=.8,mouthSmileRight=.5)
+            return dict(schema_version=VERSION,sequence=receiver.tick,timestamp_monotonic=now,
+                        target=dict(x=.6,y=.6,eye_line_roll_rad=.4),face_expression=o)
+        receiver.poll=packet
+        g=MojiaPlaybackGaze(p['tracking'],p['profile'],p['ids'],receiver,neck=True)
+        initial={m['id']:m['neutral'] for m in p['profile']['motors']}
+        last=np.array([initial[sid] for sid in p['ids']],float)
+        g.prepare(p['neutral'],last,snapshots(p['profile'],initial),10.)
+        source=ExpressionFrames(receiver,p['mapper'],config,tracking_mode='eyes-neck')
+        for tick in range(180):
+            receiver.tick=tick;now=10+(tick+1)/60
+            for sid in g.owned:g.observe(sid,dict(position=last[p['ids'].index(sid)]),now)
+            base=source.sample(tick/60,now);g.set_audio_time(tick/60,60.)
+            result=g.apply(base,last,1/60,now)
+            for j,sid in enumerate(p['ids']):
+                if sid not in g.owned:self.assertEqual(result[j],base[j])
+            last=result
+        for sid in g.owned:self.assertGreater(abs(last[p['ids'].index(sid)]-2047),1.)
+        self.assertEqual(len(g.owned),7);self.assertIsNone(g.publisher)
+        self.assertFalse(source.summary()['eye_neck_held'])
+
     def test_camera_handshake_requires_the_expression_feature(self):
         from vivis.runtime.developer import compatible_vision
         from vivis.vision.policy import VERSION
@@ -174,6 +240,40 @@ class OwnershipTests(unittest.TestCase):
 
 
 class ClockTests(unittest.TestCase):
+    def test_joint_playback_has_one_bus_no_audio_and_separate_owners(self):
+        from test_runtime import PlaybackTests
+        from test_independent_follow import snapshots
+        from vivis.motion.ownership import MojiaPlaybackGaze
+        from vivis.vision.policy import VERSION
+        from vivis.runtime.playback import play
+        config=settings();config['tracking_enabled']=True
+        p=plan(Robot(ROOT/'configs/robots/xiaoshuai/robot.json'),config,1.)
+        profile,ids=p['profile'],p['ids'];profile['changed_goals_only']=False
+        _,bus,clock=PlaybackTests().fixture();motors={m['id']:m for m in profile['motors']}
+        positions={sid:motors[sid]['neutral'] for sid in ids}
+        def state(sid):return dict(position=positions[sid],temperature_c=25,load_raw=0,status_register=0,
+                                  voltage_raw=235 if motors[sid]['model_raw_expected']==11272 else 60)
+        bus.snapshot.side_effect=lambda sid:next(s for s in snapshots(profile,positions) if s['id']==sid)
+        bus.feedback.side_effect=state
+        def read(sid,address,count):
+            s=state(sid)
+            return {56:s['position'].to_bytes(2,'little'),60:bytes(2),62:bytes([s['voltage_raw'],25]),65:bytes(1)}[address]
+        bus.read.side_effect=read;bus.goals.side_effect=lambda goals,speeds:positions.update(goals)
+        receiver=SimpleNamespace(poll=lambda now:dict(schema_version=VERSION,sequence=1,
+            timestamp_monotonic=now,target=dict(x=.4,y=.3,eye_line_roll_rad=.1)))
+        gaze=MojiaPlaybackGaze(p['tracking'],profile,ids,receiver)
+        weights=[0.]*52;weights[p['mapper'].order.index('JawOpen')]=.6
+        source=SimpleNamespace(sample=lambda t,now:p['mapper'].map_weights(weights))
+        with tempfile.TemporaryDirectory() as folder,patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus) as opened, \
+             patch('vivis.runtime.playback.AudioClock',side_effect=AssertionError('audio opened')):
+            result=play(profile,ids,p['neutral'][:9],60,None,Path(folder)/'log.json',Path(folder)/'STOP',
+                        frame_source=source,gaze_override=gaze,clock_factory=lambda:MonotonicClock(.15))
+        opened.assert_called_once();bus.close.assert_called_once();self.assertTrue(result['completed'])
+        for event in result['events']:
+            self.assertIn('person_gaze',event);self.assertIn('timeline_seconds',event)
+            self.assertEqual(set(event['goals']),set(ids));self.assertNotIn(29,event['goals'])
+            self.assertEqual(event['goals'][31],round(source.sample(0,0)[ids.index(31)]))
+
     def test_monotonic_clock_has_no_audio_lifecycle(self):
         clock=MonotonicClock(1.)
         self.assertIsNone(clock.time())

@@ -36,9 +36,11 @@ class ExpressionFrames:
     Camera observations are logged by the perception service. This controller
     keeps only current weights and summary ranges; it never queues old frames.
     """
-    def __init__(self,receiver,mapper,settings,publisher=None,duration=60.):
+    def __init__(self,receiver,mapper,settings,publisher=None,duration=60.,tracking_mode='face'):
         self.receiver,self.mapper,self.publisher=receiver,mapper,publisher
         self.duration=duration
+        if tracking_mode not in ('face','eyes-neck'):raise ValueError('Invalid expression tracking mode')
+        self.tracking_mode=tracking_mode
         self.adapter=MediaPipeAdapter(mapper.order[:52],settings['mirror_expression'])
         self.gain=settings['gain'];self.tau=settings['filter_tau_s']
         self.hold=settings['lost_hold_s'];self.release=settings['release_s']
@@ -95,7 +97,7 @@ class ExpressionFrames:
         if self.publisher is not None and now-self.last_publish>=.1:
             self.publisher.submit(dict(active=True,program='expression-follow',state=self.state,
                 updated_monotonic=now,remaining_seconds=max(0.,self.duration-t),
-                command_ids=self.mapper.ids,eye_neck_held=True,
+                command_ids=self.mapper.ids,eye_neck_held=self.tracking_mode=='face',tracking_mode=self.tracking_mode,
                 expression_top=sorted(zip(self.adapter.canonical,self.filtered.tolist()),key=lambda p:-p[1])[:8]))
             self.last_publish=now
         return goals
@@ -106,4 +108,4 @@ class ExpressionFrames:
             state=self.state,channel_max=dict(zip(self.adapter.canonical,self.channel_max.tolist())),
             nominal_goal_ranges={str(sid):[float(lo),float(hi)] for sid,lo,hi in
                 zip(self.mapper.ids,self.goal_min,self.goal_max) if math.isfinite(lo)},
-            tongue_out_available=False,eye_neck_held=True)
+            tongue_out_available=False,eye_neck_held=self.tracking_mode=='face',tracking_mode=self.tracking_mode)

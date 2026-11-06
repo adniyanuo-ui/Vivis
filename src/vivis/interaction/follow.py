@@ -1,4 +1,4 @@
-"""实时表情跟随：面部＋眼睑，眼球和颈部保持原位；不使用音频或A2F。"""
+"""实时表情跟随；可选眼球、颈部联合跟踪，不使用音频或A2F。"""
 import argparse
 import csv
 from datetime import datetime
@@ -19,7 +19,10 @@ from vivis.runtime.show import prepare,prepare_round,recovery_clearance_plan,unl
 from vivis.runtime.homing import recovery_policy
 from vivis.runtime.playback import play
 from vivis.motion.mapping import compile_trajectory,read_json
-from vivis.motion.ownership import PreviewPublisher
+from vivis.motion.ownership import PreviewPublisher,MojiaPlaybackGaze
+from vivis.motion.upstream import configure as configure_trajectory
+from vivis.vision.parallel_follow import configure as configure_parallel
+from vivis.vision.independent_follow import configure as configure_independent
 from vivis.vision.policy import TargetReceiver
 from vivis.interaction.animation import FrameMapper
 from vivis.interaction.expression import ExpressionFrames
@@ -37,9 +40,12 @@ class MonotonicClock:
 def plan(robot,settings,seconds):
     if type(seconds) not in (float,int) or not math.isfinite(seconds) or not 1<=seconds<=600:
         raise ValueError('Duration must be finite1..600 seconds')
+    tracking_enabled=settings.get('tracking_enabled',False)
     if (settings.get('schema_version')!='vivis-expression-follow-1.0' or settings.get('control_hz')!=60
-            or settings.get('face_selection')!='largest'):
+            or settings.get('face_selection')!='largest' or type(tracking_enabled) is not bool):
         raise ValueError('Unsupported expression-follow configuration')
+    mode='eyes-neck' if tracking_enabled else 'face'
+    robot.require_mode(mode)
     profile=robot.motion_profile()
     profile['exclude_held_axes_from_session']=True
     with robot.resolve('channels').open(encoding='utf-8-sig',newline='') as f:
@@ -47,25 +53,42 @@ def plan(robot,settings,seconds):
     shapes={s['shape']:{p['id']:p['position'] for p in s['positions']}
             for s in read_json(robot.calibration)['blendShapes']}
     face_ids,zero,_=compile_trajectory(np.zeros((1,61)),order,shapes,profile,scope='face')
-    profile['diagnostic_command_ids']=list(face_ids)
-    neutral=np.repeat(zero,math.ceil(seconds*60),axis=0)
     config=robot.tracking()
+    if robot.definition['defaults'].get('hold_vertical_eyes'):
+        held={a['id'] for a in config['control']['axes'] if a['coordinate']=='y'}
+        config['control']['vertical_enabled']=False
+        config['control']['held_eye_ids']=sorted(held)
+        config['control']['axes']=[a for a in config['control']['axes'] if a['id'] not in held]
+    # Perception owns only face/eyelid mapping. Add neutral eye slots for the
+    # existing gaze owner, which overrides those slots in the ONE control loop.
+    input_ids=list(face_ids)
+    if mode!='face':
+        motors={m['id']:m for m in profile['motors']}
+        eye_ids=[a['id'] for a in config['control']['axes']]
+        input_ids+=eye_ids
+        zero=np.column_stack([zero,*[np.full(len(zero),motors[sid]['neutral']) for sid in eye_ids]])
+        indices=np.argsort(input_ids);input_ids=sorted(input_ids);zero=zero[:,indices]
+    profile['diagnostic_command_ids']=list(input_ids)
+    neutral=np.repeat(zero,math.ceil(seconds*60),axis=0)
     config['social_smile']={'enabled':False}
     perception=read_json(ROOT/settings['perception'])
     config['face_expression']={k:perception[k] for k in ('model','sha256')}
     config['face_expression'].update(enabled=True,face_selection=settings['face_selection'])
+    configure_trajectory(config,mode)
+    configure_parallel(config,mode)
+    configure_independent(config,mode)
     authorize=robot.definition['defaults'].get('authorized_tongue_observation',False)
-    profile,ids,neutral=prepare(config,profile,face_ids,neutral,authorize,1.,robot.telemetry(),
-                              'face','lips-direct',audio_required=False)
+    profile,ids,neutral=prepare(config,profile,input_ids,neutral,authorize,1.,robot.telemetry(),
+                              mode,'lips-direct',audio_required=False)
     profile.update(face_update_hz=60,control_hz=60,snapshot_chunk_bytes=2)
-    home=robot.home('face')
+    home=robot.home(mode)
     home['axes']=[a for a in home['axes'] if a['id'] in ids]
-    if set(a['id'] for a in home['axes'])!=set(ids) or set(ids)!=set(face_ids):
-        raise ValueError('Expression follow must prepare, monitor and command exactly the face-only inventory')
+    if set(a['id'] for a in home['axes'])!=set(ids) or set(ids)!=set(face_ids)|set(profile['gaze_owner_ids']):
+        raise ValueError('Expression follow must prepare, monitor and command exactly its owned inventory')
     mapper=FrameMapper(order,shapes,profile,ids,smile_strength=0.,scope='face')
     ExpressionFrames(SimpleNamespace(max_age=config['transport']['max_age_s']),mapper,settings)
     return dict(profile=profile,ids=ids,neutral=neutral,tracking=config,perception=perception,
-                home=home,mapper=mapper,authorize=authorize)
+                home=home,mapper=mapper,authorize=authorize,mode=mode)
 
 
 def main(argv=None):
@@ -73,6 +96,7 @@ def main(argv=None):
     parser.add_argument('--robot',type=Path,default=ROOT/'configs/robots/xiaoshuai/robot.json')
     parser.add_argument('--config',type=Path,default=ROOT/'configs/interaction/expression_follow.json')
     parser.add_argument('--seconds',type=float,default=60,help='回中后跟随时长1..600秒')
+    parser.add_argument('--tracking',choices=('on','off'),help='on叠加眼球和颈部位置跟随；默认off保持纯表情模式')
     parser.add_argument('--gain',type=float,help='全部表情通道的统一增益，默认1.0')
     parser.add_argument('--mirror-expression',choices=('on','off'),help='on交换左右表情通道；默认off为同侧解剖映射')
     parser.add_argument('--output',type=Path)
@@ -81,12 +105,13 @@ def main(argv=None):
     settings=read_json(args.config)
     if args.gain is not None:settings['gain']=args.gain
     if args.mirror_expression is not None:settings['mirror_expression']=args.mirror_expression=='on'
-    robot=Robot(args.robot);robot.require_mode('face')
+    if args.tracking is not None:settings['tracking_enabled']=args.tracking=='on'
+    robot=Robot(args.robot)
     p=plan(robot,settings,args.seconds)
-    profile,ids,home=p['profile'],p['ids'],p['home']
+    profile,ids,home,mode=p['profile'],p['ids'],p['home'],p['mode']
     required=[ROOT/p['perception'][k] for k in ('python','model')]
     if args.check:
-        print(json.dumps(dict(offline_valid=True,program='expression-follow',robot=robot.definition['name'],
+        print(json.dumps(dict(offline_valid=True,program='expression-follow',robot=robot.definition['name'],tracking_mode=mode,
             command_ids=ids,home_ids=[a['id'] for a in home['axes']],
             held_eye_ids=profile['held_eye_ids'],held_neck_ids=profile['held_neck_ids'],
             audio_opened=False,a2f_used=False,hardware_opened=False,
@@ -113,14 +138,14 @@ def main(argv=None):
         if stop or stop_file.exists():raise RuntimeError('Operator stop')
     handlers={sig:signal.signal(sig,request_stop) for sig in (signal.SIGINT,signal.SIGTERM)}
     summary=dict(completed=False,program='expression-follow',robot=robot.definition['name'],audio_opened=False,
-                 a2f_used=False,command_ids=ids,eye_neck_held=True)
+                 a2f_used=False,command_ids=ids,eye_neck_held=mode=='face',tracking_mode=mode)
     status=ROOT/'outputs/runtime/control_status.json';status.parent.mkdir(parents=True,exist_ok=True)
     publisher=receiver=source=None;report={}
     def publish(state,error=None):
         publisher.submit(dict(active=False,program='expression-follow',state=state,error=error,
-            updated_monotonic=time.monotonic(),command_ids=ids,eye_neck_held=True))
+            updated_monotonic=time.monotonic(),command_ids=ids,eye_neck_held=mode=='face',tracking_mode=mode))
     lock_path=ROOT/'outputs/developer/control.lock';lock_path.parent.mkdir(parents=True,exist_ok=True)
-    print('节目：实时表情跟随（面部＋眼睑）；眼球、颈部保持原位；不播放音频。',flush=True)
+    print('节目：实时表情跟随（面部＋眼睑）；'+('叠加眼球、颈部跟随' if mode!='face' else '眼球、颈部保持原位')+'；不播放音频。',flush=True)
     print('日志：'+str(output),flush=True)
     try:
         with lock_path.open('a') as lock:
@@ -129,20 +154,23 @@ def main(argv=None):
             try:
                 with vision_service(output/'tracking.json',output,True,python=str(ROOT/p['perception']['python'])):
                     receiver=TargetReceiver(p['tracking']);receiver.wait_ready()
-                    guard();print('PREPARE face-only',flush=True)
+                    guard();print('PREPARE '+mode,flush=True)
                     prepare_round(home_args,profile,ids,home['axes'],startup,clearance,robot.telemetry(),
                                   guard,report,output,publish)
-                    source=ExpressionFrames(receiver,p['mapper'],settings,publisher,args.seconds)
+                    # One preview publisher and one receiver are shared by both
+                    # sources. Gaze uses the existing reviewed controller only.
+                    gaze=MojiaPlaybackGaze(p['tracking'],profile,ids,receiver,neck=True) if mode!='face' else None
+                    source=ExpressionFrames(receiver,p['mapper'],settings,publisher,args.seconds,tracking_mode=mode)
                     guard();print(f'EXPRESSION FOLLOW START {args.seconds:g}s',flush=True)
                     result=play(profile,ids,p['neutral'],60,None,output/'playback_log.json',stop_file,
-                                frame_source=source,clock_factory=lambda:MonotonicClock(args.seconds))
+                                frame_source=source,gaze_override=gaze,clock_factory=lambda:MonotonicClock(args.seconds))
                     summary['completed']=result['completed']
                     print('EXPRESSION FOLLOW COMPLETE',flush=True)
             finally:
                 if receiver:receiver.close()
                 if p['authorize'] and 'hardware_restore' in report:unload_tongue(profile,report)
                 error=publisher.finish(dict(active=False,program='expression-follow',state='stopped',
-                    updated_monotonic=time.monotonic(),command_ids=ids,eye_neck_held=True))
+                    updated_monotonic=time.monotonic(),command_ids=ids,eye_neck_held=mode=='face',tracking_mode=mode))
                 if error:summary['preview_error']=error
     except BaseException as exc:
         summary['error']=str(exc)
