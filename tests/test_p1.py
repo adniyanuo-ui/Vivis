@@ -29,6 +29,8 @@ class IntentTests(unittest.TestCase):
         text,_=resolve_candidates(self.router,'不要停止','停止');self.assertEqual(self.router.parse(text)['kind'],'ignore')
         text,_=resolve_candidates(self.router,'不用播放白骨夫人','播放白骨夫人')
         self.assertEqual(self.router.parse(text)['kind'],'ignore')
+        text,_=resolve_candidates(self.router,'我不想退出','退出')
+        self.assertEqual(self.router.parse(text)['kind'],'ignore')
         text,_=resolve_candidates(self.router,'播放白骨夫人','开始表情跟随')
         self.assertEqual(self.router.parse(text)['name'],'clarify')
         self.assertEqual(self.router.parse('表情跟随',True,current_program='baigufuren')['program'],'expression-follow')

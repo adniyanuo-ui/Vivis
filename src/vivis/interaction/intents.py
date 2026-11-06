@@ -50,7 +50,7 @@ class IntentRouter:
 def resolve_candidates(router,final,streaming):
     """Choose among two COMPLETE hypotheses; never invent a misspelling alias."""
     primary=router.parse(final);alternative=router.parse(streaming)
-    negative=command_text(final).startswith(('不要','不用','别','不想','不是')) and primary['kind']=='ignore'
+    negative=bool(re.match(r'^(?:我)?(?:不要|不用|别|不想|不是)',command_text(final))) and primary['kind']=='ignore'
     if negative:return final,'sensevoice_final'
     valid={'standby','select'}
     if primary['kind'] in valid and alternative['kind'] in valid:
