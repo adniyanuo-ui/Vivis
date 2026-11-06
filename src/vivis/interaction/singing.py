@@ -1,6 +1,7 @@
 """P0: runtime PCM-to-face and observed smile, using the existing motion owner."""
 import argparse
 import copy
+from contextlib import ExitStack
 import csv
 from datetime import datetime
 import fcntl
@@ -21,6 +22,7 @@ from vivis.runtime.developer import check_competitors, vision_service
 from vivis.runtime.show import prepare,prepare_round,recovery_clearance_plan,unload_tongue
 from vivis.runtime.homing import recovery_policy
 from vivis.runtime.playback import play
+from vivis.runtime.cancellation import operator_cancelled
 from vivis.motion.mapping import compile_trajectory,read_json,live_preflight
 from vivis.motion.ownership import MojiaPlaybackGaze
 from vivis.vision.policy import TargetReceiver
@@ -101,6 +103,11 @@ def main(argv=None):
     parser.add_argument('--inference-audio',type=Path,help='Optional sample-aligned dry voice; caller must verify alignment')
     parser.add_argument('--capture-animation',action='store_true',help='Opt-in bounded asynchronous animation trace')
     parser.add_argument('--output',type=Path)
+    parser.add_argument('--session-stop-file',type=Path,help=argparse.SUPPRESS)
+    parser.add_argument('--audio-reference-port',type=int,help=argparse.SUPPRESS)
+    parser.add_argument('--session-id',default='',help=argparse.SUPPRESS)
+    parser.add_argument('--soft-audio-cancel-ms',type=int,default=0,help=argparse.SUPPRESS)
+    parser.add_argument('--compact-logs',action='store_true',help=argparse.SUPPRESS)
     parser.add_argument('--check',action='store_true',help='Offline configuration checks; no devices/models opened')
     args=parser.parse_args(argv)
     if not 1<=args.repeat<=20:parser.error('Repeat must be1..20')
@@ -114,6 +121,13 @@ def main(argv=None):
     if args.mouth_speed is not None:robot.set_mouth_speed(args.mouth_speed)
     p=plan(robot,args.work,args.mode,settings,args.smile=='on')
     profile,ids,config=p['profile'],p['ids'],p['tracking']
+    if not 0<=args.soft_audio_cancel_ms<=100:parser.error('Invalid audio cancellation fade')
+    if args.soft_audio_cancel_ms:profile['soft_audio_cancel_ms']=args.soft_audio_cancel_ms
+    if args.compact_logs:profile.update(retain_event_limit=600,capture_serial_trace=False)
+    if args.session_stop_file is not None:profile['session_stop_file']=str(args.session_stop_file.resolve())
+    if args.audio_reference_port is not None:
+        if not 1024<=args.audio_reference_port<=65535 or not args.session_id:parser.error('Invalid audio reference session')
+        profile['audio_reference']=dict(host='127.0.0.1',port=args.audio_reference_port,session_id=args.session_id)
     inference=args.inference_audio or p['audio']
     n,rate,_=audio_info(inference)
     if abs(n/rate-p['duration'])>1/16000:parser.error('Inference/playback durations differ; need sample-aligned sources')
@@ -151,7 +165,8 @@ def main(argv=None):
         nonlocal stop
         stop=True
     def guard():
-        if stop or stop_file.exists():raise RuntimeError('Operator stop')
+        if stop or stop_file.exists() or args.session_stop_file is not None and args.session_stop_file.exists():
+            raise RuntimeError('Operator stop')
     handlers={sig:signal.signal(sig,request_stop) for sig in (signal.SIGINT,signal.SIGTERM)}
     summary=dict(completed=False,source='runtime_a2f',prerecorded_animation_read=False,rounds=[])
     status=ROOT/'outputs/runtime/control_status.json';status.parent.mkdir(parents=True,exist_ok=True)
@@ -159,11 +174,11 @@ def main(argv=None):
         temporary=status.with_suffix('.tmp');temporary.write_text(json.dumps(dict(active=False,state=state,error=error,
             updated_monotonic=time.monotonic(),command_ids=profile['diagnostic_command_ids']))+'\n');temporary.replace(status)
     lock_path=ROOT/'outputs/developer/control.lock';lock_path.parent.mkdir(parents=True,exist_ok=True)
-    owns_control=False
     try:
-        with lock_path.open('a') as lock:
+        with ExitStack() as resources:
+            lock=resources.enter_context(lock_path.open('a'))
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-            owns_control=True
+            resources.push(lambda _,exc,__:publish('stopped',str(exc) if exc is not None else None))
             vision_python=str(ROOT/p['perception']['python']) if args.smile=='on' else None
             with vision_service(config_path,output,args.mode!='face',python=vision_python):
                 for lap in range(1,args.repeat+1):
@@ -200,11 +215,10 @@ def main(argv=None):
                 summary['completed']=True
     except BaseException as exc:
         summary['error']=str(exc)
-        if isinstance(exc,RuntimeError) and str(exc)=='Operator stop':return 130
+        if operator_cancelled(exc):return 130
         raise
     finally:
         for sig,handler in handlers.items():signal.signal(sig,handler)
-        if owns_control:publish('stopped',summary.get('error'))
         (output/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
     return 0
 

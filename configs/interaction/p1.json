@@ -1,0 +1,13 @@
+{
+  "schema_version": "vivis-dialog-programs-1.0",
+  "programs": "configs/interaction/programs.json",
+  "speech": "configs/perception/speech.json",
+  "standby": "configs/interaction/standby.json",
+  "robot": "configs/robots/xiaoshuai/robot.json",
+  "max_event_age_s": 2.0,
+  "cancel_timeout_s": 8.0,
+  "expression_seconds": 600,
+  "standby_seconds": 600,
+  "soft_audio_cancel_ms": 40,
+  "diagnostics": false
+}

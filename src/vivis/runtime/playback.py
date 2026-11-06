@@ -3,6 +3,7 @@ import json
 import gc
 import math
 import signal
+from collections import deque
 import threading
 import time
 import wave
@@ -16,7 +17,7 @@ class SensorReadingError(RuntimeError):pass
 class PositionEdgeReadingError(RuntimeError):pass
 
 class AudioClock:
-    def __init__(self,path,device,latency='low',gain=1.):
+    def __init__(self,path,device,latency='low',gain=1.,reference=None):
         if not (isinstance(latency,str) and latency in ('low','high') or
                 type(latency) in (int,float) and math.isfinite(latency) and .01<=latency<=1):
             raise ValueError('Audio latency must be low/high or 0.01..1 seconds')
@@ -34,22 +35,47 @@ class AudioClock:
         common=math.gcd(self.rate,original_rate)
         self.data=resample_poly(data,self.rate//common,original_rate//common,axis=0).astype(np.float32)*gain
         self.duration=len(data)/original_rate
-        self.stream=sd.OutputStream(device=device,samplerate=self.rate,channels=self.data.shape[1],
-            dtype='float32',blocksize=0,latency=latency,callback=self.callback)
+        self.reference=None
+        if reference is not None:
+            from vivis.speech.echo import ReferencePublisher
+            self.reference=ReferencePublisher(reference,self.rate)
+        try:
+            self.stream=sd.OutputStream(device=device,samplerate=self.rate,channels=self.data.shape[1],
+                dtype='float32',blocksize=0,latency=latency,callback=self.callback)
+        except BaseException:
+            if self.reference is not None:self.reference.close()
+            raise
     def callback(self,outdata,n,timing,status):
         if status:self.fault=str(status)
         outdata.fill(0)
         if self.first_dac is None:self.first_dac=float(timing.outputBufferDacTime)
         take=min(n,len(self.data)-self.cursor)
         if take>0:outdata[:take]=self.data[self.cursor:self.cursor+take];self.cursor+=take
+        fading=getattr(self,'fade_remaining',None)
+        if fading is not None:
+            envelope=np.clip((fading-np.arange(n))/self.fade_total,0.,1.)
+            outdata*=envelope[:,None];self.fade_remaining=max(0,fading-n)
+        if getattr(self,'reference',None) is not None:self.reference.send(outdata,timing)
+        if fading is not None and self.fade_remaining==0:raise self.sd.CallbackStop
         if take<n:raise self.sd.CallbackStop
     def start(self):self.stream.start()
     def time(self):return None if self.first_dac is None else self.stream.time-self.first_dac
-    def close(self):self.stream.abort();self.stream.close()
+    def close(self):
+        try:self.stream.abort();self.stream.close()
+        finally:
+            if getattr(self,'reference',None) is not None:self.reference.close()
+
+    def close_gracefully(self,fade_ms=40):
+        if not 1<=fade_ms<=100:raise ValueError('Audio cancellation fade must be1..100ms')
+        self.fade_total=max(1,int(self.rate*fade_ms/1000));self.fade_remaining=self.fade_total
+        deadline=time.monotonic()+.6
+        try:
+            while self.stream.active and time.monotonic()<deadline:time.sleep(.005)
+        finally:self.close()
 
 def check_feedback(sid,state,motor,defer_sensor_faults=False):
     position_error=None
-    if not 0<=state['position']<=4095:raise RuntimeError(f'{sid}: invalid single-turn encoder position')
+    if not 0<=state['position']<=4095:raise RuntimeError(f'{sid}: invalid single-turn encoder position ({state["position"]})')
     low=motor.get('feedback_min',motor['safe_min']);high=motor.get('feedback_max',motor['safe_max'])
     if not low<=state['position']<=high:
         message=f'{sid}: measured position {state["position"]} outside safe range'
@@ -222,10 +248,13 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     last_good_feedback={}
     last_feedback_attempt={}
     speeds={sid:int(motors[sid]['max_speed_counts_s']) for sid in ids if sid in command_ids}
+    retain=profile.get('retain_event_limit')
+    if retain is not None and (type(retain) is not int or not 1<=retain<=100000):raise ValueError('Invalid retained event limit')
     stop=threading.Event();previous_handlers={}
     for sig in [signal.SIGINT,signal.SIGTERM]:
         previous_handlers[sig]=signal.signal(sig,lambda *_:stop.set())
-    clock=None;bus=None;gc_suspended=False;events=[];result={'completed':False,'stop_policy':profile['stop_method'],
+    clock=None;bus=None;gc_suspended=False;events=[] if retain is None else deque(maxlen=retain);sent_count=0
+    result={'completed':False,'stop_policy':profile['stop_method'],
         'initial_approach_commands':0,'servo_ids':ids,'motion_gain':profile.get('motion_gain',1),
         'preflight_snapshots':[],'sensor_confirmations':[],'startup_communication_recoveries':[],
         'phase':'preflight',
@@ -242,7 +271,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         result['sensor_fault_policy']=dict(profile['telemetry_policy'])
     def received(sid,state):
         result['last_feedback_received']={'id':sid,**state}
-    def should_stop():return stop.is_set() or Path(stop_file).exists()
+    def should_stop():return stop.is_set() or Path(stop_file).exists() or (
+        'session_stop_file' in profile and Path(profile['session_stop_file']).exists())
     def feedback_checked(sid,initial=None,observed_at=None):
         if should_stop():raise RuntimeError('Operator stop during feedback')
         last_feedback_attempt[sid]=time.monotonic()
@@ -320,6 +350,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         # Verify physical audio output has been configured before opening the bus.
         audio_latency=profile.get('audio_latency_s',profile.get('audio_latency_seconds','low'))
         audio_options={'gain':profile['audio_gain']} if 'audio_gain' in profile else {}
+        if 'audio_reference' in profile:audio_options['reference']=profile['audio_reference']
         clock=clock_factory() if clock_factory is not None else AudioClock(audio_path,profile['audio_device'],latency=audio_latency,**audio_options)
         result['timeline_clock']='monotonic' if clock_factory is not None else 'audio_dac'
         if clock_factory is None:
@@ -524,6 +555,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             command_done=time.monotonic() if mojia_gaze else None
             if previous_index>=0:skipped+=max(0,index-previous_index-1)
             events.append({('audio_seconds' if clock_factory is None else 'timeline_seconds'):t,'frame':index,'sent_monotonic':now,'goals':goals})
+            sent_count+=1
             if overrides:events[-1]['speed_overrides']=dict(overrides)
             if face_hz!=fps:events[-1]['face_frame']=face_index
             if gaze_override is not None:
@@ -565,6 +597,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         if clock_factory is None:result['audio_seconds_at_stop']=t
     except Exception as exc:
         result['error']=str(exc)
+        from vivis.runtime.cancellation import operator_cancelled
+        result['operator_cancelled']=operator_cancelled(exc)
         raise
     finally:
         # Stop clock and transmission. Do not suddenly neutralize or unload a gravity-loaded neck.
@@ -583,7 +617,12 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         cleanup_errors=[]
         for resource in [clock,bus]:
             if resource is not None:
-                try:resource.close()
+                try:
+                    if (resource is clock and clock_factory is None and result.get('operator_cancelled')
+                            and profile.get('soft_audio_cancel_ms',0) and not Path(stop_file).exists()):
+                        resource.close_gracefully(profile['soft_audio_cancel_ms'])
+                        result['operator_audio_fade_ms']=profile['soft_audio_cancel_ms']
+                    else:resource.close()
                 except Exception as exc:cleanup_errors.append(str(exc))
         if cleanup_errors:
             result['cleanup_errors']=cleanup_errors
@@ -591,7 +630,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 result.update(completed=False,error='Playback resource cleanup failed: '+'; '.join(cleanup_errors))
         if gc_suspended:gc.enable()
         for sig,handler in previous_handlers.items():signal.signal(sig,handler)
-        result['events']=events;result['sent_frames']=len(events)
+        result['events']=list(events);result['sent_frames']=sent_count
+        if retain is not None:result.update(retain_event_limit=retain,event_log_truncated=sent_count>len(events))
         if mojia_gaze:
             preview_error=gaze_override.finish(result['completed'],result.get('error'))
             if preview_error:result['preview_error']=preview_error

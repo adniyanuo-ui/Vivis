@@ -2,6 +2,7 @@
 from collections import deque
 import json
 import math
+import os
 import queue
 from pathlib import Path
 import subprocess
@@ -36,7 +37,7 @@ class LiveFrames:
         try:
             self.process=subprocess.Popen([str(binary),str(model),str(audio),str(self.output/'native'),
                 str(duration),'--stream',self.playback_id],stdout=subprocess.PIPE,stderr=self.log,
-                text=True,bufsize=1,start_new_session=True)
+                text=True,bufsize=1,start_new_session=os.environ.get('VIVIS_MANAGED_SESSION')!='1')
         except BaseException:
             self.log.close()
             if self.capture:self.capture.close()

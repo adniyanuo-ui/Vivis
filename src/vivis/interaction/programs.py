@@ -4,10 +4,14 @@ import argparse
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description='节目选择；先Ctrl+C退出当前节目，再启动另一个。')
-    parser.add_argument('program',choices=('expression-follow','singing'))
+    parser.add_argument('program',choices=('expression-follow','singing','baigufuren','dialogue','standby'))
     args,remaining=parser.parse_known_args(argv)
     if args.program=='expression-follow':
         from vivis.interaction.follow import main as run
+    elif args.program=='dialogue':
+        from vivis.interaction.dialogue import main as run
+    elif args.program=='standby':
+        from vivis.interaction.standby import main as run
     else:
         from vivis.interaction.singing import main as run
     return run(remaining)

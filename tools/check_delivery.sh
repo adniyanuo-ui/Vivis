@@ -37,6 +37,9 @@ done
 printf 'Expression-follow offline check passed (no audio/A2F/devices).\n'
 "$PYTHON" -m vivis.interaction.programs expression-follow --tracking on --check > /dev/null
 printf 'Joint expression/eye/neck offline check passed.\n'
+"$PYTHON" -m vivis.interaction.dialogue --check > /dev/null
+"$PYTHON" -m vivis.interaction.standby --check > /dev/null
+printf 'P1 dialogue and standby offline configuration checks passed.\n'
 "$PYTHON" -m unittest discover -s tests -p 'test_*.py'
 if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     git diff --check

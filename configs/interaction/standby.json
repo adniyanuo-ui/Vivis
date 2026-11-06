@@ -1,0 +1,11 @@
+{
+  "schema_version": "vivis-standby-1.0",
+  "home_speed_counts_s": 60,
+  "blink_interval_s": [9.0, 16.0],
+  "blink_duration_s": 0.6,
+  "blink_peak": 0.7,
+  "look_interval_s": [15.0, 28.0],
+  "look_duration_s": 4.5,
+  "eye_yaw_span_counts": 35,
+  "neck_yaw_span_counts": 16
+}

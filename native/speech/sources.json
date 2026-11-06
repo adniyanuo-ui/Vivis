@@ -1,0 +1,196 @@
+{
+  "schema_version": "vivis-speech-assets-1.0",
+  "sources": [
+    {
+      "kind": "asr",
+      "repository": "csukuangfj/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30",
+      "revision": "ad658fa0201659a09ea3c176129a191c77ecae8f",
+      "files": [
+        {
+          "rfilename": "README.md",
+          "blobId": "ba400b5371cb302ea54095d954895cae2b1cda6d",
+          "size": 317
+        },
+        {
+          "rfilename": "decoder.onnx",
+          "blobId": "cda50263c731e02460f604237bcab0e5b85d6e0f",
+          "size": 5165083,
+          "lfs": {
+            "sha256": "06522ad63cec0fdf6809f4e1db9bb4f7d710c34582e3b35db62ac60eccafac7e",
+            "size": 5165083,
+            "pointerSize": 132
+          }
+        },
+        {
+          "rfilename": "encoder.int8.onnx",
+          "blobId": "562db5d38485a02738f07ef006b56a8e954d57f5",
+          "size": 161141793,
+          "lfs": {
+            "sha256": "5ac51e27981bb4dab01bb9be4958453ba50c3b61c063ddda0eab23fd3671aa4f",
+            "size": 161141793,
+            "pointerSize": 134
+          }
+        },
+        {
+          "rfilename": "joiner.int8.onnx",
+          "blobId": "5fab9efce42c2a86a7b9876977eb9cec22a586a2",
+          "size": 1033416,
+          "lfs": {
+            "sha256": "b34584dc6f561089e1d747fedebb3765f2caa72c927ef54d7ca55e5ae40a814b",
+            "size": 1033416,
+            "pointerSize": 132
+          }
+        },
+        {
+          "rfilename": "test_wavs/0.wav",
+          "blobId": "f6f2b4b96e3fd542e84e859478bb577f76c4e123",
+          "size": 179646,
+          "lfs": {
+            "sha256": "668bf8df51a10027b84d5d8816a1ce11ae93545538dc05cfe2aa6811d399c250",
+            "size": 179646,
+            "pointerSize": 131
+          }
+        },
+        {
+          "rfilename": "tokens.txt",
+          "blobId": "f15034ba47f26a74abdf68168b3e02c7055bb8b3",
+          "size": 20628
+        }
+      ]
+    },
+    {
+      "kind": "tts",
+      "repository": "csukuangfj/vits-melo-tts-zh_en",
+      "revision": "a0d5c6a264c0ef92d70d8661d8cc502d79627cd6",
+      "files": [
+        {
+          "rfilename": "LICENSE",
+          "blobId": "7c49476032fa4cd6c8faa8eda042f38a31c4ea88",
+          "size": 1053
+        },
+        {
+          "rfilename": "README.md",
+          "blobId": "146aa4632b14918d7f2212fd490d69ea010b3e4c",
+          "size": 257
+        },
+        {
+          "rfilename": "date.fst",
+          "blobId": "20ec7f4c077f9ec85ca9d01c4b4f4581f6e552ee",
+          "size": 59154
+        },
+        {
+          "rfilename": "dict/README.md",
+          "blobId": "887911898611a1032f606bdbbdd6315b7bf992f6",
+          "size": 683
+        },
+        {
+          "rfilename": "dict/hmm_model.utf8",
+          "blobId": "2e1f807a0f31eeee3abe4cd1e0a0419d143af96a",
+          "size": 519739
+        },
+        {
+          "rfilename": "dict/idf.utf8",
+          "blobId": "4ca9cecfc1d4108d639f06b83d42ab930a79fa92",
+          "size": 5998717
+        },
+        {
+          "rfilename": "dict/jieba.dict.utf8",
+          "blobId": "0015948de30f38fa97dd20adef231c1909bd8efd",
+          "size": 5071204
+        },
+        {
+          "rfilename": "dict/pos_dict/char_state_tab.utf8",
+          "blobId": "e1e4d8d815b2938d199f14c922398714286eef95",
+          "size": 327139
+        },
+        {
+          "rfilename": "dict/pos_dict/prob_emit.utf8",
+          "blobId": "cc207d11dc958a46f8f91d142bdb330f2b5d28a0",
+          "size": 1687686
+        },
+        {
+          "rfilename": "dict/pos_dict/prob_start.utf8",
+          "blobId": "433750d56bed6affb5b1b2989044403bcef4448e",
+          "size": 4347
+        },
+        {
+          "rfilename": "dict/pos_dict/prob_trans.utf8",
+          "blobId": "87e5ac5ca772a625f0a0f67352e9b31d6872461c",
+          "size": 124159
+        },
+        {
+          "rfilename": "dict/stop_words.utf8",
+          "blobId": "32ac9e67dc44222534de99cc298dccd4b8de9907",
+          "size": 8974
+        },
+        {
+          "rfilename": "dict/user.dict.utf8",
+          "blobId": "6a42ee4e06fb197d968d2bb39becad65e01b2e57",
+          "size": 49
+        },
+        {
+          "rfilename": "lexicon.txt",
+          "blobId": "1a1119efceca0c2dae243f84061e70e4e3d99710",
+          "size": 6837671
+        },
+        {
+          "rfilename": "model.int8.onnx",
+          "blobId": "918a7e5c90be318d1f14e8c3efb4651c3c44bcd7",
+          "size": 53517430,
+          "lfs": {
+            "sha256": "f085f5079e05f039b800aeb542f5253c26a303211b0c6465d0d9387977855a63",
+            "size": 53517430,
+            "pointerSize": 133
+          }
+        },
+        {
+          "rfilename": "number.fst",
+          "blobId": "66c0bd468903fc98d212cd6c3c5b2793ce8eb2c3",
+          "size": 64482
+        },
+        {
+          "rfilename": "phone.fst",
+          "blobId": "2eba908c27ec0767281cad25d322008b16869c5b",
+          "size": 88630
+        },
+        {
+          "rfilename": "tokens.txt",
+          "blobId": "78ed7abf73cfa7955577a2894388dcd8f5a317c3",
+          "size": 655
+        }
+      ]
+    },
+    {
+      "kind": "asr_final",
+      "repository": "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+      "revision": "2365baeacb507f821a0c8120fcee3d484dba7a07",
+      "files": [
+        {
+          "rfilename": "LICENSE",
+          "blobId": "b5aafcccf5cfd5f7293c710bd6588dc6544eef2b",
+          "size": 71
+        },
+        {
+          "rfilename": "README.md",
+          "blobId": "a05f82e98818e72a7184df7580dac4aa72ac41c3",
+          "size": 104
+        },
+        {
+          "rfilename": "model.int8.onnx",
+          "blobId": "e0066cc153e9efed3c626d59ce4d6ded3c945f00",
+          "size": 239233841,
+          "lfs": {
+            "sha256": "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
+            "size": 239233841,
+            "pointerSize": 134
+          }
+        },
+        {
+          "rfilename": "tokens.txt",
+          "blobId": "2cfc92fc2ff26aaa690b7c01fd96b41109413881",
+          "size": 315894
+        }
+      ]
+    }
+  ]
+}

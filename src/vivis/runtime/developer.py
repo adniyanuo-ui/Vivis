@@ -67,7 +67,7 @@ def vision_service(config_path, output, required, python=None):
                                           '--config', str(config_path), '--output', str(output / 'vision')],
                                          cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                          env={**os.environ, 'PYTHONPATH': str(ROOT / 'src'),'PYTHONNOUSERSITE':'1'},
-                                         start_new_session=True)
+                                         start_new_session=os.environ.get('VIVIS_MANAGED_SESSION')!='1')
                 deadline = time.monotonic() + 20
                 while time.monotonic() < deadline:
                     if child.poll() is not None:

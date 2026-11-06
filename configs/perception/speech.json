@@ -1,0 +1,53 @@
+{
+  "schema_version": "vivis-speech-1.0",
+  "python": "outputs/speech/venv/bin/python",
+  "capture": {
+    "device": "DOV:",
+    "sample_rate_hz": 48000,
+    "channels": 2,
+    "channel": 0,
+    "frame_ms": 20,
+    "queue_frames": 25
+  },
+  "sample_rate_hz": 16000,
+  "asr": {
+    "directory": "outputs/speech/models/asr_zh_2025",
+    "encoder": "encoder.int8.onnx",
+    "decoder": "decoder.onnx",
+    "joiner": "joiner.int8.onnx",
+    "tokens": "tokens.txt",
+    "threads": 2,
+    "hotwords_score": 1.5
+  },
+  "tts": {
+    "directory": "outputs/speech/models/tts",
+    "model": "model.int8.onnx",
+    "tokens": "tokens.txt",
+    "lexicon": "lexicon.txt",
+    "dict": "dict",
+    "threads": 2
+  },
+  "aec": {
+    "enabled": true,
+    "reference_port": 14788,
+    "sample_rate_hz": 16000,
+    "tail_ms": 200,
+    "reference_delay_ms": 0,
+    "noise_suppress_db": -15
+  },
+  "prompts": "outputs/speech/prompts",
+  "asr_final": {
+    "directory": "outputs/speech/models/sensevoice",
+    "model": "model.int8.onnx",
+    "tokens": "tokens.txt",
+    "threads": 2,
+    "language": "zh"
+  },
+  "segmentation": {
+    "aggressiveness": 2,
+    "prefix_frames": 10,
+    "min_speech_frames": 3,
+    "silence_frames": 15,
+    "max_frames": 600
+  }
+}

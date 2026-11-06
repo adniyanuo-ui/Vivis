@@ -18,6 +18,7 @@ from vivis.runtime.developer import check_competitors,vision_service
 from vivis.runtime.show import prepare,prepare_round,recovery_clearance_plan,unload_tongue
 from vivis.runtime.homing import recovery_policy
 from vivis.runtime.playback import play
+from vivis.runtime.cancellation import operator_cancelled
 from vivis.motion.mapping import compile_trajectory,read_json
 from vivis.motion.ownership import PreviewPublisher,MojiaPlaybackGaze
 from vivis.motion.upstream import configure as configure_trajectory
@@ -100,6 +101,8 @@ def main(argv=None):
     parser.add_argument('--gain',type=float,help='全部表情通道的统一增益，默认1.0')
     parser.add_argument('--mirror-expression',choices=('on','off'),help='on交换左右表情通道；默认off为同侧解剖映射')
     parser.add_argument('--output',type=Path)
+    parser.add_argument('--session-stop-file',type=Path,help=argparse.SUPPRESS)
+    parser.add_argument('--compact-logs',action='store_true',help=argparse.SUPPRESS)
     parser.add_argument('--check',action='store_true',help='离线检查，不打开相机、串口、音频或模型')
     args=parser.parse_args(argv)
     settings=read_json(args.config)
@@ -109,6 +112,8 @@ def main(argv=None):
     robot=Robot(args.robot)
     p=plan(robot,settings,args.seconds)
     profile,ids,home,mode=p['profile'],p['ids'],p['home'],p['mode']
+    if args.session_stop_file is not None:profile['session_stop_file']=str(args.session_stop_file.resolve())
+    if args.compact_logs:profile.update(retain_event_limit=600,capture_serial_trace=False)
     required=[ROOT/p['perception'][k] for k in ('python','model')]
     if args.check:
         print(json.dumps(dict(offline_valid=True,program='expression-follow',robot=robot.definition['name'],tracking_mode=mode,
@@ -135,7 +140,8 @@ def main(argv=None):
         nonlocal stop
         stop=True
     def guard():
-        if stop or stop_file.exists():raise RuntimeError('Operator stop')
+        if stop or stop_file.exists() or args.session_stop_file is not None and args.session_stop_file.exists():
+            raise RuntimeError('Operator stop')
     handlers={sig:signal.signal(sig,request_stop) for sig in (signal.SIGINT,signal.SIGTERM)}
     summary=dict(completed=False,program='expression-follow',robot=robot.definition['name'],audio_opened=False,
                  a2f_used=False,command_ids=ids,eye_neck_held=mode=='face',tracking_mode=mode)
@@ -174,7 +180,7 @@ def main(argv=None):
                 if error:summary['preview_error']=error
     except BaseException as exc:
         summary['error']=str(exc)
-        if isinstance(exc,RuntimeError) and str(exc)=='Operator stop':return 130
+        if operator_cancelled(exc):return 130
         raise
     finally:
         for sig,handler in handlers.items():signal.signal(sig,handler)
