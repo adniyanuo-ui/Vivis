@@ -1,0 +1,216 @@
+{
+  "repo": "nvidia/Audio2Face-3D-v3.0",
+  "revision": "b74132732fd9a9d29b237bec193ded64c9745e91",
+  "files": [
+    {
+      "type": "file",
+      "oid": "a6344aac8c09253b3b630fb776ae94478aa0275b",
+      "size": 1519,
+      "path": ".gitattributes"
+    },
+    {
+      "type": "file",
+      "oid": "1170454cfd2ef34f0c5923d1d12e7b5307366af7",
+      "size": 11146,
+      "path": "README.md"
+    },
+    {
+      "type": "file",
+      "oid": "9459ee26d5809b8bccbca45c8988833f9ff5da1f",
+      "size": 15297809,
+      "lfs": {
+        "oid": "bcb1fde2c7384fe9ec3cf9932b0fdeeda01fe4a1e42bba3817bba14e7f1716d3",
+        "size": 15297809,
+        "pointerSize": 133
+      },
+      "xetHash": "6ba63fd3dd9fa13d950b744a3d574d097df9aedc6f8a4e892dc48f99680fd396",
+      "path": "bs_skin_Claire.npz"
+    },
+    {
+      "type": "file",
+      "oid": "7bca469229b485a0690ceb92928b732c765db2ce",
+      "size": 15297809,
+      "lfs": {
+        "oid": "da119b5291de9d7b711ccd34c99f5a9cec001f5d1e25083c294d3c02f642691c",
+        "size": 15297809,
+        "pointerSize": 133
+      },
+      "xetHash": "f8a9522ecbd6738d04269e5f0b1b2a912f7882beeb6297e081ccd25271b7bfda",
+      "path": "bs_skin_James.npz"
+    },
+    {
+      "type": "file",
+      "oid": "bca3e16a523f6d200a16d87de84522a753ea0be5",
+      "size": 15297809,
+      "lfs": {
+        "oid": "a13234c0fa07e5c3bea3b2f4ad1d5c17fcec5482285607a2c3cd79099ed81297",
+        "size": 15297809,
+        "pointerSize": 133
+      },
+      "xetHash": "b2213e063813e433c459912ca3e699f93c1834531618a5552c2f4a92aec06e0e",
+      "path": "bs_skin_Mark.npz"
+    },
+    {
+      "type": "file",
+      "oid": "4384e52abff05ac422d3357ac519b2f01829be46",
+      "size": 4667,
+      "path": "bs_skin_config_Claire.json"
+    },
+    {
+      "type": "file",
+      "oid": "e7850c222705031335a39fc59568af8ef2f4218a",
+      "size": 4667,
+      "path": "bs_skin_config_James.json"
+    },
+    {
+      "type": "file",
+      "oid": "c7cefcbb649493b4a4e9dace7061ac5c1cae9f25",
+      "size": 4667,
+      "path": "bs_skin_config_Mark.json"
+    },
+    {
+      "type": "file",
+      "oid": "14cf6b7d316635422af44b84eb4d9b9280ea6464",
+      "size": 1147927,
+      "lfs": {
+        "oid": "812f10c34edb6ab6f36aedfe1d59a79d8190a5a8ee0a6071382f6bae9e3413b6",
+        "size": 1147927,
+        "pointerSize": 132
+      },
+      "xetHash": "6ce9cdb4f2a65cff0436f3b64eae06917d47183781b6f7f7f94e5a66925a34e9",
+      "path": "bs_tongue_Claire.npz"
+    },
+    {
+      "type": "file",
+      "oid": "393edbef60f5522ed81f10a001374e1c6c473c2c",
+      "size": 1147927,
+      "lfs": {
+        "oid": "831c9d646174d84f628d5516694e00b5077cd5b2bc1dd964d817fabe68497bcc",
+        "size": 1147927,
+        "pointerSize": 132
+      },
+      "xetHash": "739f8d9805a8d8191715307a21b7a16db038aacecd13fc0f0fb3b8b6da41ea50",
+      "path": "bs_tongue_James.npz"
+    },
+    {
+      "type": "file",
+      "oid": "1d6af962645ad217eeeaef0165e62bdf9de79371",
+      "size": 1147927,
+      "lfs": {
+        "oid": "3dfd5dcdeca813df9574536750cf6d2382ec3167482f0b883e1b1eebf84fc022",
+        "size": 1147927,
+        "pointerSize": 132
+      },
+      "xetHash": "d8dc76f430a0e9c8632f1ee9a8ee4276f9be4883a22dc8b6c2b6d486e024a397",
+      "path": "bs_tongue_Mark.npz"
+    },
+    {
+      "type": "file",
+      "oid": "2e08b55a2f95a4e9b9f19f8113c797206ee31bfa",
+      "size": 1771,
+      "path": "bs_tongue_config_Claire.json"
+    },
+    {
+      "type": "file",
+      "oid": "7936611ee0896cea55c0d3ebd907274ce822df6e",
+      "size": 1770,
+      "path": "bs_tongue_config_James.json"
+    },
+    {
+      "type": "file",
+      "oid": "9a635c2fad593e816b779ab983df05d3eb28d759",
+      "size": 1770,
+      "path": "bs_tongue_config_Mark.json"
+    },
+    {
+      "type": "file",
+      "oid": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+      "size": 0,
+      "path": "config.json"
+    },
+    {
+      "type": "file",
+      "oid": "28756093914debc3ad3deca199b80ab783f90cbe",
+      "size": 1268,
+      "path": "model.json"
+    },
+    {
+      "type": "file",
+      "oid": "9e8aedaaebd216cf04452e9f99cd0c943ebd9108",
+      "size": 880,
+      "path": "model_config_Claire.json"
+    },
+    {
+      "type": "file",
+      "oid": "38b1124223d21cff2fb7d664fd58ccab1c258f35",
+      "size": 882,
+      "path": "model_config_James.json"
+    },
+    {
+      "type": "file",
+      "oid": "8e80d400bfc857e4984f80286754954d48de3674",
+      "size": 884,
+      "path": "model_config_Mark.json"
+    },
+    {
+      "type": "file",
+      "oid": "12228c72e776d75e60b8e53955d504f3e79a5a61",
+      "size": 972958,
+      "lfs": {
+        "oid": "4f05331263fa609321335e55c20922f4d6709d33160d368c3b537f019429ea4f",
+        "size": 972958,
+        "pointerSize": 131
+      },
+      "xetHash": "5c23e29ba618164b07d7973dabf56db2a9eb7f811b3f8481971dc3d4b0f72770",
+      "path": "model_data_Claire.npz"
+    },
+    {
+      "type": "file",
+      "oid": "1d3598cb2cca11ca0abab8d8167a251038517b1e",
+      "size": 972958,
+      "lfs": {
+        "oid": "23f653f88fceddda3ae137a7c2199a59ed36822f7f9681234eaad38ba7d753f3",
+        "size": 972958,
+        "pointerSize": 131
+      },
+      "xetHash": "72d63a546922de6fade13d8eb6233ff57d1c962795cba85f0c5d790c56ee9105",
+      "path": "model_data_James.npz"
+    },
+    {
+      "type": "file",
+      "oid": "0faac33aee31ddac7bd6b00c3ff1fea691f4a523",
+      "size": 972958,
+      "lfs": {
+        "oid": "8843a3a6599b263fd368ff445f4c7a9f9b4454f739271560004d1589693886cf",
+        "size": 972958,
+        "pointerSize": 131
+      },
+      "xetHash": "2b5dcced5525da0c0d42a9685496fe0e6e031a14ce8b2a662acb71f0072eb0ca",
+      "path": "model_data_Mark.npz"
+    },
+    {
+      "type": "file",
+      "oid": "31e901aedc7dff1c2d887d6125c90c82ec020fdd",
+      "size": 724844664,
+      "lfs": {
+        "oid": "db47c2701ca849de443c9e9f25657210f829a74fc458ee6fed603a8a501253a8",
+        "size": 724844664,
+        "pointerSize": 134
+      },
+      "xetHash": "bfb5aadc681d4f16e892533e2387233f1ff5a986b74d268c919c0235c5a81252",
+      "path": "network.onnx"
+    },
+    {
+      "type": "file",
+      "oid": "95bd5de24eca0cb15a7eb58d22a4335f8f5eb956",
+      "size": 1179,
+      "path": "network_info.json"
+    },
+    {
+      "type": "file",
+      "oid": "e7f0dd50c10434e25ebc708a94e1d79bf7b00923",
+      "size": 751,
+      "path": "trt_info.json"
+    }
+  ]
+}

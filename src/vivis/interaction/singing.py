@@ -1,0 +1,210 @@
+"""P0: runtime PCM-to-face and observed smile, using the existing motion owner."""
+import argparse
+import copy
+import csv
+from datetime import datetime
+import fcntl
+import hashlib
+import json
+import math
+from pathlib import Path
+import signal
+from types import SimpleNamespace
+import time
+import wave
+
+import numpy as np
+
+from vivis.paths import ROOT
+from vivis.runtime.robot import Robot
+from vivis.runtime.developer import check_competitors, vision_service
+from vivis.runtime.show import prepare,prepare_round,recovery_clearance_plan,unload_tongue
+from vivis.runtime.homing import recovery_policy
+from vivis.runtime.playback import play
+from vivis.motion.mapping import compile_trajectory,read_json,live_preflight
+from vivis.motion.ownership import MojiaPlaybackGaze
+from vivis.vision.policy import TargetReceiver
+from vivis.motion.upstream import configure as configure_trajectory
+from vivis.vision.parallel_follow import configure as configure_parallel
+from vivis.vision.independent_follow import configure as configure_independent
+from vivis.interaction.animation import FrameMapper
+from vivis.interaction.stream import LiveFrames
+
+
+def audio_info(path):
+    with wave.open(str(path)) as f:
+        if f.getsampwidth()!=2:raise ValueError('P0 audio must be PCM16 WAV')
+        return f.getnframes(),f.getframerate(),f.getnchannels()
+
+
+def model_audio(path, output):
+    frames,rate,channels=audio_info(path)
+    if rate==16000 and channels==1:return Path(path)
+    from scipy.signal import resample_poly
+    with wave.open(str(path)) as f:
+        data=np.frombuffer(f.readframes(frames),dtype='<i2').reshape(-1,channels).astype(np.float64).mean(axis=1)
+    factor=math.gcd(rate,16000)
+    data=resample_poly(data,16000//factor,rate//factor)
+    destination=Path(output)/'inference_pcm16_16000.wav'
+    with wave.open(str(destination),'wb') as f:
+        f.setnchannels(1);f.setsampwidth(2);f.setframerate(16000)
+        f.writeframes(np.clip(np.rint(data),-32768,32767).astype('<i2').tobytes())
+    return destination
+
+
+def plan(robot, work_name, mode, settings, smile=True):
+    work=robot.work(work_name)
+    audio=work['audio']
+    if hashlib.sha256(audio.read_bytes()).hexdigest()!=work['audio_sha256']:
+        raise ValueError('Playback audio hash mismatch')
+    frames,rate,_=audio_info(audio);duration=frames/rate
+    profile=robot.motion_profile()
+    with robot.resolve('channels').open(encoding='utf-8-sig',newline='') as f:
+        order=next(csv.reader(f))[2:]
+    calibration=read_json(robot.calibration)
+    shapes={s['shape']:{p['id']:p['position'] for p in s['positions']} for s in calibration['blendShapes']}
+    face_ids,zero,_=compile_trajectory(np.zeros((1,61)),order,shapes,profile,scope='face_eyes')
+    # A neutral scaffold defines duration/ownership only; every song target
+    # comes from runtime A2F. No expression or target JSON is loaded.
+    neutral=np.repeat(zero,max(1,math.ceil(duration*60)),axis=0)
+    config=robot.tracking()
+    if robot.definition['defaults'].get('hold_vertical_eyes'):
+        held={a['id'] for a in config['control']['axes'] if a['coordinate']=='y'}
+        config['control']['vertical_enabled']=False
+        config['control']['held_eye_ids']=sorted(held)
+        config['control']['axes']=[a for a in config['control']['axes'] if a['id'] not in held]
+    config['social_smile']=copy.deepcopy(settings['social_smile'])
+    config['social_smile']['enabled']=smile
+    configure_trajectory(config,mode)
+    configure_parallel(config,mode,None)
+    configure_independent(config,mode)
+    authorize=robot.definition['defaults'].get('authorized_tongue_observation',False)
+    profile,ids,neutral=prepare(config,profile,face_ids,neutral,authorize,1.,robot.telemetry(),mode,'lips-direct')
+    profile.update(face_update_hz=60,control_hz=60,snapshot_chunk_bytes=2)
+    live_preflight(profile,ids)
+    return dict(work=work,audio=audio,duration=duration,profile=profile,ids=ids,neutral=neutral,
+                tracking=config,order=order,shapes=shapes,authorize=authorize)
+
+
+def main(argv=None):
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--robot',type=Path,default=ROOT/'configs/robots/xiaoshuai/robot.json')
+    parser.add_argument('--work',default='0001')
+    parser.add_argument('--config',type=Path,default=ROOT/'configs/interaction/p0.json')
+    parser.add_argument('--repeat',type=int,default=1)
+    parser.add_argument('--mode',choices=('face','eyes','eyes-neck'),default='eyes-neck')
+    parser.add_argument('--smile',choices=('on','off'),default='on')
+    parser.add_argument('--smile-strength',type=float,help='One-run social smile increment0..0.5; saved default unchanged')
+    parser.add_argument('--mouth-speed',type=int)
+    parser.add_argument('--inference-audio',type=Path,help='Optional sample-aligned dry voice; caller must verify alignment')
+    parser.add_argument('--capture-animation',action='store_true',help='Opt-in bounded asynchronous animation trace')
+    parser.add_argument('--output',type=Path)
+    parser.add_argument('--check',action='store_true',help='Offline configuration checks; no devices/models opened')
+    args=parser.parse_args(argv)
+    if not 1<=args.repeat<=20:parser.error('Repeat must be1..20')
+    if args.mode=='face' and args.smile=='on':parser.error('Smile requires the single camera/target service; use eyes or eyes-neck')
+    settings=read_json(args.config)
+    if settings.get('schema_version')!='vivis-interactive-singing-1.0':parser.error('Unsupported P0 configuration')
+    if args.smile_strength is not None:
+        if not math.isfinite(args.smile_strength) or not 0<=args.smile_strength<=.5:parser.error('Smile strength must be finite0..0.5')
+        settings['smile_strength']=args.smile_strength
+    robot=Robot(args.robot);robot.require_mode(args.mode)
+    if args.mouth_speed is not None:robot.set_mouth_speed(args.mouth_speed)
+    p=plan(robot,args.work,args.mode,settings,args.smile=='on')
+    profile,ids,config=p['profile'],p['ids'],p['tracking']
+    inference=args.inference_audio or p['audio']
+    n,rate,_=audio_info(inference)
+    if abs(n/rate-p['duration'])>1/16000:parser.error('Inference/playback durations differ; need sample-aligned sources')
+    required=[ROOT/settings['binary'],ROOT/settings['model']]
+    if args.smile=='on':required += [ROOT/settings['vision_python'],ROOT/settings['social_smile']['model']]
+    if args.check:
+        print(json.dumps(dict(offline_valid=True,source='runtime_a2f',prerecorded_animation_read=False,
+            robot=robot.definition['name'],audio=str(p['audio']),duration_seconds=p['duration'],
+            commanded=profile['diagnostic_command_ids'],missing_dependencies=[str(x) for x in required if not x.is_file()],
+            motion_hardware_opened=False),ensure_ascii=False))
+        return 0
+    for path in required:
+        if not path.is_file():parser.error('Missing P0 dependency: '+str(path)+'; run tools/setup_p0.py')
+    check_competitors(args.mode!='face')
+    output=args.output or ROOT/'outputs/p0'/datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+    output.mkdir(parents=True,exist_ok=False)
+    config_path=output/'tracking.json';config_path.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n')
+    (output/'interaction_settings.json').write_text(json.dumps(settings,ensure_ascii=False,indent=2)+'\n')
+    (output/'profile.json').write_text(json.dumps(profile,ensure_ascii=False,indent=2)+'\n')
+    inference=model_audio(inference,output)
+    home=robot.home(args.mode);motors={m['id']:m for m in profile['motors']}
+    if profile.get('exclude_held_axes_from_session'):
+        held=set(profile.get('held_eye_ids',[]))|set(profile.get('held_neck_ids',[]))
+        home['axes']=[a for a in home['axes'] if a['id'] not in held]
+    home_ids={a['id'] for a in home['axes']}
+    if not set(ids)<=home_ids:raise ValueError('P0 home/session inventory mismatch')
+    startup=robot.startup(active_ids=motors,inventory_ids=home_ids)
+    home_args=SimpleNamespace(home_speed=60,home_only=False,
+        usb_volume_times_three=robot.definition['defaults'].get('usb_volume_times_three',False),
+        authorized_tongue_observation=p['authorize'],home_position_recovery=recovery_policy(home.get('disabled_position_recovery')),
+        home_sensor_fault_confirmation=home.get('sensor_fault_confirmation',False))
+    clearance=recovery_clearance_plan(home,motors)
+    stop=False;stop_file=ROOT/'outputs/STOP'
+    def request_stop(*_):
+        nonlocal stop
+        stop=True
+    def guard():
+        if stop or stop_file.exists():raise RuntimeError('Operator stop')
+    handlers={sig:signal.signal(sig,request_stop) for sig in (signal.SIGINT,signal.SIGTERM)}
+    summary=dict(completed=False,source='runtime_a2f',prerecorded_animation_read=False,rounds=[])
+    status=ROOT/'outputs/runtime/control_status.json';status.parent.mkdir(parents=True,exist_ok=True)
+    def publish(state,error=None):
+        temporary=status.with_suffix('.tmp');temporary.write_text(json.dumps(dict(active=False,state=state,error=error,
+            updated_monotonic=time.monotonic(),command_ids=profile['diagnostic_command_ids']))+'\n');temporary.replace(status)
+    lock_path=ROOT/'outputs/developer/control.lock';lock_path.parent.mkdir(parents=True,exist_ok=True)
+    owns_control=False
+    try:
+        with lock_path.open('a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            owns_control=True
+            vision_python=str(ROOT/settings['vision_python']) if args.smile=='on' else None
+            with vision_service(config_path,output,args.mode!='face',python=vision_python):
+                for lap in range(1,args.repeat+1):
+                    guard();directory=output/f'round_{lap}';directory.mkdir()
+                    receiver=TargetReceiver(config) if args.mode!='face' else None
+                    source=None
+                    report={}
+                    try:
+                        if receiver:receiver.wait_ready()
+                        def social(now):
+                            if receiver is None:return None
+                            packet=receiver.poll(now)
+                            return packet.get('social_smile') if packet else None
+                        mapper=FrameMapper(p['order'],p['shapes'],profile,ids,settings['smile_strength'])
+                        source=LiveFrames(ROOT/settings['binary'],ROOT/settings['model'],inference,p['duration'],
+                            directory/'a2f',mapper,social if args.smile=='on' else None,
+                            settings['buffer_frames'],settings['prebuffer_frames'],settings['underflow_grace_s'],args.capture_animation)
+                        source.wait_ready(guard)
+                        print(f'ROUND {lap}/{args.repeat} PREPARE runtime-A2F ready',flush=True)
+                        prepare_round(home_args,profile,ids,home['axes'],startup,clearance,robot.telemetry(),guard,report,directory,publish)
+                        gaze=MojiaPlaybackGaze(config,profile,ids,receiver,status,lap,args.repeat,
+                            neck=args.mode=='eyes-neck') if receiver else None
+                        guard();print(f'ROUND {lap}/{args.repeat} START runtime-A2F + smile={args.smile}',flush=True)
+                        result=play(profile,ids,p['neutral'],60,p['audio'],directory/'playback_log.json',stop_file,
+                                    gaze_override=gaze,frame_source=source)
+                        summary['rounds'].append(dict(completed=result['completed'],animation=source.summary()))
+                    finally:
+                        if source:
+                            source.close()
+                            (directory/'animation_summary.json').write_text(json.dumps(source.summary(),indent=2)+'\n')
+                        if receiver:receiver.close()
+                        if p['authorize'] and 'hardware_restore' in report:unload_tongue(profile,report)
+                        (directory/'preparation.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+                summary['completed']=True
+    except BaseException as exc:
+        summary['error']=str(exc)
+        if isinstance(exc,RuntimeError) and str(exc)=='Operator stop':return 130
+        raise
+    finally:
+        for sig,handler in handlers.items():signal.signal(sig,handler)
+        if owns_control:publish('stopped',summary.get('error'))
+        (output/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
+    return 0
+
+
+if __name__=='__main__':raise SystemExit(main())

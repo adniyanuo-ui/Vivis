@@ -47,7 +47,7 @@ def preview_state():
 
 
 @contextmanager
-def vision_service(config_path, output, required):
+def vision_service(config_path, output, required, python=None):
     """Stop only our own child. Reuse an external service only after hash match."""
     child = log = None
     try:
@@ -60,7 +60,7 @@ def vision_service(config_path, output, required):
                     raise RuntimeError('127.0.0.1:8765已有不同配置、旧协议或画面过期的视觉服务；请先关闭旧视觉服务再启动本示例')
             else:
                 log = (output / 'vision.log').open('w')
-                child = subprocess.Popen([sys.executable, '-m', 'vivis.vision.service',
+                child = subprocess.Popen([python or sys.executable, '-m', 'vivis.vision.service',
                                           '--config', str(config_path), '--output', str(output / 'vision')],
                                          cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                          env={**os.environ, 'PYTHONPATH': str(ROOT / 'src'),'PYTHONNOUSERSITE':'1'},

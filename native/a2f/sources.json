@@ -1,0 +1,34 @@
+{
+  "schema_version": "vivis-a2f-native-sources-1.0",
+  "sdk": {
+    "url": "https://github.com/NVIDIA/Audio2Face-3D-SDK.git",
+    "commit": "1ca0f02535ed774f5dbcd724a31cd486368dc783"
+  },
+  "dependencies": [
+    {
+      "name": "cnpy",
+      "url": "https://github.com/rogersce/cnpy.git",
+      "commit": "4e8810b1a8637695171ed346ce68f6984e585ef4"
+    },
+    {
+      "name": "magic_enum",
+      "url": "https://github.com/Neargye/magic_enum.git",
+      "commit": "e55b9b54d5cf61f8e117cafb17846d7d742dd3b4"
+    },
+    {
+      "name": "refl-cpp",
+      "url": "https://github.com/veselink1/refl-cpp.git",
+      "commit": "27fbd7d2e6d86bc135b87beef6b5f7ce53afd4fc"
+    },
+    {
+      "name": "AudioFile",
+      "url": "https://github.com/adamstark/AudioFile.git",
+      "commit": "bcb61a47e64fe4e7fc3d8a8664b8a23a192bddb7"
+    },
+    {
+      "name": "tbtSVD",
+      "url": "https://github.com/wi-re/tbtSVD.git",
+      "commit": "21e06aad232e0a58f77d0bd2df3470712529ab33"
+    }
+  ]
+}

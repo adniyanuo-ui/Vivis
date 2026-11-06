@@ -46,6 +46,9 @@ def main(argv=None):
     identity=dict(config_sha256=config_digest,target_protocol_version=VERSION,target_features=['face_xy','eye_line_roll'],
         camera_device=camera_config['device'],camera_eye=config['control'].get('camera_eye'),
         camera_transform={k:camera_config[k] for k in ('rotation_deg','mirror_x')})
+    social_config=config.get('social_smile',{})
+    if social_config.get('enabled'):
+        identity['target_features'].append('social_smile')
     if (camera_config['rotation_deg'] not in (0, 90, 180, 270)
             or type(camera_config['mirror_x']) is not bool
             or any(type(camera_config[k]) is not int or not 64 <= camera_config[k] <= 1920
@@ -76,6 +79,11 @@ def main(argv=None):
             except BlockingIOError:
                 raise RuntimeError('A person-tracking service is already running')
             vision = FaceVision(config, ROOT)
+            social=None
+            if social_config.get('enabled'):
+                from vivis.interaction.smile import SmileDetector
+                social=SmileDetector(social_config,ROOT)
+                resources.callback(social.close)
             camera = LatestCamera(camera_config)
             resources.callback(camera.close)
             summary['camera_actual'] = camera.actual
@@ -108,6 +116,10 @@ def main(argv=None):
                     continue
                 cycle_begin = now
                 packet, jpeg, metrics = vision.detect(sample)
+                if social is not None:
+                    # P0 is single-person: keep normal tracking with multiple
+                    # faces, but do not associate an ambiguous social cue.
+                    packet['social_smile']=social.detect(sample,packet['target'] if metrics['faces']==1 else None)
                 now = time.monotonic()
                 last_sequence = sample[0]
                 age = now - sample[1]
@@ -130,6 +142,7 @@ def main(argv=None):
                            'actuators_opened': False,
                            'mount': config['control']['camera_mount']}
                 current['camera_eye']=config['control'].get('camera_eye')
+                if social is not None:current['social_smile']=packet['social_smile']
                 if config.get('schema_version') in ('mojia-person-gaze-1.0','vivis-person-gaze-1.0'):
                     # The camera service has no actuator feedback; show image direction,
                     # not an integrator pretending the eye moved with its commands.

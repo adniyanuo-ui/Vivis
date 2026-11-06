@@ -60,50 +60,83 @@ def inputs(clip,calibration,header,allowed_motor_ids=None):
 
 
 
-def compile_trajectory(values,order,shapes,profile,scope='full',draft=False):
-    if profile['mixing'] not in ['sum_deltas','bounded_weighted_deltas'] or profile['jaw_owner'] not in ['JawOpen','all_calibrated']:raise ValueError('Unsupported composition rule')
-    motors={m['id']:m for m in profile['motors']}
-    # Calibration defines face axes, including Mojia 29/35/36; neck is separate.
-    active=sorted({sid for p in shapes.values() for sid in p if sid not in (32,33,34)})
-    if scope=='face':active=[sid for sid in active if sid not in [7,8,22,23]]
-    elif scope not in ['face_eyes','full']:raise ValueError('scope must be face, face_eyes or full')
-    weights=values[:,:52].copy();lookup={n:i for i,n in enumerate(order)}
-    if scope in ['face_eyes','full']:
-        angles=profile['eye_angle_endpoints_rad']
-        if angles is None:
-            if not draft:raise ValueError('Missing eye angle-to-endpoint calibration')
-        else:
-            for side in ['Left','Right']:
-                yaw=values[:,lookup[side+'EyeYaw']];pitch=values[:,lookup[side+'EyePitch']]
-                for suffix,angle,positive in [('Down',pitch,True),('Up',pitch,False),('In',yaw,side=='Right'),('Out',yaw,side=='Left')]:
-                    name='EyeLook'+suffix+side;endpoint=float(angles[name])
-                    if not math.isfinite(endpoint) or endpoint<=0:raise ValueError('Invalid eye angular endpoint')
-                    weights[:,lookup[name]]=np.clip((angle if positive else -angle)/endpoint,0,1)
-    result=np.zeros((len(values),len(active)));raw=result.copy();clipping={}
-    for j,sid in enumerate(active):
-        motor=motors[sid];neutral=motor.get('mapping_neutral',motor['neutral'])
-        delta=np.zeros(len(values));weight_sum=np.zeros(len(values))
-        blink_name='EyeBlinkLeft' if sid in [5,6] else 'EyeBlinkRight' if sid in [20,21] else None
-        for name,positions in shapes.items():
-            if sid not in positions:continue
-            if sid==31 and profile['jaw_owner']!='all_calibrated' and name!=profile['jaw_owner']:continue
-            # Avoid duplicating lid motion already authored in the exported video.
-            if profile['paired_eye_look_is_already_in_lids'] and name.startswith('EyeLook') and sid in [5,6,20,21]:continue
-            if profile['mixing']=='bounded_weighted_deltas' and name==blink_name:continue
-            delta+=weights[:,lookup[name]]*(positions[sid]-neutral)
-            weight_sum+=weights[:,lookup[name]]
-        if profile['mixing']=='bounded_weighted_deltas':
+class CompiledFaceMapping:
+    """The shared mapping rules, prepared once for batch or live-frame use.
+
+    Explicit zero-delta membership, conditional normalization, authored eyelids
+    and jaw ownership all remain represented in the prepared matrices.
+    """
+    def __init__(self,order,shapes,profile,scope='face_eyes',draft=False):
+        if profile['mixing'] not in ['sum_deltas','bounded_weighted_deltas'] or profile['jaw_owner'] not in ['JawOpen','all_calibrated']:
+            raise ValueError('Unsupported composition rule')
+        motors={m['id']:m for m in profile['motors']}
+        self.active=sorted({sid for positions in shapes.values() for sid in positions if sid not in (32,33,34)})
+        if scope=='face':self.active=[sid for sid in self.active if sid not in [7,8,22,23]]
+        elif scope not in ['face_eyes','full']:raise ValueError('scope must be face, face_eyes or full')
+        lookup={n:i for i,n in enumerate(order)}
+        self.eye_rules=[]
+        if scope in ['face_eyes','full']:
+            angles=profile['eye_angle_endpoints_rad']
+            if angles is None:
+                if not draft:raise ValueError('Missing eye angle-to-endpoint calibration')
+            else:
+                for side in ['Left','Right']:
+                    for suffix,coordinate,positive in [('Down','Pitch',True),('Up','Pitch',False),('In','Yaw',side=='Right'),('Out','Yaw',side=='Left')]:
+                        name='EyeLook'+suffix+side;endpoint=float(angles[name])
+                        if not math.isfinite(endpoint) or endpoint<=0:raise ValueError('Invalid eye angular endpoint')
+                        self.eye_rules.append((lookup[name],lookup[side+'Eye'+coordinate],endpoint,positive))
+        size=len(self.active)
+        self.deltas=np.zeros((size,52));self.members=np.zeros((size,52))
+        self.channel_order=[lookup[name] for name in shapes]
+        self.neutral=np.zeros(size);self.low=np.zeros(size);self.high=np.zeros(size)
+        self.blinks=[];self.bounded=profile['mixing']=='bounded_weighted_deltas'
+        self.gain=float(profile.get('motion_gain',1))
+        if not math.isfinite(self.gain) or not 0<self.gain<=1:raise ValueError('Invalid motion gain')
+        for j,sid in enumerate(self.active):
+            motor=motors[sid];neutral=motor.get('mapping_neutral',motor['neutral']);self.neutral[j]=neutral
+            blink_name='EyeBlinkLeft' if sid in [5,6] else 'EyeBlinkRight' if sid in [20,21] else None
+            for name,positions in shapes.items():
+                if sid not in positions:continue
+                if sid==31 and profile['jaw_owner']!='all_calibrated' and name!=profile['jaw_owner']:continue
+                if profile['paired_eye_look_is_already_in_lids'] and name.startswith('EyeLook') and sid in [5,6,20,21]:continue
+                if self.bounded and name==blink_name:continue
+                i=lookup[name];self.deltas[j,i]=positions[sid]-neutral;self.members[j,i]=1
+            if self.bounded and blink_name and sid in shapes[blink_name]:
+                self.blinks.append((j,lookup[blink_name],shapes[blink_name][sid]-neutral))
+            limits=motor['endpoint_envelope_not_safe_limits'] if draft else [motor['safe_min'],motor['safe_max']]
+            if any(x is None for x in limits):raise ValueError(f'Missing safe limits for {sid}')
+            self.low[j],self.high[j]=limits
+
+    def map(self,values):
+        values=np.asarray(values,dtype=float)
+        if values.ndim!=2 or values.shape[1]!=61 or not np.isfinite(values).all():raise ValueError('Invalid mapping frame matrix')
+        weights=values[:,:52].copy()
+        for output,source,endpoint,positive in self.eye_rules:
+            angle=values[:,source]
+            weights[:,output]=np.clip((angle if positive else -angle)/endpoint,0,1)
+        # Vectorize over motors, retaining the calibration's addition order.
+        # A BLAS reduction would reassociate floating-point terms and change
+        # a few saved targets at ~1e-13 counts. Preserve exact legacy outputs.
+        delta=np.zeros((len(values),len(self.active)))
+        weight_sum=np.zeros_like(delta)
+        for channel in self.channel_order:
+            weight=weights[:,channel,None]
+            delta+=weight*self.deltas[:,channel]
+            if self.bounded:weight_sum+=weight*self.members[:,channel]
+        if self.bounded:
             delta/=np.maximum(1,weight_sum)
-            if blink_name and sid in shapes[blink_name]:
-                blink=weights[:,lookup[blink_name]]
-                delta=(1-blink)*delta+blink*(shapes[blink_name][sid]-neutral)
-        gain=float(profile.get('motion_gain',1))
-        if not math.isfinite(gain) or not 0<gain<=1:raise ValueError('Invalid motion gain')
-        raw[:,j]=neutral+gain*delta
-        limits=motor['endpoint_envelope_not_safe_limits'] if draft else [motor['safe_min'],motor['safe_max']]
-        if any(x is None for x in limits):raise ValueError(f'Missing safe limits for {sid}')
-        result[:,j]=np.clip(raw[:,j],*limits)
-        clipping[str(sid)]=int(np.count_nonzero(abs(raw[:,j]-result[:,j])>.001))
+            for column,channel,endpoint in self.blinks:
+                blink=weights[:,channel]
+                delta[:,column]=(1-blink)*delta[:,column]+blink*endpoint
+        raw=self.neutral+self.gain*delta
+        return np.clip(raw,self.low,self.high),raw
+
+
+def compile_trajectory(values,order,shapes,profile,scope='full',draft=False):
+    compiled=CompiledFaceMapping(order,shapes,profile,scope,draft)
+    active=compiled.active.copy();result,raw=compiled.map(values)
+    motors={m['id']:m for m in profile['motors']};lookup={n:i for i,n in enumerate(order)}
+    clipping={str(sid):int(np.count_nonzero(abs(raw[:,j]-result[:,j])>.001)) for j,sid in enumerate(active)}
     if scope=='full':
         mapping=profile['neck_angle_position_maps']
         if mapping is None:

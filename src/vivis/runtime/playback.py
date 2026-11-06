@@ -143,7 +143,7 @@ def startup_feedback(reader,sid,deadline,records,should_stop=lambda:False,wait=t
                     return state
         raise RuntimeError(f'ID{sid}: startup communication recovery failed; no two consecutive valid samples') from last_error
 
-def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=None,gaze_override=None):
+def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=None,gaze_override=None,frame_source=None):
     if (not isinstance(ids,list) or not ids or len(set(ids))!=len(ids)
             or any(type(sid) is not int or not 0<=sid<=253 for sid in ids)):
         raise ValueError('Playback IDs must be nonempty, unique servo IDs')
@@ -295,9 +295,10 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     def feedback_error(sid,exc):
         pending_sensor=any(r['id']==sid and not r['recovered'] for r in result['sensor_confirmations'])
         if feedback_age_limit is None or pending_sensor:raise exc
-        events[-1]['feedback_error']={'id':sid,'error':str(exc)}
+        record=events[-1] if events else result.setdefault('preroll_telemetry',{})
+        record['feedback_error']={'id':sid,'error':str(exc)}
         if polls_per_frame>1 or scheduled_feedback:
-            events[-1].setdefault('feedback_errors',[]).append(events[-1]['feedback_error'])
+            record.setdefault('feedback_errors',[]).append(record['feedback_error'])
 
     def scheduled_sample(sid,state,observed_at):
         # An actual sensor/servo alarm still takes the existing hold-and-confirm
@@ -305,8 +306,9 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         checked=feedback_checked(sid,state,observed_at)
         if checked is not None:
             sample={'id':sid,**checked,'sample_started_monotonic':observed_at}
-            events[-1]['feedback']=sample
-            events[-1].setdefault('feedback_samples',[]).append(sample)
+            record=events[-1] if events else result.setdefault('preroll_telemetry',{})
+            record['feedback']=sample
+            record.setdefault('feedback_samples',[]).append(sample)
 
     def startup_feedback_checked(sid,deadline):
         if not scheduled_feedback:return feedback_checked(sid)
@@ -436,12 +438,23 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             if should_stop():raise RuntimeError('Operator stop')
             if clock.fault:raise RuntimeError('Audio callback fault: '+clock.fault)
             t=clock.time()
-            if t is None:
-                if time.monotonic()-started>2:raise RuntimeError('Audio clock did not start')
-                stop.wait(.001);continue
+            if t is None or t<0:
+                if t is None and time.monotonic()-started>2:raise RuntimeError('Audio clock did not start')
+                if frame_source is not None and feedback_scheduler is not None:
+                    # The DAC's existing pre-roll is idle bus time. Refresh
+                    # REAL complete samples here so startup work and the audio
+                    # buffer do not consume most of the first watchdog window.
+                    budget=max(0.,(.01 if t is None else min(.01,-t))-.001)
+                    sample=feedback_scheduler.step(time.monotonic()+budget,last_good_feedback,
+                        scheduled_sample,feedback_error,should_stop,
+                        confirmation_ids=fault_monitor.pending_ids() if fault_monitor else ())
+                    result['preroll_feedback_reads']=result.get('preroll_feedback_reads',0)+sample['reads']
+                    result['preroll_feedback_samples']=result.get('preroll_feedback_samples',0)+sample['completed']
+                stop.wait(.001 if t is None else min(.002,-t));continue
             if t>=run_duration:break
-            if t<0:stop.wait(min(.002,-t));continue
             now=time.monotonic()
+            if frame_source is not None and 'first_audio_feedback_ages_s' not in result:
+                result['first_audio_feedback_ages_s']={str(sid):now-stamp for sid,stamp in last_good_feedback.items()}
             if scheduled_feedback and next_command_at is not None and now<next_command_at:
                 stop.wait(min(.001,next_command_at-now));continue
             index=min(len(trajectory)-1,max(0,int((t+profile['actuator_latency_ms']/1000)*fps)))
@@ -469,6 +482,15 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 sample_time=max(0.,t+profile['actuator_latency_ms']/1000)
                 face_index=min(len(trajectory)-1,int(math.floor(sample_time*face_hz)*fps/face_hz))
             target=trajectory[face_index]
+            if frame_source is not None:
+                # A live source must be prepared before entering play().
+                # This call never waits for model inference or pipe I/O.
+                target=np.asarray(frame_source.sample(t,now),dtype=float)
+                if target.shape!=(len(ids),) or not np.isfinite(target).all():
+                    raise ValueError('Invalid live facial target vector')
+                for j,sid in enumerate(ids):
+                    if not motors[sid]['safe_min']<=target[j]<=motors[sid]['safe_max']:
+                        raise ValueError('Live facial target exceeds command limits')
             gaze_started=time.monotonic() if mojia_gaze else None
             if gaze_override is not None:
                 if mojia_gaze:gaze_override.set_audio_time(t,run_duration)
