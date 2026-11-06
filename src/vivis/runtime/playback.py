@@ -143,13 +143,13 @@ def startup_feedback(reader,sid,deadline,records,should_stop=lambda:False,wait=t
                     return state
         raise RuntimeError(f'ID{sid}: startup communication recovery failed; no two consecutive valid samples') from last_error
 
-def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=None,gaze_override=None,frame_source=None):
+def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=None,gaze_override=None,frame_source=None,clock_factory=None):
     if (not isinstance(ids,list) or not ids or len(set(ids))!=len(ids)
             or any(type(sid) is not int or not 0<=sid<=253 for sid in ids)):
         raise ValueError('Playback IDs must be nonempty, unique servo IDs')
     if type(fps) not in (int,float) or not math.isfinite(fps) or not 1<=fps<=120:
         raise ValueError('Playback FPS must be finite and within 1..120')
-    live_preflight(profile,ids)
+    live_preflight(profile,ids,audio_required=clock_factory is None)
     if max_seconds is not None and (not math.isfinite(max_seconds) or max_seconds<=0):
         raise ValueError('Playback duration must be positive and finite')
     motors={m['id']:m for m in profile['motors']}
@@ -320,10 +320,12 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         # Verify physical audio output has been configured before opening the bus.
         audio_latency=profile.get('audio_latency_s',profile.get('audio_latency_seconds','low'))
         audio_options={'gain':profile['audio_gain']} if 'audio_gain' in profile else {}
-        clock=AudioClock(audio_path,profile['audio_device'],latency=audio_latency,**audio_options)
-        result['audio_requested_latency']=audio_latency
-        result['audio_requested_gain']=profile.get('audio_gain',1.)
-        if abs(len(trajectory)/fps-clock.duration)>1/fps:raise ValueError('Clip/audio duration mismatch')
+        clock=clock_factory() if clock_factory is not None else AudioClock(audio_path,profile['audio_device'],latency=audio_latency,**audio_options)
+        result['timeline_clock']='monotonic' if clock_factory is not None else 'audio_dac'
+        if clock_factory is None:
+            result['audio_requested_latency']=audio_latency
+            result['audio_requested_gain']=profile.get('audio_gain',1.)
+        if abs(len(trajectory)/fps-clock.duration)>1/fps:raise ValueError('Clip/timeline duration mismatch')
         run_duration=min(clock.duration,max_seconds) if max_seconds is not None else clock.duration
         result.update(requested_duration_seconds=run_duration,full_clip_requested=run_duration==clock.duration)
         if profile.get('serial_backend')=='feetech_python':
@@ -436,7 +438,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         clock.start();last_tick=time.monotonic();previous_index=-1;skipped=0;started=time.monotonic()
         while True:
             if should_stop():raise RuntimeError('Operator stop')
-            if clock.fault:raise RuntimeError('Audio callback fault: '+clock.fault)
+            if clock.fault:raise RuntimeError(('Audio callback fault: ' if clock_factory is None else 'Control clock fault: ')+clock.fault)
             t=clock.time()
             if t is None or t<0:
                 if t is None and time.monotonic()-started>2:raise RuntimeError('Audio clock did not start')
@@ -453,8 +455,9 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 stop.wait(.001 if t is None else min(.002,-t));continue
             if t>=run_duration:break
             now=time.monotonic()
-            if frame_source is not None and 'first_audio_feedback_ages_s' not in result:
-                result['first_audio_feedback_ages_s']={str(sid):now-stamp for sid,stamp in last_good_feedback.items()}
+            if frame_source is not None and 'first_control_feedback_ages_s' not in result:
+                result['first_control_feedback_ages_s']={str(sid):now-stamp for sid,stamp in last_good_feedback.items()}
+                if clock_factory is None:result['first_audio_feedback_ages_s']=result['first_control_feedback_ages_s']
             if scheduled_feedback and next_command_at is not None and now<next_command_at:
                 stop.wait(min(.001,next_command_at-now));continue
             index=min(len(trajectory)-1,max(0,int((t+profile['actuator_latency_ms']/1000)*fps)))
@@ -520,7 +523,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             bus.goals(goals,command_speeds);last_sent=goals
             command_done=time.monotonic() if mojia_gaze else None
             if previous_index>=0:skipped+=max(0,index-previous_index-1)
-            events.append({'audio_seconds':t,'frame':index,'sent_monotonic':now,'goals':goals})
+            events.append({('audio_seconds' if clock_factory is None else 'timeline_seconds'):t,'frame':index,'sent_monotonic':now,'goals':goals})
             if overrides:events[-1]['speed_overrides']=dict(overrides)
             if face_hz!=fps:events[-1]['face_frame']=face_index
             if gaze_override is not None:
@@ -558,7 +561,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             if mojia_gaze:
                 events[-1]['stage_ms']=dict(gaze=1000*(gaze_done-gaze_started),
                     command=1000*(command_done-gaze_done),feedback=1000*(time.monotonic()-command_done))
-        result.update(completed=True,skipped_source_frames=skipped,audio_seconds_at_stop=t)
+        result.update(completed=True,skipped_source_frames=skipped,timeline_seconds_at_stop=t)
+        if clock_factory is None:result['audio_seconds_at_stop']=t
     except Exception as exc:
         result['error']=str(exc)
         raise

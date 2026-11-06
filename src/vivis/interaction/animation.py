@@ -45,7 +45,7 @@ class A2FAdapter:
 
 
 class FrameMapper:
-    def __init__(self, order, shapes, profile, ids, smile_strength=.15):
+    def __init__(self, order, shapes, profile, ids, smile_strength=.15,scope='face_eyes'):
         if not math.isfinite(smile_strength) or not 0<=smile_strength<=.5:
             raise ValueError('Social strength must be0..0.5')
         self.order,self.shapes,self.profile,self.ids=list(order),shapes,profile,list(ids)
@@ -53,7 +53,7 @@ class FrameMapper:
         self.critical=('JawOpen','MouthClose','MouthFunnel','MouthPucker')
         self.social=('MouthSmileLeft','MouthSmileRight')
         self.neutral=np.array([next(m for m in profile['motors'] if m['id']==sid)['neutral'] for sid in ids],float)
-        self.mapping=CompiledFaceMapping(self.order,self.shapes,self.profile,scope='face_eyes')
+        self.mapping=CompiledFaceMapping(self.order,self.shapes,self.profile,scope=scope)
         self.last_fused=None
         self.protected_ids=[]
 

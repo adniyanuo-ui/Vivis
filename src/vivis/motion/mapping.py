@@ -159,12 +159,13 @@ def compile_trajectory(values,order,shapes,profile,scope='full',draft=False):
       'mixing':profile['mixing'],'motion_gain':profile.get('motion_gain',1),
       'omitted_neck_by_scope':scope!='full'}
 
-def live_preflight(profile,ids):
+def live_preflight(profile,ids,audio_required=True):
     missing=[]
-    for key in ['mixing_confirmed','jaw_owner_confirmed','physical_audio_output_confirmed']:
+    required=['mixing_confirmed','jaw_owner_confirmed']+(['physical_audio_output_confirmed'] if audio_required else [])
+    for key in required:
         if profile.get(key) is not True:missing.append(key)
     if not profile.get('hardware_stop_description'):missing.append('hardware_stop_description')
-    if profile.get('audio_device') is None:missing.append('audio_device')
+    if audio_required and profile.get('audio_device') is None:missing.append('audio_device')
     if 'power_checked' in profile and profile['power_checked'] is not True:missing.append('power_checked')
     if not 0<=profile.get('actuator_latency_ms',-1)<=250:missing.append('actuator_latency_ms')
     motors={m['id']:m for m in profile['motors']}

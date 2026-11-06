@@ -74,6 +74,8 @@ def plan(robot, work_name, mode, settings, smile=True):
         config['control']['held_eye_ids']=sorted(held)
         config['control']['axes']=[a for a in config['control']['axes'] if a['id'] not in held]
     config['social_smile']=copy.deepcopy(settings['social_smile'])
+    perception=read_json(ROOT/settings['perception'])
+    config['social_smile'].update(model=perception['model'],sha256=perception['sha256'])
     config['social_smile']['enabled']=smile
     configure_trajectory(config,mode)
     configure_parallel(config,mode,None)
@@ -83,7 +85,7 @@ def plan(robot, work_name, mode, settings, smile=True):
     profile.update(face_update_hz=60,control_hz=60,snapshot_chunk_bytes=2)
     live_preflight(profile,ids)
     return dict(work=work,audio=audio,duration=duration,profile=profile,ids=ids,neutral=neutral,
-                tracking=config,order=order,shapes=shapes,authorize=authorize)
+                tracking=config,order=order,shapes=shapes,authorize=authorize,perception=perception)
 
 
 def main(argv=None):
@@ -116,7 +118,7 @@ def main(argv=None):
     n,rate,_=audio_info(inference)
     if abs(n/rate-p['duration'])>1/16000:parser.error('Inference/playback durations differ; need sample-aligned sources')
     required=[ROOT/settings['binary'],ROOT/settings['model']]
-    if args.smile=='on':required += [ROOT/settings['vision_python'],ROOT/settings['social_smile']['model']]
+    if args.smile=='on':required += [ROOT/p['perception']['python'],ROOT/p['perception']['model']]
     if args.check:
         print(json.dumps(dict(offline_valid=True,source='runtime_a2f',prerecorded_animation_read=False,
             robot=robot.definition['name'],audio=str(p['audio']),duration_seconds=p['duration'],
@@ -162,7 +164,7 @@ def main(argv=None):
         with lock_path.open('a') as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             owns_control=True
-            vision_python=str(ROOT/settings['vision_python']) if args.smile=='on' else None
+            vision_python=str(ROOT/p['perception']['python']) if args.smile=='on' else None
             with vision_service(config_path,output,args.mode!='face',python=vision_python):
                 for lap in range(1,args.repeat+1):
                     guard();directory=output/f'round_{lap}';directory.mkdir()

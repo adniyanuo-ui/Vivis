@@ -47,8 +47,13 @@ def main(argv=None):
         camera_device=camera_config['device'],camera_eye=config['control'].get('camera_eye'),
         camera_transform={k:camera_config[k] for k in ('rotation_deg','mirror_x')})
     social_config=config.get('social_smile',{})
+    expression_config=config.get('face_expression',{})
+    if expression_config.get('enabled') and expression_config.get('face_selection')!='largest':
+        raise ValueError('Expression follow requires the existing largest-face selector')
     if social_config.get('enabled'):
         identity['target_features'].append('social_smile')
+    if expression_config.get('enabled'):
+        identity['target_features'].append('face_expression')
     if (camera_config['rotation_deg'] not in (0, 90, 180, 270)
             or type(camera_config['mirror_x']) is not bool
             or any(type(camera_config[k]) is not int or not 64 <= camera_config[k] <= 1920
@@ -79,11 +84,18 @@ def main(argv=None):
             except BlockingIOError:
                 raise RuntimeError('A person-tracking service is already running')
             vision = FaceVision(config, ROOT)
-            social=None
+            social=landmarker=None
+            if social_config.get('enabled') or expression_config.get('enabled'):
+                from vivis.vision.landmarks import FaceLandmarkerDetector
+                wanted=expression_config if expression_config.get('enabled') else social_config
+                if social_config.get('enabled') and expression_config.get('enabled'):
+                    if any(expression_config[k]!=social_config[k] for k in ('model','sha256')):
+                        raise ValueError('One camera service requires a single shared landmark model')
+                landmarker=FaceLandmarkerDetector(wanted,ROOT)
+                resources.callback(landmarker.close)
             if social_config.get('enabled'):
-                from vivis.interaction.smile import SmileDetector
-                social=SmileDetector(social_config,ROOT)
-                resources.callback(social.close)
+                from vivis.interaction.smile import SmileGate
+                social=SmileGate(social_config['gate'])
             camera = LatestCamera(camera_config)
             resources.callback(camera.close)
             summary['camera_actual'] = camera.actual
@@ -116,10 +128,16 @@ def main(argv=None):
                     continue
                 cycle_begin = now
                 packet, jpeg, metrics = vision.detect(sample)
-                if social is not None:
-                    # P0 is single-person: keep normal tracking with multiple
-                    # faces, but do not associate an ambiguous social cue.
-                    packet['social_smile']=social.detect(sample,packet['target'] if metrics['faces']==1 else None)
+                if landmarker is not None:
+                    # Expression-follow uses the SAME selected largest-face ROI.
+                    # P0 social cues still require exactly one detected face.
+                    selected=expression_config.get('enabled') or metrics['faces']==1
+                    observation=landmarker.observe(sample,packet['target'] if selected else None)
+                    if expression_config.get('enabled'):packet['face_expression']=observation
+                    if social is not None:
+                        weights=observation['weights']
+                        packet['social_smile']=social.step(weights.get('mouthSmileLeft',0.),weights.get('mouthSmileRight',0.),
+                            observation['timestamp_monotonic'],observation['valid'] and metrics['faces']==1)
                 now = time.monotonic()
                 last_sequence = sample[0]
                 age = now - sample[1]
@@ -143,6 +161,7 @@ def main(argv=None):
                            'mount': config['control']['camera_mount']}
                 current['camera_eye']=config['control'].get('camera_eye')
                 if social is not None:current['social_smile']=packet['social_smile']
+                if expression_config.get('enabled'):current['face_expression']=packet['face_expression']
                 if config.get('schema_version') in ('mojia-person-gaze-1.0','vivis-person-gaze-1.0'):
                     # The camera service has no actuator feedback; show image direction,
                     # not an integrator pretending the eye moved with its commands.

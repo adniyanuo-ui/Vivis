@@ -28,6 +28,9 @@ def compatible_vision(state, config, digest):
     features=state.get('target_features',[])
     if config.get('parallel_neck',{}).get('enabled') and (not isinstance(features,list) or 'eye_line_roll' not in features):
         return False
+    for setting,feature in [('social_smile','social_smile'),('face_expression','face_expression')]:
+        if config.get(setting,{}).get('enabled') and (not isinstance(features,list) or feature not in features):
+            return False
     return (state.get('config_sha256')==digest and state.get('target_protocol_version')==VERSION
         and state.get('camera_transform')=={k:config['camera'][k] for k in ('rotation_deg','mirror_x')}
         and state.get('camera_device')==config['camera']['device']

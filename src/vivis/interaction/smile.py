@@ -63,42 +63,15 @@ class SmileGate:
 class SmileDetector:
     """Landmarker runs only within the face selected by the existing tracker."""
     def __init__(self, config, root):
-        import hashlib
-        from pathlib import Path
-        import mediapipe as mp
-        from mediapipe.tasks.python import BaseOptions, vision
-        path = Path(root)/config['model']
-        if hashlib.sha256(path.read_bytes()).hexdigest()!=config['sha256']:
-            raise ValueError('Face Landmarker model hash mismatch')
-        self.mp = mp
-        self.model = vision.FaceLandmarker.create_from_options(vision.FaceLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=str(path)),
-            running_mode=vision.RunningMode.VIDEO, num_faces=1,
-            output_face_blendshapes=True, min_face_detection_confidence=.5,
-            min_face_presence_confidence=.5, min_tracking_confidence=.5))
+        from vivis.vision.landmarks import FaceLandmarkerDetector
+        self.detector=FaceLandmarkerDetector(config,root)
         self.gate = SmileGate(config['gate'])
-        self.timestamp_ms = -1
 
     def detect(self, sample, target):
-        import cv2
-        _, stamp, image = sample
-        left = right = 0.
-        valid = False
-        if target is not None:
-            x,y,w,h = target['bbox']
-            height,width=image.shape[:2]
-            x0,y0=max(0,int(x-.15*w)),max(0,int(y-.15*h))
-            x1,y1=min(width,math.ceil(x+1.15*w)),min(height,math.ceil(y+1.15*h))
-            if x1>x0 and y1>y0:
-                # YuNet's selected ROI prevents smile from a different face.
-                roi=cv2.cvtColor(image[y0:y1,x0:x1],cv2.COLOR_BGR2RGB)
-                self.timestamp_ms=max(self.timestamp_ms+1,int(stamp*1000))
-                result=self.model.detect_for_video(self.mp.Image(image_format=self.mp.ImageFormat.SRGB,data=roi),self.timestamp_ms)
-                if len(result.face_blendshapes)==1:
-                    weights={v.category_name:float(v.score) for v in result.face_blendshapes[0]}
-                    left,right=weights['mouthSmileLeft'],weights['mouthSmileRight']
-                    valid=True
-        return self.gate.step(left,right,stamp,valid)
+        observation=self.detector.observe(sample,target)
+        weights=observation['weights']
+        return self.gate.step(weights.get('mouthSmileLeft',0.),weights.get('mouthSmileRight',0.),
+                              observation['timestamp_monotonic'],observation['valid'])
 
     def close(self):
-        self.model.close()
+        self.detector.close()

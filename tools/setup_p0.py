@@ -8,7 +8,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-import urllib.request
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -57,17 +56,7 @@ def main(argv=None):
     subprocess.run(['cmake','--build',str(folder/'build'),'--target','a2f_chunk_probe','--parallel','2'],check=True)
     subprocess.run([sys.executable,str(ROOT/'native/a2f/build_model.py'),str(destination)],check=True)
     if not args.skip_vision:
-        venv=folder/'vision_venv'
-        subprocess.run([sys.executable,'-m','venv',str(venv)],check=True)
-        subprocess.run([str(venv/'bin/python'),'-m','pip','install','-r',str(ROOT/'native/a2f/vision_requirements.txt')],check=True)
-        model=folder/'face_landmarker.task'
-        config=json.loads((ROOT/'configs/interaction/p0.json').read_text())['social_smile']
-        if not model.exists():
-            url='https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
-            data=urllib.request.urlopen(url,timeout=60).read()
-            if hashlib.sha256(data).hexdigest()!=config['sha256']:raise RuntimeError('Landmarker model mismatch')
-            model.write_bytes(data)
-        if hashlib.sha256(model.read_bytes()).hexdigest()!=config['sha256']:raise RuntimeError('Landmarker model changed')
+        subprocess.run([sys.executable,str(ROOT/'tools/setup_face_landmarker.py')],check=True)
     print('P0 dependencies prepared; no servo, camera or audio device opened.')
 
 

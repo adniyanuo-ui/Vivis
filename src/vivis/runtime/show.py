@@ -76,7 +76,7 @@ def configure_show_volume(device):
                      digital_trim=gain,output_amplitude_factor=3.,before=before,after=after)
 
 
-def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,telemetry_policy=None,mode='eyes-neck',mouth_command_mode='limited'):
+def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,telemetry_policy=None,mode='eyes-neck',mouth_command_mode='limited',audio_required=True):
     if mode not in ('face','eyes','eyes-neck'):
         raise ValueError('Unknown developer mode')
     if mouth_command_mode not in ('limited','lips-direct'):
@@ -128,7 +128,7 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
             or set(direct)&set(p['gaze_owner_ids'])):
         raise ValueError('Direct mouth commands require calibrated, exclusively owned mouth axes')
     p.update(mouth_command_mode=mouth_command_mode,direct_position_ids=direct)
-    live_preflight(p,monitored)
+    live_preflight(p,monitored,audio_required=audio_required)
     return p,monitored,trajectory
 
 

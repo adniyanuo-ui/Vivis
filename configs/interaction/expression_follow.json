@@ -1,0 +1,11 @@
+{
+  "schema_version": "vivis-expression-follow-1.0",
+  "perception": "configs/perception/face_landmarker.json",
+  "face_selection": "largest",
+  "control_hz": 60,
+  "gain": 1.0,
+  "mirror_expression": false,
+  "filter_tau_s": 0.06,
+  "lost_hold_s": 0.15,
+  "release_s": 0.4
+}

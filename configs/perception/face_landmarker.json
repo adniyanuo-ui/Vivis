@@ -1,0 +1,9 @@
+{
+  "schema_version": "vivis-face-landmarker-1.0",
+  "model": "outputs/models/face_landmarker.task",
+  "python": "outputs/face_landmarker/venv/bin/python",
+  "url": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+  "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
+  "bytes": 3758596,
+  "package_version": "0.10.18"
+}

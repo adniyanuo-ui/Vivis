@@ -39,8 +39,9 @@ finally{clearTimeout(deadline);if(pendingImage)URL.revokeObjectURL(pendingImage)
 async function refreshState(){const controller=new AbortController(),deadline=setTimeout(()=>controller.abort(),2000);
 try{let r=await fetch('/state',{cache:'no-store',signal:controller.signal});if(!r.ok)throw new Error('State unavailable');let s=await r.json();
 document.querySelector('#state').textContent=JSON.stringify(s,null,2);
-let control=s.robot_control;document.querySelector('#robot-control').textContent=control?(control.active?'真机跟踪正在运行，剩余约 '+Math.ceil(control.remaining_seconds||0)+' 秒':'真机跟踪未运行；画面仍在检测人脸'):'视觉服务不驱动机器人';
-let xy=s.simulated_xy||[0,0];document.querySelectorAll('.pupil').forEach(p=>p.style.transform=`translate(${xy[0]*29}px,${xy[1]*14}px)`);
+let control=s.robot_control,expression=control&&control.program==='expression-follow';
+document.querySelector('#robot-control').textContent=control?(control.active?(expression?'表情跟随：面部＋眼睑；眼球、颈部保持原位。剩余约 ':'真机跟踪正在运行，剩余约 ')+Math.ceil(control.remaining_seconds||0)+' 秒':'真机控制未运行；画面仍在检测人脸'):'视觉服务不驱动机器人';
+let xy=expression?[0,0]:(s.simulated_xy||[0,0]);document.querySelectorAll('.pupil').forEach(p=>p.style.transform=`translate(${xy[0]*29}px,${xy[1]*14}px)`);
 }catch(e){document.querySelector('#state').textContent='视觉服务未连接，正在自动重试…';}
 finally{clearTimeout(deadline);setTimeout(refreshState,250);}}
 refreshCamera();refreshState();</script></html>'''

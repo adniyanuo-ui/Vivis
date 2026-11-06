@@ -2,15 +2,13 @@
   "schema_version": "vivis-interactive-singing-1.0",
   "binary": "outputs/a2f/build/a2f_chunk_probe",
   "model": "outputs/a2f/model_bundle/model.json",
-  "vision_python": "outputs/a2f/vision_venv/bin/python",
+  "perception": "configs/perception/face_landmarker.json",
   "buffer_frames": 180,
   "prebuffer_frames": 120,
   "underflow_grace_s": 0.2,
   "smile_strength": 0.15,
   "social_smile": {
     "enabled": true,
-    "model": "outputs/a2f/face_landmarker.task",
-    "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
     "gate": {
       "enter": 0.45,
       "exit": 0.3,
