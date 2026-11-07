@@ -7,6 +7,9 @@
   "prebuffer_frames": 120,
   "underflow_grace_s": 0.2,
   "smile_strength": 0.30,
+  "social_channels": [
+    "MouthSmileLeft", "MouthSmileRight", "CheekSquintLeft", "CheekSquintRight"
+  ],
   "mouth_channel_gain": 1.2,
   "round_lip_channel_gain": 1.2,
   "social_smile": {

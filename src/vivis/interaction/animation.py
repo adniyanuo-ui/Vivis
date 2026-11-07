@@ -55,7 +55,7 @@ def speech_channel_gains(settings,order):
 
 
 class FrameMapper:
-    def __init__(self, order, shapes, profile, ids, smile_strength=.15,scope='face_eyes',channel_gains=None):
+    def __init__(self, order, shapes, profile, ids, smile_strength=.15,scope='face_eyes',channel_gains=None,social_channels=None):
         if not math.isfinite(smile_strength) or not 0<=smile_strength<=.5:
             raise ValueError('Social strength must be0..0.5')
         self.order,self.shapes,self.profile,self.ids=list(order),shapes,profile,list(ids)
@@ -66,9 +66,16 @@ class FrameMapper:
             raise ValueError('Invalid source channel gains')
         self.gains=np.array([self.channel_gains.get(name,1.) for name in self.order[:52]],float)
         self.critical=('JawOpen','MouthClose','MouthFunnel','MouthPucker')
-        self.social=('MouthSmileLeft','MouthSmileRight')
+        self.social=tuple(social_channels if social_channels is not None else ('MouthSmileLeft','MouthSmileRight'))
+        allowed={'MouthSmileLeft','MouthSmileRight','CheekSquintLeft','CheekSquintRight','EyeSquintLeft','EyeSquintRight'}
+        if not self.social or len(set(self.social))!=len(self.social) or not set(self.social)<=allowed:
+            raise ValueError('Invalid social smile channels')
         self.neutral=np.array([next(m for m in profile['motors'] if m['id']==sid)['neutral'] for sid in ids],float)
         self.mapping=CompiledFaceMapping(self.order,self.shapes,self.profile,scope=scope)
+        # Reserve articulation resources for the whole song. A .01 coefficient
+        # threshold switched the entire social target on/off at shared joints,
+        # even when source coefficients and the smile envelope were continuous.
+        self.speech_owned_ids=sorted(set(self.ids)&{sid for name in self.critical for sid in self.shapes[name]})
         self.last_fused=None
         self.protected_ids=[]
         self.last_social_delta=np.zeros(len(ids))
@@ -94,11 +101,8 @@ class FrameMapper:
             if sid in self.ids:result[self.ids.index(sid)]=mapped[0,i]
         if not combine:return result
         baseline=result.copy()
-        protected=set()
-        for name in self.critical:
-            if value[0,self.order.index(name)]>.01:
-                protected.update(self.shapes[name])
-        self.protected_ids=sorted(protected)
+        protected=set(self.speech_owned_ids)
+        self.protected_ids=self.speech_owned_ids.copy()
         # Derive shared resources from calibration, never a fixed motor-ID list.
         for i,sid in enumerate(source_ids):
             if sid in self.ids and sid not in protected:result[self.ids.index(sid)]=mapped[1,i]

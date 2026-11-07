@@ -105,6 +105,36 @@ class AnimationTests(unittest.TestCase):
         self.assertTrue(np.any(before!=after))
         self.assertAlmostEqual(m.last_fused[p['order'].index('MouthSmileLeft')],.55)
 
+    def test_social_ownership_does_not_jump_at_small_round_lip_coefficients(self):
+        # The old .01 switch caused tens of counts of smile delta to appear
+        # or vanish while a smooth source crossed that coefficient.
+        for name in ('xiaoshuai','mojia'):
+            p=plan(Robot(ROOT/f'configs/robots/{name}/robot.json'),'0001','eyes-neck',settings())
+            m=FrameMapper(p['order'],p['shapes'],p['profile'],p['ids'],.3)
+            previous=None;previous_weight=None
+            for weight in (.0,.009,.0099,.0101,.011,.02):
+                raw=[0.]*52;raw[p['order'].index('MouthFunnel')]=weight
+                base=m.map_weights(raw).copy();response=m.map_weights(raw,1.).copy()
+                for sid in m.speech_owned_ids:
+                    self.assertEqual(base[p['ids'].index(sid)],response[p['ids'].index(sid)])
+                if previous is not None and weight-previous_weight<.00021:
+                    self.assertLess(float(max(abs(response-previous))),1.)
+                previous=response;previous_weight=weight
+
+    def test_eye_corner_smile_is_visible_in_targets_without_touching_articulation(self):
+        p=plan(Robot(ROOT/'configs/robots/xiaoshuai/robot.json'),'0001','eyes-neck',settings())
+        m=FrameMapper(p['order'],p['shapes'],p['profile'],p['ids'],.3,social_channels=settings()['social_channels'])
+        raw=[0.]*52;raw[p['order'].index('JawOpen')]=.4;raw[p['order'].index('MouthFunnel')]=.2
+        base=m.map_weights(raw).copy();response=m.map_weights(raw,1.)
+        self.assertGreater(response[p['ids'].index(6)]-base[p['ids'].index(6)],40.)
+        self.assertLess(response[p['ids'].index(21)]-base[p['ids'].index(21)],-50.)
+        for sid in m.speech_owned_ids:self.assertEqual(base[p['ids'].index(sid)],response[p['ids'].index(sid)])
+        for name in ('EyeBlinkLeft','EyeBlinkRight'):raw[p['order'].index(name)]=1.
+        closed=m.map_weights(raw).copy();responding=m.map_weights(raw,1.)
+        for sid in (5,6,20,21):self.assertEqual(closed[p['ids'].index(sid)],responding[p['ids'].index(sid)])
+        with self.assertRaises(ValueError):
+            FrameMapper(p['order'],p['shapes'],p['profile'],p['ids'],social_channels=['JawOpen'])
+
 
 class SmileTests(unittest.TestCase):
     def test_single_response_no_continuous_smile_and_rearm(self):
@@ -163,17 +193,35 @@ class OfflineP0Tests(unittest.TestCase):
 
 
 class LiveQueueTests(unittest.TestCase):
-    def fake(self,folder):
+    def fake(self,folder,ramp=False):
         import sys
         path=Path(folder)/'worker.py'
         header=dict(schema_version='vivis-a2f-bindings-1.0',names=dict(skin=[n[0].lower()+n[1:] for n in names()[:52]],tongue=[]))
         text='#!'+sys.executable+'\nimport json,sys\npid=sys.argv[-1]\nheader='+repr(header)+"\nheader['playback_id']=pid\nprint(json.dumps(header),flush=True)\n"
         text+="for i in range(20):\n print(json.dumps(dict(schema_version='vivis-a2f-raw-1.0',playback_id=pid,frame_seq=i,audio_sample_index=int(i*16000/60),sample_rate_hz=16000,weights=[.1]*52)),flush=True)\n"
+        if ramp:text=text.replace('weights=[.1]*52','weights=[i/20]*52')
         path.write_text(text);path.chmod(0o755)
         class Mapper:
             order=names();ids=[1];last_fused=[.1]*52;protected_ids=[]
             def map_weights(self,w,smile):return np.array([w[0]+smile])
         return path,Mapper()
+
+    def test_sampling_interpolates_at_audio_time_and_keeps_original_knots(self):
+        with tempfile.TemporaryDirectory() as folder:
+            worker,mapper=self.fake(folder,ramp=True)
+            source=LiveFrames(worker,'model','audio',1,Path(folder)/'stream',mapper,capacity=20,prebuffer=20)
+            try:
+                source.wait_ready(timeout=3)
+                self.assertEqual(source.sample(0.,time.monotonic())[0],0.)
+                self.assertEqual(source.sample(266/16000,time.monotonic())[0],.05)
+                midpoint=(266+533)/2/16000
+                self.assertAlmostEqual(source.sample(midpoint,time.monotonic())[0],.075)
+                self.assertEqual(source.current['frame_seq'],1)
+                self.assertEqual(source.frames[0]['frame_seq'],2)
+                self.assertEqual(source.sample(533/16000,time.monotonic())[0],.1)
+                self.assertEqual(source.underflows,0)
+                self.assertGreater(source.summary()['interpolated_ticks'],0)
+            finally:source.close()
 
     def test_queue_is_bounded_and_model_pipe_does_not_block_control(self):
         with tempfile.TemporaryDirectory() as folder:

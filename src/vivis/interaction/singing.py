@@ -87,6 +87,9 @@ def plan(robot, work_name, mode, settings, smile=True):
     profile,ids,neutral=prepare(config,profile,face_ids,neutral,authorize,1.,robot.telemetry(),mode,'lips-direct')
     profile.update(face_update_hz=60,control_hz=60,snapshot_chunk_bytes=2)
     live_preflight(profile,ids)
+    # Validate social configuration during --check, before opening any device.
+    FrameMapper(order,shapes,profile,ids,settings['smile_strength'],
+        channel_gains=source_gains,social_channels=settings.get('social_channels'))
     return dict(work=work,audio=audio,duration=duration,profile=profile,ids=ids,neutral=neutral,
                 tracking=config,order=order,shapes=shapes,authorize=authorize,perception=perception,source_gains=source_gains)
 
@@ -197,7 +200,8 @@ def main(argv=None):
                             if receiver is None:return None
                             packet=receiver.poll(now)
                             return packet.get('social_smile') if packet else None
-                        mapper=FrameMapper(p['order'],p['shapes'],profile,ids,settings['smile_strength'],channel_gains=p['source_gains'])
+                        mapper=FrameMapper(p['order'],p['shapes'],profile,ids,settings['smile_strength'],
+                            channel_gains=p['source_gains'],social_channels=settings.get('social_channels'))
                         source=LiveFrames(ROOT/settings['binary'],ROOT/settings['model'],inference,p['duration'],
                             directory/'a2f',mapper,social if args.smile=='on' else None,
                             settings['buffer_frames'],settings['prebuffer_frames'],settings['underflow_grace_s'],args.capture_animation)

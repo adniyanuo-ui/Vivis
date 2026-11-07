@@ -36,6 +36,7 @@ class LiveFrames:
         self.capture_error=None
         self.capture_thread=None
         self.smile_ticks=0;self.smile_peak=0.;self.social_delta_peak=0.
+        self.interpolated=0;self.social_delta_by_id={}
         try:
             self.process=subprocess.Popen([str(binary),str(model),str(audio),str(self.output/'native'),
                 str(duration),'--stream',self.playback_id],stdout=subprocess.PIPE,stderr=self.log,
@@ -109,10 +110,21 @@ class LiveFrames:
             self.discarded+=max(0,used-1)
             self.condition.notify_all()
             frame=self.current
+            following=self.frames[0] if self.frames else None
         if frame is None:raise RuntimeError('A2F has no frame at audio start')
         age=audio_seconds-frame['audio_sample_index']/16000
-        if age>1/60+.002:self.underflows+=1
+        if following is None and age>1/60+.002:self.underflows+=1
         if age>self.grace:raise RuntimeError('A2F animation underflow exceeds bounded hold')
+        weights=frame['weights']
+        interpolation=None
+        if following is not None:
+            span=(following['audio_sample_index']-frame['audio_sample_index'])/16000
+            alpha=max(0.,min(1.,age/span))
+            # Sample the existing piecewise-linear source at DAC time. No
+            # coefficient filter, added latency, slew cap or model wait.
+            weights=[a+(b-a)*alpha for a,b in zip(weights,following['weights'])]
+            interpolation=dict(upper_frame_seq=following['frame_seq'],fraction=alpha)
+            self.interpolated+=int(0<alpha<1)
         event=self.social(now) if self.social else None
         desired=0.
         if (isinstance(event,dict) and event.get('schema_version')=='vivis-smile-event-1.0'
@@ -124,12 +136,15 @@ class LiveFrames:
         dt=1/60 if self.last_time is None else min(.1,max(0,now-self.last_time))
         self.last_time=now
         self.smile+=(desired-self.smile)*(1-math.exp(-dt/.08))
-        target=self.mapper.map_weights(frame['weights'],self.smile)
+        target=self.mapper.map_weights(weights,self.smile)
         self.smile_ticks+=int(self.smile>.01);self.smile_peak=max(self.smile_peak,self.smile)
         self.social_delta_peak=max(self.social_delta_peak,float(max((abs(v) for v in getattr(self.mapper,'last_social_delta',[])),default=0)))
+        for sid,delta in zip(self.mapper.ids,getattr(self.mapper,'last_social_delta',[])):
+            self.social_delta_by_id[sid]=max(self.social_delta_by_id.get(sid,0.),abs(float(delta)))
         if self.capture:
             record={**frame,'submitted_audio_seconds':audio_seconds,'social_smile_strength':self.smile,
                     'fused_weights':self.mapper.last_fused,'protected_ids':self.mapper.protected_ids,
+                    'sampled_weights':weights,'interpolation':interpolation,
                     'motor_ids':self.mapper.ids,'nominal_positions':target.tolist()}
             try:self.capture_queue.put_nowait(record)
             except queue.Full:self.capture_dropped+=1
@@ -142,8 +157,12 @@ class LiveFrames:
                     prebuffer_frames=self.prebuffer,first_window_ready_s=(None if self.first_window_ready is None else self.first_window_ready-self.started),
                     channel_mapping_version='a2f-skin52-v1',raw_animation_capture=bool(self.capture),
                     social_smile_channel_gain=getattr(self.mapper,'smile_strength',None),
+                    social_channels=list(getattr(self.mapper,'social',())),
+                    social_arbitration='song_critical_resources_reserved',
                     source_channel_gains=dict(getattr(self.mapper,'channel_gains',{})),social_response_ticks=self.smile_ticks,
                     social_envelope_peak=self.smile_peak,social_target_delta_peak_counts=self.social_delta_peak,
+                    social_target_delta_peak_by_id=self.social_delta_by_id,
+                    sampling='linear_audio_sample_time',interpolated_ticks=self.interpolated,
                     capture_dropped=self.capture_dropped,capture_error=self.capture_error)
 
     def close(self):
