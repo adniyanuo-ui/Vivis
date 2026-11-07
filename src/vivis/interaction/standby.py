@@ -1,4 +1,4 @@
-"""待机：有人时眼颈跟随与微笑回应，无人时低频眨眼和轻微游视。"""
+"""Shared idle/interaction motion: camera-free standby or visual social response."""
 import argparse
 import copy
 import csv
@@ -27,15 +27,18 @@ from vivis.motion.ownership import MojiaPlaybackGaze,PreviewPublisher
 from vivis.motion.upstream import configure as configure_trajectory
 from vivis.vision.parallel_follow import configure as configure_parallel
 from vivis.vision.independent_follow import configure as configure_independent
-from vivis.vision.policy import TargetReceiver,validate_packet
+from vivis.vision.policy import TargetReceiver,validate_packet,axis_normalized,axis_position
 from vivis.interaction.smile import SmileGate,selected_face_allowed
+from vivis.interaction.attention import AttentionRhythm
 
 
 class IdleFrames:
     def __init__(self,mapper,settings,seed=None,tracking=None,perception=None):
         self.mapper,self.c=mapper,settings;self.rng=random.Random(seed)
+        self.behavior=settings.get('behavior','standby')
         self.tracking,self.perception=tracking,perception
         self.receiver=self.publisher=None;self.smile=0.;self.last_time=None;self.last_publish=-math.inf
+        self.attention=AttentionRhythm(settings.get('attention',{'enabled':False}),seed=seed)
         self.missing_since=None;self.missing_origin=0.
         self.smile_ticks=0;self.smile_peak=0.;self.social_delta_by_id={}
         self.response=settings.get('social_response',{'enabled':False})
@@ -120,13 +123,14 @@ class IdleFrames:
 
     def publish(self,now,target,diagnostic):
         if self.publisher is not None and now-self.last_publish>=.2:
-            self.publisher.submit(dict(active=True,program='standby',updated_monotonic=now,
+            self.publisher.submit(dict(active=True,program=self.behavior,updated_monotonic=now,
                 **diagnostic,command_ids=self.mapper.profile['diagnostic_command_ids'],social_smile_strength=self.smile,
                 social_response_ticks=self.smile_ticks,nominal_goals=dict(zip(self.mapper.ids,map(float,target)))))
             self.last_publish=now
 
     def summary(self):
         return dict(blinks=self.blinks,glances=self.looks,tracking_enabled=self.tracking_enabled,
+            attention_enabled=self.attention.enabled,attention_aversion_count=self.attention.count,
             smile_enabled=self.response['enabled'],smile_channel_gain=self.mapper.smile_strength,
             social_response_ticks=self.smile_ticks,social_envelope_peak=self.smile_peak,
             social_target_delta_peak_by_id=self.social_delta_by_id)
@@ -146,10 +150,27 @@ class StandbyGaze(MojiaPlaybackGaze):
         self.high=np.array([m['safe_max'] for sid in ids for m in profile['motors'] if m['id']==sid])
 
     def apply(self,base,last,dt,now):
-        result=super().apply(base,last,dt,now)
+        packet=self.receiver.poll(now);visible=False
+        try:
+            validate_packet(packet,now,self.receiver.max_age);visible=packet['target'] is not None
+        except (ValueError,KeyError,TypeError,AttributeError):pass
+        attention=self.source.attention.step(visible,now,self.source.smile>.1)
+        options={'attention_hold':True} if attention['pause'] else {}
+        result=super().apply(base,last,dt,now,**options)
         if not np.isfinite(result).all() or np.any(result<self.low) or np.any(result>self.high):
             raise ValueError('Standby pursuit target exceeds command limits')
         d=self.last_diagnostic
+        if attention['started']:
+            axis=next(a for a in self.config['control']['axes'] if a['id']==self.camera_eye_id)
+            offset=axis_normalized(axis,float(result[self.ids.index(axis['id'])]))
+            if abs(offset)>.7:self.source.attention.direction=-1 if offset>0 else 1
+        if not (self.returning or self.platform_returning) and attention['blend']>0:
+            for axis in self.config['control']['axes']:
+                col=self.ids.index(axis['id']);intent=self.source.attention
+                delta=intent.direction*intent.eye_yaw_fraction if axis['coordinate']=='x' else intent.eye_pitch_fraction
+                position=axis_normalized(axis,float(result[col]))+delta*attention['blend']
+                result[col]=axis_position(axis,max(-1.,min(1.,position)))
+        d['attention']=attention
         centered=np.max(abs(result[self.columns]-self.neutral[self.columns]))<1.
         idle=d['state']=='idle' and centered and not self.returning
         self.glance_blend+=(float(idle)-self.glance_blend)*(-math.expm1(-dt/self.source.glance_tau))
@@ -164,6 +185,10 @@ class StandbyGaze(MojiaPlaybackGaze):
 def plan(robot,settings,seconds):
     if (settings.get('schema_version')!='vivis-standby-1.0' or type(seconds) not in (int,float)
             or not math.isfinite(seconds) or not 1<=seconds<=3600):raise ValueError('Invalid standby configuration/duration')
+    behavior=settings.get('behavior','standby')
+    if behavior not in ('standby','interaction'):raise ValueError('Unknown idle behavior')
+    if behavior=='standby' and (settings.get('tracking_enabled') or settings.get('social_response',{}).get('enabled')):
+        raise ValueError('Standby must keep camera off; use the interaction behavior')
     profile=robot.motion_profile()
     with robot.resolve('channels').open(encoding='utf-8-sig',newline='') as f:order=next(csv.reader(f))[2:]
     shapes={s['shape']:{p['id']:p['position'] for p in s['positions']} for s in read_json(robot.calibration)['blendShapes']}
@@ -213,13 +238,13 @@ def plan(robot,settings,seconds):
     return profile,ids,home,mapper,source,neutral
 
 
-def main(argv=None):
+def main(argv=None,default_config=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--robot',type=Path,default=ROOT/'configs/robots/xiaoshuai/robot.json')
-    parser.add_argument('--config',type=Path,default=ROOT/'configs/interaction/standby.json')
+    parser.add_argument('--config',type=Path,default=default_config or ROOT/'configs/interaction/standby.json')
     parser.add_argument('--seconds',type=float,default=600);parser.add_argument('--session-stop-file',type=Path)
-    parser.add_argument('--tracking',choices=('on','off'),help='默认按待机配置开启眼颈跟随')
-    parser.add_argument('--smile',choices=('on','off'),help='默认按待机配置开启微笑回应')
+    parser.add_argument('--tracking',choices=('on','off'),help='交互态可对照关闭跟随；真正待机固定关闭')
+    parser.add_argument('--smile',choices=('on','off'),help='交互态可对照关闭微笑；真正待机固定关闭')
     parser.add_argument('--smile-strength',type=float,help='单次微笑增量0..0.5，不保存配置')
     parser.add_argument('--overlap-warmup',action='store_true',help=argparse.SUPPRESS)
     parser.add_argument('--output',type=Path);parser.add_argument('--check',action='store_true')
@@ -230,18 +255,19 @@ def main(argv=None):
     if args.smile is not None:settings.setdefault('social_response',{})['enabled']=args.smile=='on'
     if args.smile_strength is not None:settings.setdefault('social_response',{})['strength']=args.smile_strength
     profile,ids,home,mapper,source,neutral=plan(robot,settings,args.seconds)
+    behavior=source.behavior
     needs_camera=source.tracking_enabled or source.response['enabled']
     required=[ROOT/source.perception[k] for k in ('python','model')] if source.perception else []
     if args.session_stop_file is not None:profile['session_stop_file']=str(args.session_stop_file.resolve())
     if args.check:
-        print(json.dumps(dict(offline_valid=True,ids=ids,camera_opened=False,hardware_opened=False,
+        print(json.dumps(dict(offline_valid=True,program=behavior,ids=ids,camera_opened=False,hardware_opened=False,
             tracking_enabled=source.tracking_enabled,smile_enabled=source.response['enabled'],
             smile_channel_gain=mapper.smile_strength,a2f_used=False,audio_opened=False,
             missing_dependencies=[str(x) for x in required if not x.is_file()]),ensure_ascii=False));return 0
     for path in required:
         if not path.is_file():parser.error('缺少待机视觉依赖：'+str(path)+'；运行python3 tools/setup_face_landmarker.py')
     check_competitors(needs_camera)
-    output=args.output or ROOT/'outputs/standby'/datetime.now().strftime('%Y%m%d_%H%M%S_%f');output.mkdir(parents=True,exist_ok=False)
+    output=args.output or ROOT/'outputs'/behavior/datetime.now().strftime('%Y%m%d_%H%M%S_%f');output.mkdir(parents=True,exist_ok=False)
     for name,data in [('settings',settings),('tracking',source.tracking),('profile',profile),('home',home)]:
         (output/(name+'.json')).write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
     stopped=False;stop_file=ROOT/'outputs/STOP'
@@ -256,7 +282,7 @@ def main(argv=None):
     home_args=SimpleNamespace(home_speed=settings['home_speed_counts_s'],home_only=True,usb_volume_times_three=False,
         authorized_tongue_observation=authorize,home_position_recovery=recovery_policy(home.get('disabled_position_recovery')),
         home_sensor_fault_confirmation=home.get('sensor_fault_confirmation',False))
-    report={};result=dict(completed=False,camera_opened=False,program='standby',audio_opened=False,a2f_used=False)
+    report={};result=dict(completed=False,camera_opened=False,program=behavior,audio_opened=False,a2f_used=False)
     receiver=publisher=None
     lock_path=ROOT/'outputs/developer/control.lock';lock_path.parent.mkdir(parents=True,exist_ok=True)
     try:
@@ -281,15 +307,15 @@ def main(argv=None):
                         if vision is not None:vision.wait_ready(guard)
                         receiver.wait_ready();guard()
                     gaze=StandbyGaze(source.tracking,profile,ids,receiver,source) if source.tracking_enabled else None
-                    guard();print(f'STANDBY START: tracking={source.tracking_enabled}, smile={source.response["enabled"]}, gain={mapper.smile_strength:g}',flush=True)
-                    print('待机：有人时眼颈跟随、微笑回应；无人时回中后低频眨眼和轻微游视。',flush=True)
+                    guard();print(f'{behavior.upper()} START: tracking={source.tracking_enabled}, smile={source.response["enabled"]}, gain={mapper.smile_strength:g}',flush=True)
+                    print('交互态：人脸跟随与持续微笑回应。' if behavior=='interaction' else '真正待机：摄像头关闭，低频眨眼；由管理器保持唤醒监听。',flush=True)
                     playback=play(profile,ids,neutral,60,None,output/'playback_log.json',stop_file,
                         frame_source=source,gaze_override=gaze,clock_factory=lambda:MonotonicClock(args.seconds))
                     result['completed']=playback['completed']
             finally:
                 if receiver is not None:receiver.close()
                 if authorize and 'hardware_restore' in report:unload_tongue(profile,report)
-                error=publisher.finish(dict(active=False,program='standby',state='stopped',updated_monotonic=time.monotonic()))
+                error=publisher.finish(dict(active=False,program=behavior,state='stopped',updated_monotonic=time.monotonic()))
                 if error:result['preview_error']=error
     except Exception as exc:
         result['error']=str(exc)

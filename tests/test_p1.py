@@ -36,21 +36,24 @@ class IntentTests(unittest.TestCase):
         self.assertEqual(self.router.parse('表情跟随',True,current_program='baigufuren')['program'],'expression-follow')
 
     def setUp(self):self.router=IntentRouter(read('configs/interaction/programs.json'))
-    def test_all_exit_aliases_and_polite_forms_go_to_standby(self):
+    def test_sleep_and_task_exit_aliases_are_distinct(self):
         for phrase in read('configs/interaction/programs.json')['standby_phrases']:
-            self.assertEqual(self.router.parse(phrase,True)['kind'],'standby',phrase)
-        for phrase in ('请你停止吧','小帅，请停止播放。','结束当前节目','退出这个节目','请你休息一下'):
-            self.assertEqual(self.router.parse(phrase,True)['kind'],'standby',phrase)
+            self.assertEqual(self.router.parse(phrase,True,state='task')['kind'],'standby',phrase)
+        for phrase in read('configs/interaction/programs.json')['exit_phrases']:
+            self.assertEqual(self.router.parse(phrase,True,state='task')['kind'],'interaction',phrase)
+        for phrase in ('请你停止吧','小帅，请停止播放。','结束当前节目','退出这个节目'):
+            self.assertEqual(self.router.parse(phrase,True,state='task')['kind'],'interaction',phrase)
+        self.assertEqual(self.router.parse('请你休息一下',True,state='task')['kind'],'standby')
 
     def test_negation_quoted_explanation_and_unrelated_speech_never_switch(self):
         for phrase in ('不要停止','别停止','我不想退出','停止是什么意思','他说停止了','今天天气很好','不要播放白骨夫人'):
             self.assertEqual(self.router.parse(phrase,True)['kind'],'ignore',phrase)
 
-    def test_two_programs_selection_and_removed_recitation(self):
+    def test_three_programs_selection_including_restored_static_recitation(self):
         for phrase,target in [('播放白骨夫人','baigufuren'),('开始表情跟随','expression-follow'),
                               ('切换到表情跟随','expression-follow'),('我想听白骨夫人','baigufuren')]:
             self.assertEqual(self.router.parse(phrase,True),dict(kind='select',program=target))
-        self.assertEqual(self.router.parse('播放魏总朗诵')['kind'],'prompt')
+        self.assertEqual(self.router.parse('播放魏总朗诵'),dict(kind='select',program='wz2'))
         self.assertEqual(self.router.parse('白骨夫人',True)['kind'],'ignore')
         self.assertEqual(self.router.parse('白骨夫人',False)['program'],'baigufuren')
         self.assertEqual(self.router.parse('播放白骨夫人或者表情跟随')['name'],'clarify')
@@ -310,7 +313,7 @@ class SupervisorTests(unittest.TestCase):
             def contains(self,*_):return False
         class Input:
             def __iter__(self):
-                for text in ('播放白骨夫人','开始表情跟随','休息一下'):
+                for text in ('小帅','播放白骨夫人','开始表情跟随','休息一下'):
                     time.sleep(.25);yield text
                 time.sleep(.25)
         with tempfile.TemporaryDirectory() as tmp:
@@ -339,9 +342,9 @@ sys.exit(130)
                  patch('vivis.interaction.dialogue.PromptPlayer',Prompts), \
                  patch('vivis.interaction.dialogue.program_command',side_effect=command),patch('sys.stdin',Input()),redirect_stdout(io.StringIO()):
                 self.assertEqual(main(['--config',str(config),'--robot',str(ROOT/'configs/robots/xiaoshuai/robot.json'),'--text-input']),0)
-            lines=trace.read_text().splitlines();self.assertEqual(len(lines),8)
+            lines=trace.read_text().splitlines();self.assertEqual(len(lines),10)
             for i in range(0,len(lines),2):self.assertEqual(lines[i].replace('start ','end '),lines[i+1])
-            self.assertEqual([x[6:] for x in lines[::2]],['standby','baigufuren','expression-follow','standby'])
+            self.assertEqual([x[6:] for x in lines[::2]],['standby','interaction','baigufuren','expression-follow','standby'])
             self.assertFalse(flag.exists())
 
 

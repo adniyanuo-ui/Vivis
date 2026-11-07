@@ -10,5 +10,7 @@
   "standby_seconds": 600,
   "soft_audio_cancel_ms": 40,
   "overlap_warmup": true,
-  "diagnostics": false
+  "diagnostics": false,
+  "interaction": "configs/interaction/interaction.json",
+  "interaction_seconds": 600
 }

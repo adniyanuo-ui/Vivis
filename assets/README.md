@@ -13,6 +13,8 @@
 
 0001、wz2的音频及派生目标总计约9MB。两份音频保留原始哈希；目标轨迹已按`墨甲10.29.json`（JawOpen端点按用户确认修正为1547）重新生成，保留原帧数、已接受的眨眼时序及增益；该轮只改变ID31目标，其他轴逐值保留。`works.json`记录来源哈希、帧数和位置；电机参数只在`configs/robots/mojia/hardware.json`。素材不是Git LFS指针，普通clone即可取得实际文件。
 
+上述目标属于墨甲。小帅使用`configs/robots/xiaoshuai/works.json`登记的本体派生目标：白骨夫人在`assets/works/xiaoshuai/0001/targets.json`，魏总剧本在`assets/works/xiaoshuai/wz2/targets.json`，共享原作品音频和表情源。P1中的两份节目均为预录播放，不实时运行A2F或叠加社交表情。wz2按小帅标定和限位重新换算，增益1.0，30FPS源逐帧保持到60FPS；未修改上游源文件，也未套用墨甲舵机目标或其派生眨眼修饰。小帅白骨夫人沿用已有静态文件，新增小帅wz2需现场验收。
+
 作品3来自`incoming/demo2/`的61通道JSON和PCM16 WAV：2010帧、30FPS表情数据按逐帧保持生成4020帧、60FPS轨迹，播放共67秒。原JSON逐字节保留为`source.json`；原音频长66.005333秒，播放副本仅在末尾补0.994667秒静音，原音频内容和表情时序保留。处理记录与原始哈希见`assets/works/Face_ControlBoard_CtrlRig/provenance.json`。作品3已登记源文件及哈希，可使用`--round-lip-gain 1.2`；用户反馈上电后真机播放成功。
 
 作品4用`--work demo3`选择，来自`incoming/demo3/9.11（16.50）.json`和同名WAV。原JSON标注30FPS，但848帧只有28.266667秒，音频长35.387211秒。用户授权按表情保真优先选择时间基准后，采用推定的`24000/1001`（约23.976）FPS：848帧对应35.368667秒，与音频仅差约18.5毫秒；该帧率未获原作者确认，不将其描述为已测得的真实帧率。

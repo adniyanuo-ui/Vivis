@@ -79,6 +79,8 @@ def vision_service(config_path, output, required, python=None,wait_ready=True):
             config=json.loads(config_path.read_text())
             current = preview_state()
             if current is not None:
+                if os.environ.get('VIVIS_MANAGED_SESSION')=='1':
+                    raise RuntimeError('P1受管会话需要独立持有相机；请先关闭已有独立视觉服务')
                 if not compatible_vision(current,config,wanted):
                     raise RuntimeError('127.0.0.1:8765已有不同配置、旧协议或画面过期的视觉服务；请先关闭旧视觉服务再启动本示例')
             else:
@@ -140,6 +142,12 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     parser.add_argument('--upstream-trajectory', choices=('on','off'),
                         help='Optional ID32 jerk-limited upstream trajectory planning')
     parser.add_argument('--parallel-neck',choices=('on','off'),help='ID33/34 coupled pitch and light roll')
+    parser.add_argument('--session-stop-file',type=Path,help=argparse.SUPPRESS)
+    parser.add_argument('--audio-reference-port',type=int,help=argparse.SUPPRESS)
+    parser.add_argument('--session-id',help=argparse.SUPPRESS)
+    parser.add_argument('--soft-audio-cancel-ms',type=int,default=0,help=argparse.SUPPRESS)
+    parser.add_argument('--compact-logs',action='store_true',help=argparse.SUPPRESS)
+    parser.add_argument('--overlap-warmup',action='store_true',help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if mode not in ('face', 'eyes', 'eyes-neck'):
         parser.error('Unknown example mode')
@@ -180,6 +188,10 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     if args.parallel_neck is not None:command+=['--parallel-neck',args.parallel_neck]
     if args.home_only:
         command += ['--home-only']
+    for key in ('session_stop_file','audio_reference_port','session_id','soft_audio_cancel_ms'):
+        value=getattr(args,key)
+        if value is not None:command+=['--'+key.replace('_','-'),str(value)]
+    if args.compact_logs:command+=['--compact-logs']
     from vivis.runtime.show import main
     # Validate asset hashes, limits and ownership before any hardware access.
     if args.check:
@@ -228,8 +240,9 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
             raise KeyboardInterrupt
         previous = signal.signal(signal.SIGTERM, interrupt)
         try:
-            with vision_service(config_path, output, required):
+            with vision_service(config_path, output, required,wait_ready=not args.overlap_warmup) as vision:
                 try:
+                    if args.overlap_warmup:return main(command,vision_readiness=vision)
                     return main(command)
                 except RuntimeError as exc:
                     if str(exc).startswith(('Operator stop','Stopped during')):

@@ -14,17 +14,19 @@ from vivis.paths import ROOT
 PROCESSING_VERSION='r128-compand-pauses-v2'
 
 TEXTS={
-    'welcome':'你好，我是小帅。想听歌，可以说播放白骨夫人。想让我模仿你的表情，可以说开始表情跟随。',
-    'menu':'我可以表演白骨夫人，也可以模仿你的表情。你想选哪一个？',
-    'clarify':'想听歌，请说播放白骨夫人。想让我模仿你，请说开始表情跟随。',
-    'standby':'好的，我先休息一会儿。',
+    'welcome':'我在，请说。',
+    'menu':'我可以表演白骨夫人、魏总剧本，也可以模仿你的表情。你想选哪一个？',
+    'clarify':'你可以说，播放白骨夫人，播放魏总剧本，或者开始表情跟随。',
+    'standby':'好的，我先休息。有需要再叫我。',
+    'interaction':'好的，我们继续。',
     'fault':'刚才出了点问题，我先停下来。请检查设备，再重新启动。',
-    'identity':'我是小帅，可以为你表演白骨夫人，也可以模仿你的表情。',
+    'identity':'我是小帅，可以为你表演白骨夫人、魏总剧本，也可以模仿你的表情。',
     'stop_test':'停止。结束。退出。不用学了。待机。休息一下。自己玩一会儿。',
     'select_test':'播放白骨夫人。开始表情跟随。',
     'test_stop':'停止。','test_end':'结束。','test_exit':'退出。',
     'test_idle':'休息一下。','test_selfplay':'自己玩一会儿。',
-    'test_mirror':'开始表情跟随。','test_song':'播放白骨夫人。'
+    'test_mirror':'开始表情跟随。','test_song':'播放白骨夫人。',
+    'test_wake':'小帅。','test_return':'不用播了。'
 }
 
 

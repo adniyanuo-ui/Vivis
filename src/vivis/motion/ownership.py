@@ -156,18 +156,20 @@ class MojiaPlaybackGaze:
     def set_audio_time(self,seconds,duration):
         self.audio_seconds,self.duration=seconds,duration
 
-    def apply(self,base,last,dt,now):
+    def apply(self,base,last,dt,now,attention_hold=False):
         self.returning=self.returning or self.audio_seconds>=max(0.,self.duration-self.controller.return_window(self.previous[-1]))
         returning=self.returning
+        attention_hold=attention_hold and not returning
         applied_neck=self.scheduler.filtered_position if self.neck and self.scheduler is not None else None
         packet=self.receiver.poll(now)
         self.previous,d=self.controller.step(packet,self.previous,dt,now,
-                                             returning=returning,applied_neck=applied_neck)
+                                             returning=returning,applied_neck=applied_neck,
+                                             **({'attention_hold':True} if attention_hold else {}))
         result=np.array(base,copy=True);result[self.controller_columns]=self.previous
         if self.platform is not None:
             self.platform_returning=self.platform_returning or self.audio_seconds>=max(0.,
                 self.duration-self.platform.reference.return_window())
-            goals=self.platform.step(packet,d['state'],dt,now,
+            goals=self.platform.step(packet,'holding' if attention_hold and not d['returning_to_center'] else d['state'],dt,now,
                                      returning=self.platform_returning or d['returning_to_center'])
             for sid,value in goals.items():result[self.ids.index(sid)]=value
             d['independent_neck' if self.independent else 'parallel_neck']=self.platform.diagnostic

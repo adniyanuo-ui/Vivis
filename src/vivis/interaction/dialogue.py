@@ -1,5 +1,6 @@
 """P1 local voice selection, cancellation and socially responsive standby."""
 import argparse
+import copy
 from datetime import datetime
 import fcntl
 import json
@@ -16,8 +17,9 @@ import uuid
 
 from vivis.paths import ROOT
 from vivis.runtime.robot import Robot
-from vivis.runtime.developer import check_competitors
+from vivis.runtime.developer import check_competitors,preview_state
 from vivis.interaction.intents import IntentRouter
+from vivis.interaction.session import SessionPolicy,STANDBY,INTERACTION
 from vivis.motion.mapping import read_json
 from vivis.hardware.feetech.sdk import check_serial_access
 from vivis.hardware.feetech.protocol import ProtocolError
@@ -30,8 +32,10 @@ def dependencies(config,listener_only=False):
     if 'asr_final' in speech:
         for k in ('model','tokens'):required.append(ROOT/speech['asr_final']['directory']/speech['asr_final'][k])
     if not listener_only:
-        required.extend([ROOT/'outputs/a2f/build/a2f_chunk_probe',ROOT/'outputs/a2f/model_bundle/model.json'])
-        for name in ('welcome','menu','clarify','standby','identity','fault'):required.append(ROOT/speech['prompts']/(name+'.wav'))
+        catalog=read_json(ROOT/config['programs'])
+        if any(p['kind']=='runtime_a2f' for p in catalog['programs']):
+            required.extend([ROOT/'outputs/a2f/build/a2f_chunk_probe',ROOT/'outputs/a2f/model_bundle/model.json'])
+        for name in ('welcome','menu','clarify','standby','interaction','identity','fault'):required.append(ROOT/speech['prompts']/(name+'.wav'))
         perception=read_json(ROOT/'configs/perception/face_landmarker.json')
         required.extend(ROOT/perception[k] for k in ('python','model'))
     for path in required:
@@ -49,11 +53,17 @@ def dependencies(config,listener_only=False):
 def program_command(program,robot,folder,speech,settings):
     stop=folder.with_suffix('.cancel');base=[sys.executable,'-m']
     common=['--robot',str(robot.path),'--output',str(folder),'--session-stop-file',str(stop)]
-    if program is None:
-        return base+['vivis.interaction.standby',*common,'--seconds',str(settings['standby_seconds']),
-                     '--config',str(ROOT/settings['standby'])]+(['--overlap-warmup'] if settings.get('overlap_warmup',False) else [])
+    if program is None or program['kind']=='interaction':
+        mode=INTERACTION if program else STANDBY
+        return base+['vivis.interaction.standby',*common,'--seconds',str(settings[mode+'_seconds']),
+                     '--config',str(ROOT/settings[mode])]+(['--overlap-warmup'] if settings.get('overlap_warmup',False) else [])
     if not settings.get('diagnostics',False):common+=['--compact-logs']
     if settings.get('overlap_warmup',False):common+=['--overlap-warmup']
+    if program['kind']=='prerecorded':
+        if program.get('realtime_response',False):raise ValueError('Prepared programs cannot enable a social expression overlay')
+        return base+['vivis.interaction.prerecorded',*common,'--work',program['work'],'--repeat','1',
+            '--audio-reference-port',str(speech['aec']['reference_port']),'--session-id',folder.name,
+            '--soft-audio-cancel-ms',str(settings['soft_audio_cancel_ms'])]
     if program['kind']=='runtime_a2f':
         response=program.get('realtime_response',False)
         if type(response) is not bool:raise ValueError('Program realtime_response must be boolean')
@@ -87,7 +97,7 @@ class Worker:
                         self.preparation['last_message']=line.rstrip();print(line.rstrip(),flush=True)
                         try:events.put_nowait(dict(kind='worker_preparation',pid=self.process.pid,state=state,message=line.rstrip()))
                         except queue.Full:pass
-                    if any(text in line for text in ('EXPRESSION FOLLOW START','ROUND 1/1 START','STANDBY START')):
+                    if any(text in line for text in ('EXPRESSION FOLLOW START','ROUND 1/1 START','STANDBY START','INTERACTION START')):
                         self.ready=True
                         try:events.put_nowait(dict(kind='worker_ready',pid=self.process.pid))
                         except queue.Full:pass
@@ -174,32 +184,43 @@ def main(argv=None):
     if type(settings.get('overlap_warmup',False)) is not bool:parser.error('Invalid overlapping warmup switch')
     if args.seconds is not None and (not math.isfinite(args.seconds) or args.seconds<=0):parser.error('Invalid duration')
     if args.listen_only and args.text_input:parser.error('Choose microphone-only or typed-input mode')
-    catalog=read_json(ROOT/settings['programs']);router=IntentRouter(catalog)
+    catalog=read_json(ROOT/settings['programs'])
     robot=Robot(args.robot or ROOT/settings['robot']);speech,missing=dependencies(settings,listener_only=args.listen_only)
+    wake_words=settings.get('wake_words') or robot.definition.get('identity',{}).get('wake_words')
+    if wake_words is None:wake_words=[robot.definition.get('identity',{}).get('display_name',robot.definition['name'])]
+    router=IntentRouter(catalog,wake_words=wake_words)
+    session=SessionPolicy(p['id'] for p in catalog['programs'])
     if args.simulate_text is not None:
-        active=False
         for text in args.simulate_text:
-            intent=router.parse(text,active)
-            if intent['kind']=='select':active=True
-            elif intent['kind']=='standby':active=False
-            print(json.dumps(dict(text=text,intent=intent,hardware_opened=False),ensure_ascii=False))
+            before=session.mode
+            intent=router.parse(text,session.mode=='task',current_program=session.desired if session.mode=='task' else None,state=session.mode)
+            session.request(intent)
+            print(json.dumps(dict(text=text,intent=intent,mode_before=before,mode_after=session.mode,hardware_opened=False),ensure_ascii=False))
         return 0
     if args.check:
         # Plans are pure and validate model-specific ownership without devices.
         from vivis.interaction.follow import plan as follow_plan
         from vivis.interaction.standby import plan as standby_plan
         f=read_json(ROOT/'configs/interaction/expression_follow.json');f['tracking_enabled']=True
-        follow_plan(robot,f,1.);standby_plan(robot,read_json(ROOT/settings['standby']),1.)
+        follow_plan(robot,f,1.)
+        standby_plan(robot,read_json(ROOT/settings['standby']),1.)
+        standby_plan(robot,read_json(ROOT/settings['interaction']),1.)
         for p in catalog['programs']:
-            if p['kind']=='runtime_a2f':robot.work(p['work'])
+            if p['kind'] in ('runtime_a2f','prerecorded'):robot.work(p['work'])
         print(json.dumps(dict(offline_valid=True,programs=[p['title'] for p in catalog['programs']],
-            missing_dependencies=missing,hardware_opened=False,requires_onsite=['ASR at intended distance','speaker double-talk/AEC','smooth standby motion']),ensure_ascii=False));return 0
+            modes=[STANDBY,INTERACTION,'task'],wake_words=wake_words,initial_mode=STANDBY,
+            missing_dependencies=missing,hardware_opened=False,requires_onsite=['wake ASR at intended distance','speaker double-talk/AEC','smooth mode transitions']),ensure_ascii=False));return 0
     if missing:parser.error('Missing optional P1 assets; run python3 tools/setup_p1.py and setup_p0.py: '+str(missing))
     if not args.listen_only:
         check_competitors(True)
+        if preview_state() is not None:
+            raise RuntimeError('已有独立视觉服务；请先关闭，再启动P1以保证真正待机时释放相机')
         try:check_serial_access(robot.motion_profile()['port'])
         except ProtocolError as exc:parser.error(str(exc))
-    output=args.output or ROOT/'outputs/p1'/datetime.now().strftime('%Y%m%d_%H%M%S_%f');output.mkdir(parents=True,exist_ok=False)
+    output=(args.output or ROOT/'outputs/p1'/datetime.now().strftime('%Y%m%d_%H%M%S_%f')).resolve();output.mkdir(parents=True,exist_ok=False)
+    speech_effective=copy.deepcopy(speech)
+    speech_effective.update(wake_words=wake_words,programs=str((ROOT/settings['programs']).resolve()))
+    speech_path=output/'speech_effective.json';speech_path.write_text(json.dumps(speech_effective,ensure_ascii=False,indent=2)+'\n')
     (output/'effective.json').write_text(json.dumps(dict(config=settings,robot=str(robot.path),speech=speech),ensure_ascii=False,indent=2)+'\n')
     lock_path=ROOT/'outputs/runtime/p1.lock';lock_path.parent.mkdir(parents=True,exist_ok=True)
     lock=lock_path.open('a')
@@ -212,8 +233,9 @@ def main(argv=None):
             with control.open('a') as probe:fcntl.flock(probe,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:
             lock.close();raise RuntimeError('已有节目占用控制权，请先停止它，再启动P1语音管理器')
-    events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_thread=None;desired=None;active_program=None
+    events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_thread=None;active_target=None;active_program=None
     quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;preparation={};log=(output/'events.jsonl').open('w')
+    ready=False
     def request_shutdown(*_):
         nonlocal quitting
         quitting=True
@@ -227,21 +249,27 @@ def main(argv=None):
         if not force and now-last_published<.2:return
         last_published=now
         state=dict(schema_version='vivis-program-state-1.0',updated_monotonic=time.monotonic(),
-            phase=phase,active_program=active_program,desired_program=desired,error=fault,output=str(output),self_check=preparation)
+            phase=phase,mode=session.mode_of(active_target) if active_target is not None else session.mode,
+            desired_mode=session.mode,active_program=active_program,desired_program=session.desired if session.mode=='task' else None,
+            microphone_active=ready and asr is not None and asr.poll() is None,
+            microphone_pid=getattr(asr,'pid',None),
+            wake_words=wake_words,error=fault,output=str(output),self_check=preparation)
         path=ROOT/'outputs/runtime/program_status.json';temp=path.with_suffix('.tmp');temp.write_text(json.dumps(state,ensure_ascii=False)+'\n');temp.replace(path)
     def start_worker(target):
-        nonlocal turn,active_program,phase,preparation
-        turn+=1;folder=output/f'{turn:04d}_{target or "standby"}'
-        program=next((p for p in catalog['programs'] if p['id']==target),None) if target else None
+        nonlocal turn,active_target,active_program,phase,preparation
+        turn+=1;folder=output/f'{turn:04d}_{target}'
+        program=(dict(id=INTERACTION,title='交互态',kind='interaction') if target==INTERACTION else None
+                 if target==STANDBY else next(p for p in catalog['programs'] if p['id']==target))
         command=program_command(program,robot,folder,speech,settings)
-        active_program=target;phase='preparing' if target else 'returning_to_standby';preparation=dict(state='pending')
-        record('start',program=target,session=folder.name);print('准备：'+(program['title'] if program else '待机'),flush=True)
+        active_target=target;active_program=target if session.mode_of(target)=='task' else None
+        phase='preparing';preparation=dict(state='pending')
+        record('start',program=active_program,mode=session.mode_of(target),session=folder.name);print('准备：'+(program['title'] if program else '真正待机'),flush=True)
         return Worker(command,folder,events)
     gate=EventGate(settings['max_event_age_s'])
     try:
         if not args.text_input:
             asr_log=(output/'asr.log').open('w')
-            asr=subprocess.Popen([str(ROOT/speech['python']),'-m','vivis.speech.listen','--config',str(ROOT/settings['speech'])],
+            asr=subprocess.Popen([str(ROOT/speech['python']),'-m','vivis.speech.listen','--config',str(speech_path)],
                 cwd=ROOT,env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'PYTHONNOUSERSITE':'1'},stdout=subprocess.PIPE,
                 stderr=asr_log,text=True,start_new_session=True)
             def read_asr():
@@ -261,7 +289,8 @@ def main(argv=None):
             threading.Thread(target=read_text,daemon=True).start()
         prompt=None if args.listen_only else PromptPlayer(robot,speech)
         ready=args.text_input
-        print('P1：白骨夫人／表情跟随。语音退出节目后待机；Ctrl+C退出管理器。',flush=True)
+        print('P1三级状态：待机→唤醒交互→任务。停止／退出回交互；待机／自己玩去吧回待机。Ctrl+C退出管理器。',flush=True)
+        print('唤醒词：'+'、'.join(wake_words)+'；管理器运行期间持续监听。',flush=True)
         while True:
             now=time.monotonic()
             if args.seconds is not None and now-started>=args.seconds:quitting=True
@@ -277,33 +306,36 @@ def main(argv=None):
                     record('speech_fault',detail=event);continue
                 if event.get('kind')=='ready':
                     ready=True;record('speech_ready',detail=event)
-                    print('麦克风已就绪，可以说指令。'+('本次只识别，不驱动机器人。' if args.listen_only else '请在欢迎语结束后选择节目。'),flush=True)
-                    if prompt:prompt.play('welcome')
+                    print('麦克风已就绪，请说唤醒词。'+('本次只识别，不驱动机器人。' if args.listen_only else '当前为真正待机，摄像头关闭。'),flush=True)
                     continue
-                if event.get('kind')=='worker_ready' and worker and event['pid']==worker.process.pid:
-                    phase='active' if active_program else 'standby';record('worker_ready',program=active_program);continue
+                if event.get('kind')=='worker_ready' and worker and worker.cancelled_at is None and event['pid']==worker.process.pid:
+                    phase=session.mode_of(active_target);record('worker_ready',program=active_program,mode=phase)
+                    print('状态：'+{STANDBY:'①待机（摄像头关闭，等待唤醒）',INTERACTION:'②交互态','task':'③任务执行'}[phase],flush=True)
+                    continue
                 if event.get('kind')=='worker_preparation' and worker and event['pid']==worker.process.pid:
                     if event['state'] is not None:preparation['state']=event['state']
                     preparation['last_message']=event['message']
                     record('preparation',program=active_program,**preparation);continue
                 if not gate.accept(event,time.monotonic()):continue
-                intent=router.parse(event.get('text',''),active_program is not None,current_program=active_program)
+                intent=router.parse(event.get('text',''),session.mode=='task',
+                    current_program=session.desired if session.mode=='task' else None,state=session.mode)
                 stamp=event.get('speech_end_monotonic') or event['captured_end_monotonic']
-                if prompt and prompt.contains(stamp) and intent['kind']!='standby':
+                if prompt and prompt.contains(stamp) and intent['kind'] not in ('standby','interaction'):
                     record('prompt_turn_ignored',text=event['text']);continue
                 record('intent',text=event['text'],intent=intent,metrics=event.get('metrics',{}))
-                label={'standby':'待机','ignore':'未匹配','prompt':'节目说明'}.get(intent['kind'],intent['kind'])
+                label={'standby':'真正待机','interaction':'回到交互','wake':'唤醒交互','ignore':'未匹配','prompt':'交互问答'}.get(intent['kind'],intent['kind'])
                 if intent['kind']=='select':label='选择'+next(p['title'] for p in catalog['programs'] if p['id']==intent['program'])
                 if fault:label+='；未执行，管理器处于故障状态，请Ctrl+C后检查日志并重启'
                 print('识别：'+event['text']+' → '+label,flush=True)
-                if args.listen_only or fault:continue
-                if intent['kind'] in ('select','standby'):
+                if fault:continue
+                restart=session.request(intent)
+                if args.listen_only:
+                    session.pending_prompt=None;phase=session.mode;continue
+                if intent['kind'] in ('wake','select','standby','interaction','prompt'):
                     if prompt:prompt.stop()
-                    desired=intent.get('program')
-                    if worker and (intent['kind']=='select' or active_program is not None):
+                    if worker and (session.desired!=active_target or restart):
                         worker.cancel();phase='stopping'
                         record('cancel_requested',program=active_program,reason=event['text'])
-                elif intent['kind']=='prompt' and active_program is None and prompt:prompt.play(intent['name'])
             if prompt:prompt.poll()
             if worker is not None:
                 code=worker.process.poll()
@@ -312,10 +344,10 @@ def main(argv=None):
                     worker.kill_owned_group();worker.finish();preparation.update(worker.preparation)
                     record('worker_exit',program=active_program,code=code,cancelled=cancelled,self_check=preparation)
                     failed_log=worker.folder.with_suffix('.log') if code not in (0,130) else None
-                    if not cancelled:desired=None
-                    worker=None;active_program=None
+                    session.completed(active_target,cancelled)
+                    worker=None;active_target=None;active_program=None
                     if failed_log is not None:
-                        fault='Program failed; see '+str(failed_log);phase='fault';desired=None
+                        fault='Program failed; see '+str(failed_log);phase='fault';session.pending_prompt=None
                         print('节目故障，已停止；管理器将退出，处理后请重新启动。日志：'+str(failed_log),flush=True)
                         publish(True)
                         if prompt and not quitting:
@@ -331,7 +363,10 @@ def main(argv=None):
                 if prompt:prompt.stop()
                 if worker:worker.cancel()
                 else:break
-            elif not args.listen_only and ready and worker is None and fault is None:worker=start_worker(desired)
+            elif not args.listen_only and ready and worker is None and fault is None:worker=start_worker(session.desired)
+            if not quitting and worker is not None and prompt:
+                spoken=session.take_prompt(active_target,getattr(worker,'ready',False) and worker.cancelled_at is None)
+                if spoken:prompt.play(spoken)
             publish();time.sleep(.02)
     except BaseException as exc:
         fault=str(exc);raise
@@ -361,6 +396,8 @@ def main(argv=None):
         if cleanup_errors:fault=fault or 'Resource cleanup failed: '+'; '.join(cleanup_errors)
         phase='fault' if fault else 'stopped';cleanup(lambda:publish(True));cleanup(lambda:record('closed',error=fault));cleanup(log.close)
         cleanup(lambda:(output/'summary.json').write_text(json.dumps(dict(phase=phase,error=fault,program_sessions=turn,
+            last_mode=session.mode_of(active_target) if active_target is not None else session.mode,
+            desired_mode=session.mode,wake_words=wake_words,microphone_process_starts=int(asr is not None),
             cleanup_errors=cleanup_errors,listen_only=args.listen_only,text_input=args.text_input,
             elapsed_seconds=time.monotonic()-started),ensure_ascii=False,indent=2)+'\n'))
         for s,h in handlers.items():signal.signal(s,h)

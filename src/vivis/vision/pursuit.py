@@ -254,12 +254,13 @@ class MojiaPursuit:
             self.eye_motion, self.eye_motion_at = float(np.sign(delta)), now
             self.eye_observation = float(position)
 
-    def step(self, packet, previous, dt, now, returning=False, applied_neck=None):
+    def step(self, packet, previous, dt, now, returning=False, applied_neck=None,attention_hold=False):
         c, n = self.config['control'], self.config['neck']
         anchor,vertical=self.camera_yaw,self.camera_pitch
         applied = [axis_normalized(anchor, previous[self.ids.index(anchor['id'])]),
                    axis_normalized(vertical,previous[self.ids.index(vertical['id'])]) if vertical else 0.]
-        xy, weight, state = self.policy.step(packet, now, dt, applied)
+        options={'attention_hold':True} if attention_hold else {}
+        xy, weight, state = self.policy.step(packet, now, dt, applied,**options)
         lost_return=state in ('releasing','idle')
         return_center=returning or lost_return
         if not self.measured_eye:
@@ -274,13 +275,14 @@ class MojiaPursuit:
         for a in c['axes']:
             coordinate=0 if a['coordinate']=='x' else 1
             result[self.ids.index(a['id'])] = 2047. if returning else 2047*(1-weight)+weight*axis_position(a, xy[coordinate])
+            if attention_hold and not return_center:result[self.ids.index(a['id'])]=previous[self.ids.index(a['id'])]
         if self.neck:
             col = self.ids.index(32);position = previous[col]
             eye = eye_offset
             desired = 0.
             if self.upstream is not None:
                 if self.upstream.position is None:self.upstream.reset(position)
-                if return_center:self.assist.reset()
+                if return_center or attention_hold:self.assist.reset()
                 else:
                     span=abs(anchor['positive' if eye>=0 else 'negative']-anchor['neutral'])
                     desired=self.assist.step(packet,state,eye,eye_motion,span,eye_fresh)
@@ -301,6 +303,8 @@ class MojiaPursuit:
                 blend=u*u*u*(10+u*(-15+6*u))
                 goal=self.return_origin+(2047-self.return_origin)*blend
                 desired=(2047-self.return_origin)*30*u*u*(1-u)*(1-u)/self.return_duration
+            elif attention_hold:
+                self.assist.reset();goal=position
             else:
                 self.return_started=self.return_origin=self.return_duration=None
                 span = abs(anchor['positive' if eye >= 0 else 'negative']-anchor['neutral'])
@@ -320,7 +324,7 @@ class MojiaPursuit:
             eye_feedback_age_s=now-self.eye_observed_at if self.measured_eye else None,
             camera_eye=c.get('camera_eye'),camera_eye_id=self.camera_eye_id,
             returning_to_center=return_center,
-            neck_assist_reason='returning' if returning else 'lost_face_return' if lost_return else self.assist.reason,
+            neck_assist_reason='returning' if returning else 'lost_face_return' if lost_return else 'attention_pause' if attention_hold else self.assist.reason,
             neck_requested_velocity=desired if self.neck else 0.,
             neck_return_duration_s=self.return_duration if self.neck and return_center else None,
             upstream_trajectory=(dict(self.upstream.last_diagnostic) if self.upstream is not None else {'enabled':False}),

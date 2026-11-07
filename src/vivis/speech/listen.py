@@ -23,8 +23,10 @@ def recognizer(config):
     a=config['asr'];folder=ROOT/a['directory']
     extra={}
     if a.get('hotwords_score',0)>0:
-        catalog=json.loads((ROOT/'configs/interaction/programs.json').read_text())
-        words=set(catalog['standby_phrases'])|{alias for p in catalog['programs'] for alias in p['aliases']}
+        catalog=json.loads((ROOT/config.get('programs','configs/interaction/programs.json')).read_text())
+        words=(set(catalog['standby_phrases'])|set(catalog.get('exit_phrases',[]))
+               |set(config.get('wake_words',catalog.get('wake_words',[])))
+               |{alias for p in catalog['programs'] for alias in p['aliases']})
         tokens={line.split()[0] for line in (folder/a['tokens']).read_text().splitlines() if line.strip()}
         path=ROOT/'outputs/speech/command_hotwords.txt';path.parent.mkdir(parents=True,exist_ok=True)
         path.write_text('\n'.join(' '.join(w) for w in sorted(words) if all(char in tokens for char in w))+'\n')
@@ -50,7 +52,8 @@ class Decoder:
                 tokens=str(folder/final['tokens']),num_threads=final['threads'],language=final['language'],use_itn=False)
             self.pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='asr-final')
         from vivis.interaction.intents import IntentRouter
-        self.router=IntentRouter(json.loads((ROOT/'configs/interaction/programs.json').read_text()))
+        self.router=IntentRouter(json.loads((ROOT/config.get('programs','configs/interaction/programs.json')).read_text()),
+                                 wake_words=config.get('wake_words'))
 
     def reset(self):
         self.stream=self.engine.create_stream();self.last_text='';self.last_changed=None

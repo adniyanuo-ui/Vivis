@@ -39,7 +39,12 @@ printf 'Expression-follow offline check passed (no audio/A2F/devices).\n'
 printf 'Joint expression/eye/neck offline check passed.\n'
 "$PYTHON" -m vivis.interaction.dialogue --check > /dev/null
 "$PYTHON" -m vivis.interaction.standby --check > /dev/null
-printf 'P1 dialogue and standby offline configuration checks passed.\n'
+"$PYTHON" -m vivis.interaction.programs interaction --check > /dev/null
+for program in baigufuren wz2; do
+    "$PYTHON" -m vivis.interaction.programs "$program" --robot configs/robots/xiaoshuai/robot.json --check > /dev/null
+    printf 'Prepared P1 program check passed: %s (no A2F/devices).\n' "$program"
+done
+printf 'P1 three-mode dialogue, standby and interaction offline configuration checks passed.\n'
 "$PYTHON" -m unittest discover -s tests -p 'test_*.py'
 if git rev-parse --is-inside-work-tree > /dev/null 2>&1; then
     git diff --check

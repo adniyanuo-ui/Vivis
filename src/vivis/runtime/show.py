@@ -329,7 +329,7 @@ def unload_tongue(profile,report):
     finally:bus.close()
 
 
-def main(argv=None):
+def main(argv=None,vision_readiness=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--robot',type=Path,help='Developer robot definition; resolves canonical hardware and work assets')
     parser.add_argument('--work',default='wz2')
@@ -357,6 +357,11 @@ def main(argv=None):
     parser.add_argument('--usb-volume-times-three',action='store_true',help='Use the saved original USB volume reference, never cumulative gain')
     parser.add_argument('--hold-vertical-eyes',action='store_true',help='Hold ID7/22: neither song nor tracking may send them position commands')
     parser.add_argument('--check',action='store_true')
+    parser.add_argument('--session-stop-file',type=Path,help=argparse.SUPPRESS)
+    parser.add_argument('--audio-reference-port',type=int,help=argparse.SUPPRESS)
+    parser.add_argument('--session-id',help=argparse.SUPPRESS)
+    parser.add_argument('--soft-audio-cancel-ms',type=int,default=0,help=argparse.SUPPRESS)
+    parser.add_argument('--compact-logs',action='store_true',help=argparse.SUPPRESS)
     args=parser.parse_args(argv)
     if not 1<=args.repeat<=20:parser.error('Repeat must be 1..20')
     if not 1<=args.home_speed<=32767:parser.error('Home speed must be within 1..32767')
@@ -389,6 +394,13 @@ def main(argv=None):
     profile['face_update_hz']=min(args.face_fps,args.control_fps)
     profile['control_hz']=args.control_fps
     profile['snapshot_chunk_bytes']=2
+    if not 0<=args.soft_audio_cancel_ms<=100:parser.error('Invalid audio cancellation fade')
+    if args.soft_audio_cancel_ms:profile['soft_audio_cancel_ms']=args.soft_audio_cancel_ms
+    if args.compact_logs:profile.update(retain_event_limit=600,capture_serial_trace=False)
+    if args.session_stop_file is not None:profile['session_stop_file']=str(args.session_stop_file.resolve())
+    if args.audio_reference_port is not None:
+        if not 1024<=args.audio_reference_port<=65535 or not args.session_id:parser.error('Invalid audio reference session')
+        profile['audio_reference']=dict(host='127.0.0.1',port=args.audio_reference_port,session_id=args.session_id)
     if args.baud is not None:profile['baud']=args.baud
     home_inventory=robot.home(args.mode)
     if profile.get('exclude_held_axes_from_session') and not args.home_only:
@@ -448,7 +460,9 @@ def main(argv=None):
         stopped=True
     handlers={sig:signal.signal(sig,stop) for sig in (signal.SIGINT,signal.SIGTERM)}
     def guard():
-        if stopped or stop_file.exists():raise RuntimeError('Operator stop')
+        if stopped or stop_file.exists() or args.session_stop_file is not None and args.session_stop_file.exists():
+            raise RuntimeError('Operator stop')
+        if vision_readiness is not None:vision_readiness.check()
     summary=dict(completed=False,rounds=[],error=None,startup_events=[],tongue_disabled_after=False,mouth_motion_gain=args.mouth_gain)
     summary.update(repeat_mode='independent_full_cycle',requested_rounds=args.repeat,cleanup_attempted=False,
                    control_hz=args.control_fps,baud=profile['baud'],source_fps=fps,developer_mode=args.mode,
@@ -487,11 +501,12 @@ def main(argv=None):
                 summary['homing']=startup['homing']
                 guard();override=None
                 if args.mode!='face':
+                    if vision_readiness is not None:vision_readiness.wait_ready(guard)
                     receiver=TargetReceiver(config);receiver.wait_ready()
                     override=MojiaPlaybackGaze(config,profile,ids,receiver,
                         ROOT/'outputs/runtime/control_status.json',lap,args.repeat,
                         neck=args.mode=='eyes-neck')
-                print(f'ROUND {lap}/{args.repeat} START',flush=True)
+                guard();print(f'ROUND {lap}/{args.repeat} START',flush=True)
                 result=play(profile,ids,trajectory,fps,args.audio,directory/'playback_log.json',stop_file,gaze_override=override)
                 if not result['completed'] or not result['full_clip_requested']:
                     raise RuntimeError('Independent round did not complete the full clip')

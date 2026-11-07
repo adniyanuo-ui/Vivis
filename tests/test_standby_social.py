@@ -14,11 +14,12 @@ import numpy as np
 from vivis.paths import ROOT
 from vivis.motion.mapping import read_json
 from vivis.runtime.robot import Robot
-from vivis.interaction.standby import plan,StandbyGaze,main
+from vivis.interaction.standby import plan,StandbyGaze,main as idle_main
 from vivis.interaction.animation import FrameMapper
 
 
-def settings():return read_json(ROOT/'configs/interaction/standby.json')
+def settings():return read_json(ROOT/'configs/interaction/interaction.json')
+def main(argv=None):return idle_main(argv,default_config=ROOT/'configs/interaction/interaction.json')
 def robot(name='xiaoshuai'):return Robot(ROOT/f'configs/robots/{name}/robot.json')
 def packet(now,strength=1.,target=True):
     return dict(schema_version='vivis-person-target-1.0',timestamp_monotonic=now,sequence=int(now*60),
@@ -173,7 +174,7 @@ class StandbySocialTests(unittest.TestCase):
 
     def test_idle_overlay_does_not_conceal_an_out_of_bounds_tracking_target(self):
         profile,ids,_,mapper,source,_=plan(robot(),settings(),1.)
-        gaze=StandbyGaze(source.tracking,profile,ids,SimpleNamespace(),source)
+        gaze=StandbyGaze(source.tracking,profile,ids,SimpleNamespace(max_age=.3,poll=lambda _:None),source)
         invalid=mapper.neutral.copy();invalid[ids.index(32)]=9999
         with patch('vivis.motion.ownership.MojiaPlaybackGaze.apply',return_value=invalid):
             with self.assertRaisesRegex(ValueError,'exceeds command limits'):
@@ -208,13 +209,13 @@ class StandbySocialTests(unittest.TestCase):
                 self.assertTrue(summary['smile_enabled']);self.assertFalse(summary['a2f_used'])
 
     def test_legacy_no_camera_mode_and_invalid_tuning_rejected_before_devices(self):
-        original=(ROOT/'configs/interaction/standby.json').read_bytes()
+        original=(ROOT/'configs/interaction/interaction.json').read_bytes()
         with patch('subprocess.Popen',side_effect=AssertionError('opened')),redirect_stdout(io.StringIO()) as out:
             main(['--tracking','off','--smile','off','--check'])
         report=json.loads(out.getvalue());self.assertFalse(report['tracking_enabled']);self.assertFalse(report['smile_enabled'])
         for value in ('nan','-1','.6'):
             with redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):main(['--smile-strength',value,'--check'])
-        self.assertEqual((ROOT/'configs/interaction/standby.json').read_bytes(),original)
+        self.assertEqual((ROOT/'configs/interaction/interaction.json').read_bytes(),original)
 
     def test_failed_camera_readiness_never_prepares_or_moves_actuators(self):
         with tempfile.TemporaryDirectory() as tmp,redirect_stdout(io.StringIO()), \

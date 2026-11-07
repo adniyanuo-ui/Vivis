@@ -105,7 +105,8 @@ class GazePolicy:
         self.weight = 0.
         self.last_seen = None
 
-    def step(self, packet, now, dt, applied_xy):
+    def step(self, packet, now, dt, applied_xy, attention_hold=False):
+        if type(attention_hold) is not bool:raise ValueError('Invalid attention hold intent')
         if not finite(dt) or not 0 < dt <= .1 or not np.isfinite(applied_xy).all():
             raise ValueError('Invalid gaze clock or applied position')
         c = self.control
@@ -116,7 +117,7 @@ class GazePolicy:
                 visible = packet['target'] is not None
             except (ValueError, KeyError, TypeError, AttributeError):
                 pass
-        if visible:
+        if visible and not attention_hold:
             vertical = self.vertical_enabled and (c['camera_mount']=='fixed' or c.get('camera_eye') in ('left','right'))
             target = np.array([packet['target']['x'], packet['target']['y'] if vertical else 0.])
             error = np.sign(target) * np.maximum(0, np.abs(target) - c['deadband'])
@@ -132,7 +133,7 @@ class GazePolicy:
                 desired = c['fixed_gain'] * self.error
             step = c['max_axis_speed'] * dt
             self.xy = np.clip(self.xy + np.clip(desired - self.xy, -step, step), -1, 1)
-            self.last_seen = packet['timestamp_monotonic']
+        if visible:self.last_seen = packet['timestamp_monotonic']
         holding = (self.last_seen is not None
                    and now - self.last_seen <= self.max_age + c['lost_hold_s'])
         engaged = visible or holding
