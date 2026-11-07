@@ -17,6 +17,15 @@ from ._vendor.scservo_sdk import (PortHandler, sms_sts, GroupSyncWrite,
                                   COMM_SUCCESS, COMM_RX_TIMEOUT, COMM_RX_CORRUPT)
 
 
+def check_serial_access(port):
+    """Check presence and permissions without opening or configuring the device."""
+    if isinstance(port,str) and port.startswith('/dev/'):
+        if not os.path.exists(port):raise ProtocolError('Serial device is missing: '+port+'; check USB adapter connection')
+        if not os.access(port,os.R_OK|os.W_OK):
+            command='sudo setfacl -m '+shlex.quote('u:'+getpass.getuser()+':rw')+' '+shlex.quote(port)
+            raise ProtocolError('Serial device access denied: '+port+'; grant current-user access with: '+command)
+
+
 class OfficialSDKBus(Bus):
     def __init__(self, port, baud=1000000, feedback_mode='block',write_mode='position_speed',changed_goals_only=False,trace_path=None,post_goal_quiet_ms=0,sync_group_size=30,sync_group_gap_ms=0,transaction_timeout_ms=None,servo_status_policy='raise',snapshot_chunk_bytes=None):
         if snapshot_chunk_bytes is not None and (type(snapshot_chunk_bytes) is not int or not 1<=snapshot_chunk_bytes<=8):
@@ -42,11 +51,7 @@ class OfficialSDKBus(Bus):
         self.feedback_mode = feedback_mode
         if write_mode not in ['position_speed','position_only']:raise ValueError('Unknown SDK write mode')
         self.write_mode=write_mode
-        if isinstance(port,str) and port.startswith('/dev/'):
-            if not os.path.exists(port):raise ProtocolError('Serial device is missing: '+port+'; check USB adapter connection')
-            if not os.access(port,os.R_OK|os.W_OK):
-                command='sudo setfacl -m '+shlex.quote('u:'+getpass.getuser()+':rw')+' '+shlex.quote(port)
-                raise ProtocolError('Serial device access denied: '+port+'; grant current-user access with: '+command)
+        check_serial_access(port)
         self.handler = PortHandler(port)
         if not self.handler.setBaudRate(baud):
             raise ProtocolError('Official SDK could not open serial port')

@@ -1,5 +1,5 @@
 """P1 intent, cancellation, exclusive program switching, idle and echo contracts."""
-from contextlib import nullcontext,redirect_stdout
+from contextlib import nullcontext,redirect_stdout,redirect_stderr
 import io
 import json
 from pathlib import Path
@@ -206,6 +206,19 @@ class EchoTests(unittest.TestCase):
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_serial_permission_error_precedes_microphone_prompts_and_worker(self):
+        from vivis.hardware.feetech.protocol import ProtocolError
+        with patch('vivis.interaction.dialogue.dependencies',return_value=({},[])), \
+             patch('vivis.interaction.dialogue.check_competitors'), \
+             patch('vivis.interaction.dialogue.check_serial_access',side_effect=ProtocolError('Serial device access denied')) as access, \
+             patch('subprocess.Popen') as process,patch('vivis.interaction.dialogue.PromptPlayer') as prompt, \
+             redirect_stderr(io.StringIO()) as error:
+            with self.assertRaises(SystemExit) as stopped:main([])
+        self.assertEqual(stopped.exception.code,2)
+        access.assert_called_once_with('/dev/ttyCH343USB0')
+        process.assert_not_called();prompt.assert_not_called()
+        self.assertIn('Serial device access denied',error.getvalue())
+
     def test_prompt_cleanup_error_does_not_leave_motion_worker_running(self):
         calls=[]
         class Prompts:
@@ -224,7 +237,8 @@ class SupervisorTests(unittest.TestCase):
             config=root/'p1.json';config.write_text(json.dumps(settings))
             with patch('vivis.interaction.dialogue.ROOT',root), \
                  patch('vivis.interaction.dialogue.dependencies',return_value=(read('configs/perception/speech.json'),[])), \
-                 patch('vivis.interaction.dialogue.check_competitors'),patch('vivis.interaction.dialogue.PromptPlayer',Prompts), \
+                 patch('vivis.interaction.dialogue.check_competitors'),patch('vivis.interaction.dialogue.check_serial_access'), \
+                 patch('vivis.interaction.dialogue.PromptPlayer',Prompts), \
                  patch('vivis.interaction.dialogue.Worker',return_value=worker),patch('sys.stdin',Input()),redirect_stdout(io.StringIO()):
                 with self.assertRaisesRegex(RuntimeError,'audio failed'):
                     main(['--config',str(config),'--robot',str(ROOT/'configs/robots/xiaoshuai/robot.json'),'--text-input'])
@@ -239,7 +253,8 @@ class SupervisorTests(unittest.TestCase):
             with lock_path.open('a') as held:
                 fcntl.flock(held,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 with patch('vivis.interaction.dialogue.ROOT',root),patch('vivis.interaction.dialogue.dependencies',return_value=({},[])), \
-                     patch('vivis.interaction.dialogue.check_competitors'),patch('vivis.interaction.dialogue.PromptPlayer') as prompt, \
+                     patch('vivis.interaction.dialogue.check_competitors'),patch('vivis.interaction.dialogue.check_serial_access'), \
+                     patch('vivis.interaction.dialogue.PromptPlayer') as prompt, \
                      patch('subprocess.Popen') as process:
                     with self.assertRaisesRegex(RuntimeError,'控制权'):
                         main(['--config',str(file),'--robot',str(ROOT/'configs/robots/xiaoshuai/robot.json'),'--text-input'])
@@ -288,7 +303,8 @@ sys.exit(130)
             def command(program,robot,folder,speech,settings):
                 return [sys.executable,str(script),str(folder),str(flag),str(trace),program['id'] if program else 'standby']
             with patch('vivis.interaction.dialogue.ROOT',root),patch('vivis.interaction.dialogue.dependencies',return_value=(read('configs/perception/speech.json'),[])), \
-                 patch('vivis.interaction.dialogue.check_competitors'),patch('vivis.interaction.dialogue.PromptPlayer',Prompts), \
+                 patch('vivis.interaction.dialogue.check_competitors'),patch('vivis.interaction.dialogue.check_serial_access'), \
+                 patch('vivis.interaction.dialogue.PromptPlayer',Prompts), \
                  patch('vivis.interaction.dialogue.program_command',side_effect=command),patch('sys.stdin',Input()),redirect_stdout(io.StringIO()):
                 self.assertEqual(main(['--config',str(config),'--robot',str(ROOT/'configs/robots/xiaoshuai/robot.json'),'--text-input']),0)
             lines=trace.read_text().splitlines();self.assertEqual(len(lines),8)

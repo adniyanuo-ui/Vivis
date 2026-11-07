@@ -19,6 +19,8 @@ from vivis.runtime.robot import Robot
 from vivis.runtime.developer import check_competitors
 from vivis.interaction.intents import IntentRouter
 from vivis.motion.mapping import read_json
+from vivis.hardware.feetech.sdk import check_serial_access
+from vivis.hardware.feetech.protocol import ProtocolError
 
 
 def dependencies(config,listener_only=False):
@@ -165,7 +167,10 @@ def main(argv=None):
         print(json.dumps(dict(offline_valid=True,programs=[p['title'] for p in catalog['programs']],
             missing_dependencies=missing,hardware_opened=False,requires_onsite=['ASR at intended distance','speaker double-talk/AEC','smooth standby motion']),ensure_ascii=False));return 0
     if missing:parser.error('Missing optional P1 assets; run python3 tools/setup_p1.py and setup_p0.py: '+str(missing))
-    if not args.listen_only:check_competitors(True)
+    if not args.listen_only:
+        check_competitors(True)
+        try:check_serial_access(robot.motion_profile()['port'])
+        except ProtocolError as exc:parser.error(str(exc))
     output=args.output or ROOT/'outputs/p1'/datetime.now().strftime('%Y%m%d_%H%M%S_%f');output.mkdir(parents=True,exist_ok=False)
     (output/'effective.json').write_text(json.dumps(dict(config=settings,robot=str(robot.path),speech=speech),ensure_ascii=False,indent=2)+'\n')
     lock_path=ROOT/'outputs/runtime/p1.lock';lock_path.parent.mkdir(parents=True,exist_ok=True)
