@@ -1,0 +1,104 @@
+{
+  "schema_version": "vivis-onsite-asr-observations-1.0",
+  "date": "2026-11-07",
+  "source": "User supplied onsite observations; expected text is user transcription, not audio verified here",
+  "robot": "xiaoshuai",
+  "session": "outputs/p1/20261107_194523_344363",
+  "raw_microphone_saved": false,
+  "command_examples": [
+    {
+      "recognized": "干点啥",
+      "expected_intent": "menu"
+    },
+    {
+      "recognized": "帮我干点啥",
+      "expected_intent": "menu"
+    },
+    {
+      "recognized": "你们帮我干点啥",
+      "expected_intent": "menu"
+    },
+    {
+      "recognized": "你有啥功能",
+      "expected_intent": "menu"
+    },
+    {
+      "recognized": "你会做什么",
+      "expected_intent": "menu"
+    },
+    {
+      "recognized": "嗯有什么功能",
+      "expected_intent": "menu"
+    },
+    {
+      "recognized": "你是谁",
+      "expected_intent": "identity"
+    },
+    {
+      "recognized": "播放魏什么剧版",
+      "expected_intent": "select:wz2"
+    },
+    {
+      "recognized": "播放魏总剧本",
+      "expected_intent": "select:wz2"
+    },
+    {
+      "recognized": "模仿我的表情",
+      "expected_intent": "select:expression-follow"
+    },
+    {
+      "recognized": "模仿表情",
+      "expected_intent": "select:expression-follow"
+    }
+  ],
+  "self_playback_examples": [
+    {
+      "recognized": "我原本活的好好的却被你毁了",
+      "user_reference": "我原本活得好好的，却被你毁了！"
+    },
+    {
+      "recognized": "你凭什么凌晨传我凭什么忽冷忽热",
+      "user_reference": "你凭什么凌晨吵我，凭什么忽冷忽热？"
+    },
+    {
+      "recognized": "好忘没了",
+      "user_reference": "朋友没了，"
+    },
+    {
+      "recognized": "计划费了",
+      "user_reference": "计划废了，"
+    },
+    {
+      "recognized": "那我自己都丢了",
+      "user_reference": "连我自己都丢了。"
+    },
+    {
+      "recognized": "我恨你",
+      "user_reference": "我恨你，"
+    },
+    {
+      "recognized": "这知吗",
+      "user_reference": "恨你这个人，"
+    },
+    {
+      "recognized": "可是我更恨自己明着你奈却还一次次心软一次次被你拖进泥里我的生活全乱了",
+      "user_reference": "可我更恨自己——明知你烂，却还一次次心软，一次次被你拖进泥里。我的生活，全乱了，"
+    },
+    {
+      "recognized": "全烂了",
+      "user_reference": "全乱了！"
+    }
+  ],
+  "observed_runtime": {
+    "aec_enabled": true,
+    "reference_delay_ms": 0,
+    "echo_tail_ms": 200,
+    "first_example_metrics": {
+      "raw_rms": 0.030054666350146093,
+      "clean_rms": 0.012008361503652212,
+      "reference_rms": 0.050582781130611085,
+      "reference_coverage": 1.0
+    }
+  },
+  "use": "Regression analysis and duplex test design; not vocabulary for forcing lyrics or online ASR autocorrection"
+}

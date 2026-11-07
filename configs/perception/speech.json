@@ -26,11 +26,15 @@
     "voices": "voices.bin",
     "tokens": "tokens.txt",
     "lexicon": "lexicon-zh.txt",
-    "speaker_id": 58,
-    "speaker_name": "zm_009",
-    "speed": 1.0,
+    "speaker_id": 66,
+    "speaker_name": "zm_020",
+    "speed": 1.05,
     "threads": 2,
-    "rule_fsts": ["date-zh.fst", "number-zh.fst", "phone-zh.fst"]
+    "rule_fsts": [
+      "date-zh.fst",
+      "number-zh.fst",
+      "phone-zh.fst"
+    ]
   },
   "prompt_level": {
     "method": "r128",

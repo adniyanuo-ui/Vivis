@@ -26,6 +26,7 @@ def recognizer(config):
         catalog=json.loads((ROOT/config.get('programs','configs/interaction/programs.json')).read_text())
         words=(set(catalog['standby_phrases'])|set(catalog.get('exit_phrases',[]))
                |set(config.get('wake_words',catalog.get('wake_words',[])))
+               |{phrase for phrases in catalog.get('questions',{}).values() for phrase in phrases}
                |{alias for p in catalog['programs'] for alias in p['aliases']})
         tokens={line.split()[0] for line in (folder/a['tokens']).read_text().splitlines() if line.strip()}
         path=ROOT/'outputs/speech/command_hotwords.txt';path.parent.mkdir(parents=True,exist_ok=True)

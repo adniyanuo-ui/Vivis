@@ -9,7 +9,7 @@ def normalize(text):
 
 def command_text(text):
     value=normalize(text)
-    for _ in range(3):value=re.sub(r'^(?:小帅|机器人|请你|请|麻烦你|麻烦|帮我|你)', '',value)
+    for _ in range(4):value=re.sub(r'^(?:嗯|呃|小帅|机器人|请你|请|麻烦你|麻烦|帮我|你们|你)', '',value)
     return re.sub(r'(?:好吗|好不好|可以吗|吧|呀|啊|哈|哟|哦|噢|啦|喽|咯|呗|呢|了)+$','',value)
 
 
@@ -18,6 +18,12 @@ class IntentRouter:
         if catalog.get('schema_version')!='vivis-programs-1.0':raise ValueError('Unsupported program catalog')
         self.programs=catalog['programs'];self.sleep={command_text(s) for s in catalog['standby_phrases']}
         self.stop={command_text(s) for s in catalog.get('exit_phrases',[])}
+        questions=catalog.get('questions',{})
+        self.identity={command_text(s) for s in questions.get('identity',['你是谁','叫什么','你叫什么','介绍一下自己'])}
+        self.menu={command_text(s) for s in questions.get('menu',['有哪些节目','有什么节目','节目单','你会什么','能做什么','能帮我做什么','帮助'])}
+        self.observed={command_text(k):v for k,v in catalog.get('observed_asr_commands',{}).items()}
+        if any(v.get('kind')!='select' or v.get('program') not in {p['id'] for p in self.programs}
+               for v in self.observed.values()):raise ValueError('Invalid observed ASR command')
         self.wake_words=wake_words if wake_words is not None else catalog.get('wake_words',['小帅'])
         if (not isinstance(self.wake_words,list) or not self.wake_words
                 or any(not isinstance(w,str) or not 1<=len(normalize(w))<=20 for w in self.wake_words)):
@@ -49,10 +55,11 @@ class IntentRouter:
             return dict(kind='interaction',reason=text)
         if value.startswith(('不要','不用','别','不想','不是','停止是什么意思','怎么停止')):
             return dict(kind='ignore')
-        if value in ('你是谁','是谁','叫什么','你叫什么','介绍一下自己'):
+        if value in self.identity:
             return dict(kind='prompt',name='identity')
-        if value in ('有哪些节目','有什么节目','节目单','你会什么','会什么','能做什么','你能做什么','能帮我做什么','你能帮我做什么','帮助'):
+        if value in self.menu:
             return dict(kind='prompt',name='menu')
+        if value in self.observed:return dict(self.observed[value])
         matches=[p['id'] for p in self.programs if any(normalize(a) in value for a in p['aliases'])]
         if len(matches)>1:return dict(kind='prompt',name='clarify')
         if not matches:

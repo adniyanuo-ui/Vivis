@@ -148,7 +148,9 @@ time.sleep(10)
 ''')
             settings=read_json(ROOT/'configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs'])
             config=root/'p1.json';config.write_text(json.dumps(settings))
+            home_speeds=[]
             def command(program,robot,folder,speech,settings):
+                home_speeds.append(settings.get('_home_speed_counts_s'))
                 return [sys.executable,str(script),str(folder),str(flag),str(trace),program['id'] if program else STANDBY]
             def launch(command,**kwargs):
                 if 'vivis.speech.listen' in command:
@@ -164,6 +166,8 @@ time.sleep(10)
                 self.assertEqual(main(['--config',str(config),'--robot',str(ROOT/'configs/robots/xiaoshuai/robot.json'),
                     '--seconds','3.9','--output',str(root/'run')]),0)
             self.assertEqual(len(launches),1)
+            self.assertIsNone(home_speeds[0])
+            self.assertTrue(all(value==120 for value in home_speeds[1:]))
             lines=trace.read_text().splitlines()
             for a,b in zip(lines[::2],lines[1::2]):self.assertEqual(a.replace('start ','end '),b)
             self.assertEqual([x[6:] for x in lines[::2]],

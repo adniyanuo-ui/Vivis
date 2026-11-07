@@ -12,5 +12,6 @@
   "overlap_warmup": true,
   "diagnostics": false,
   "interaction": "configs/interaction/interaction.json",
-  "interaction_seconds": 600
+  "interaction_seconds": 600,
+  "warm_home_speed_counts_s": 120
 }

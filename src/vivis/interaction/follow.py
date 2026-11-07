@@ -104,8 +104,10 @@ def main(argv=None):
     parser.add_argument('--session-stop-file',type=Path,help=argparse.SUPPRESS)
     parser.add_argument('--compact-logs',action='store_true',help=argparse.SUPPRESS)
     parser.add_argument('--overlap-warmup',action='store_true',help=argparse.SUPPRESS)
+    parser.add_argument('--home-speed',type=int,default=60,help='Single-session homing cap in counts/s')
     parser.add_argument('--check',action='store_true',help='离线检查，不打开相机、串口、音频或模型')
     args=parser.parse_args(argv)
+    if not 1<=args.home_speed<=32767:parser.error('Invalid home speed')
     settings=read_json(args.config)
     if args.gain is not None:settings['gain']=args.gain
     if args.mirror_expression is not None:settings['mirror_expression']=args.mirror_expression=='on'
@@ -132,7 +134,7 @@ def main(argv=None):
         (output/(name+'.json')).write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n')
     motors={m['id']:m for m in profile['motors']}
     startup=robot.startup(active_ids=motors,inventory_ids=ids)
-    home_args=SimpleNamespace(home_speed=60,home_only=False,usb_volume_times_three=False,
+    home_args=SimpleNamespace(home_speed=args.home_speed,home_only=False,usb_volume_times_three=False,
         authorized_tongue_observation=p['authorize'],home_position_recovery=recovery_policy(home.get('disabled_position_recovery')),
         home_sensor_fault_confirmation=home.get('sensor_fault_confirmation',False))
     clearance=recovery_clearance_plan(home,motors)

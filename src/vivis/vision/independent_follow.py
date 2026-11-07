@@ -51,6 +51,8 @@ def validate(config,profile):
                          ('roll_gain_s',.1,5.),('roll_filter_tau_s',.01,1.),('return_duration_s',1.,10.)):
         if not finite(plan[key]) or not low<=plan[key]<=high:raise ValueError('Invalid independent neck '+key)
     motion=settings(plan)
+    if plan.get('roll_control_mode','position') not in ('position','visual_velocity'):
+        raise ValueError('Unknown independent roll control mode')
     if not motion['enabled']:raise ValueError('Independent pitch/roll need bounded trajectory planning')
     return motors
 
@@ -119,14 +121,21 @@ class IndependentFaceFollower:
             motion=self.eye_motion if now-self.eye_motion_at<=age else 0.
             velocity[33]=self.assist.step(image,state,eye,motion,span,True)
             stamp=packet['timestamp_monotonic'];line=packet['target'].get('eye_line_roll_rad')
-            line=line if finite(line) and abs(line)<=math.pi/2 else 0.
+            roll_valid=finite(line) and abs(line)<=math.pi/2
+            line=line if roll_valid else 0.
             if self.stamp is None or stamp>self.stamp:
                 alpha=1. if self.stamp is None else -math.expm1(-(stamp-self.stamp)/self.plan['roll_filter_tau_s'])
                 self.filtered_roll+=alpha*(line-self.filtered_roll);self.stamp=stamp
             ref=self.reference.planners[34];extent=min(2047-ref.low,ref.high-2047)
             offset=max(-1.,min(1.,self.filtered_roll/self.plan['roll_reference_rad']))
             target=2047+self.plan['roll']['sign']*extent*self.plan['roll_follow_ratio']*offset
-            velocity[34]=self.plan['roll_gain_s']*(target-self.reference.planners[34].position)
+            if self.plan.get('roll_control_mode','position')=='visual_velocity':
+                # A head-fixed camera measures residual image tilt. Restoring
+                # toward a neutral-anchored absolute position opposes the lean.
+                # Feed image error into the existing bounded velocity planner;
+                # do not pretend that encoder counts are measured head angles.
+                velocity[34]=self.plan['roll_gain_s']*(target-2047) if roll_valid else 0.
+            else:velocity[34]=self.plan['roll_gain_s']*(target-self.reference.planners[34].position)
             reason=self.assist.reason
         else:
             self.assist.reset()
@@ -134,6 +143,7 @@ class IndependentFaceFollower:
             reason='feedback_stale' if not fresh else 'returning' if should_return else 'holding'
         goals=self.reference.step(velocity,dt,returning=should_return and fresh)
         self.diagnostic=dict(enabled=True,topology='independent',reason=reason,requested_velocity=velocity,
+            roll_control_mode=self.plan.get('roll_control_mode','position'),
             image_roll_rad=self.filtered_roll,eye_reference_id=self.eye_id,
             eye_motion_source='encoder',feedback_age_s={str(s):now-v[1] for s,v in self.observations.items()},
             axes={str(s):dict(p.last_diagnostic) for s,p in self.reference.planners.items()})

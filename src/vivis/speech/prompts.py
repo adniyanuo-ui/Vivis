@@ -14,13 +14,13 @@ from vivis.paths import ROOT
 PROCESSING_VERSION='r128-compand-pauses-v2'
 
 TEXTS={
-    'welcome':'我在，请说。',
-    'menu':'我可以表演白骨夫人、魏总剧本，也可以模仿你的表情。你想选哪一个？',
+    'welcome':'在呢，你说！',
+    'menu':'我能唱白骨夫人、演魏总剧本，还能学你的表情。你点节目，我来演！',
     'clarify':'你可以说，播放白骨夫人，播放魏总剧本，或者开始表情跟随。',
-    'standby':'好的，我先休息。有需要再叫我。',
-    'interaction':'好的，我们继续。',
+    'standby':'好嘞，我歇会儿。有事喊小帅！',
+    'interaction':'好，咱们接着聊。',
     'fault':'刚才出了点问题，我先停下来。请检查设备，再重新启动。',
-    'identity':'我是小帅，可以为你表演白骨夫人、魏总剧本，也可以模仿你的表情。',
+    'identity':'我是小帅，二十岁，北京男孩。唱歌、演戏、学表情，随你挑！',
     'stop_test':'停止。结束。退出。不用学了。待机。休息一下。自己玩一会儿。',
     'select_test':'播放白骨夫人。开始表情跟随。',
     'test_stop':'停止。','test_end':'结束。','test_exit':'退出。',
@@ -121,8 +121,22 @@ def normalize_prompt(path,reference_lufs,settings):
         true_peak_dbfs=20*math.log10(peak(data)),gain=gain,compressed=compressed)
 
 
-def prepare(config):
+def create_engine(config):
     import sherpa_onnx
+    t=config['tts'];folder=ROOT/t['directory']
+    common=dict(model=str(folder/t['model']),tokens=str(folder/t['tokens']),lexicon=str(folder/t['lexicon']))
+    if t.get('engine','vits')=='kokoro':
+        engine_model=dict(kokoro=sherpa_onnx.OfflineTtsKokoroModelConfig(**common,voices=str(folder/t['voices'])))
+    elif t.get('engine','vits')=='vits':
+        engine_model=dict(vits=sherpa_onnx.OfflineTtsVitsModelConfig(**common,dict_dir=str(folder/t['dict'])))
+    else:raise ValueError('Unsupported local TTS engine')
+    model=sherpa_onnx.OfflineTtsModelConfig(**engine_model,num_threads=t['threads'],provider='cpu')
+    rules=','.join(str(folder/n) for n in t.get('rule_fsts',('date.fst','number.fst','phone.fst')))
+    engine=sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(model=model,rule_fsts=rules))
+    return engine
+
+
+def prepare(config):
     t=config['tts'];folder=ROOT/t['directory'];destination=ROOT/config['prompts'];destination.mkdir(parents=True,exist_ok=True)
     metadata=dict(processing_version=PROCESSING_VERSION,tts=t,texts=TEXTS,timing=config.get('prompt_timing'),asset_sha256={k:hashlib.sha256((folder/t[k]).read_bytes()).hexdigest()
         for k in ('model','tokens','voices','lexicon') if k in t})
@@ -137,15 +151,7 @@ def prepare(config):
     try:cached=json.loads((destination/'metadata.json').read_text())
     except (OSError,ValueError):cached={}
     if not isinstance(cached,dict):cached={}
-    common=dict(model=str(folder/t['model']),tokens=str(folder/t['tokens']),lexicon=str(folder/t['lexicon']))
-    if t.get('engine','vits')=='kokoro':
-        engine_model=dict(kokoro=sherpa_onnx.OfflineTtsKokoroModelConfig(**common,voices=str(folder/t['voices'])))
-    elif t.get('engine','vits')=='vits':
-        engine_model=dict(vits=sherpa_onnx.OfflineTtsVitsModelConfig(**common,dict_dir=str(folder/t['dict'])))
-    else:raise ValueError('Unsupported local TTS engine')
-    model=sherpa_onnx.OfflineTtsModelConfig(**engine_model,num_threads=t['threads'],provider='cpu')
-    rules=','.join(str(folder/n) for n in t.get('rule_fsts',('date.fst','number.fst','phone.fst')))
-    engine=sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(model=model,rule_fsts=rules))
+    engine=create_engine(config)
     sid=t.get('speaker_id',0);speed=t.get('speed',1.)
     if type(sid) is not int or not 0<=sid<engine.num_speakers or not .5<=speed<=2:raise ValueError('Invalid prompt speaker or speed')
     reports={};timing_reports={}

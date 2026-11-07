@@ -121,6 +121,7 @@
     "roll_gain_s": 3.0,
     "roll_filter_tau_s": 0.15,
     "direction_source": "User:33 increasing looks down;34 increasing tilts robot right. Image roll response pending integrated onsite observation.",
-    "range_mode": "device"
+    "range_mode": "device",
+    "roll_control_mode": "visual_velocity"
   }
 }

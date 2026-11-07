@@ -53,6 +53,8 @@ def dependencies(config,listener_only=False):
 def program_command(program,robot,folder,speech,settings):
     stop=folder.with_suffix('.cancel');base=[sys.executable,'-m']
     common=['--robot',str(robot.path),'--output',str(folder),'--session-stop-file',str(stop)]
+    if settings.get('_home_speed_counts_s') is not None and (program is None or program['kind']!='runtime_a2f'):
+        common+=['--home-speed',str(settings['_home_speed_counts_s'])]
     if program is None or program['kind']=='interaction':
         mode=INTERACTION if program else STANDBY
         return base+['vivis.interaction.standby',*common,'--seconds',str(settings[mode+'_seconds']),
@@ -179,6 +181,8 @@ def main(argv=None):
     parser.add_argument('--seconds',type=float);parser.add_argument('--output',type=Path)
     parser.add_argument('--diagnostics',choices=('on','off'),help='按需保留节目完整控制记录与串口追踪')
     args=parser.parse_args(argv);settings=read_json(args.config)
+    warm_speed=settings.get('warm_home_speed_counts_s',60)
+    if type(warm_speed) is not int or not 1<=warm_speed<=32767:parser.error('Invalid warm homing speed')
     if args.diagnostics is not None:settings['diagnostics']=args.diagnostics=='on'
     if settings.get('schema_version')!='vivis-dialog-programs-1.0':parser.error('Unsupported P1 config')
     if type(settings.get('overlap_warmup',False)) is not bool:parser.error('Invalid overlapping warmup switch')
@@ -235,7 +239,7 @@ def main(argv=None):
             lock.close();raise RuntimeError('已有节目占用控制权，请先停止它，再启动P1语音管理器')
     events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_thread=None;active_target=None;active_program=None
     quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;preparation={};log=(output/'events.jsonl').open('w')
-    ready=False
+    ready=False;warm_ready=False
     def request_shutdown(*_):
         nonlocal quitting
         quitting=True
@@ -260,7 +264,10 @@ def main(argv=None):
         turn+=1;folder=output/f'{turn:04d}_{target}'
         program=(dict(id=INTERACTION,title='交互态',kind='interaction') if target==INTERACTION else None
                  if target==STANDBY else next(p for p in catalog['programs'] if p['id']==target))
-        command=program_command(program,robot,folder,speech,settings)
+        worker_settings=dict(settings)
+        if warm_ready:
+            worker_settings['_home_speed_counts_s']=min(warm_speed,*(m['max_speed_counts_s'] for m in robot.motion_profile()['motors']))
+        command=program_command(program,robot,folder,speech,worker_settings)
         active_target=target;active_program=target if session.mode_of(target)=='task' else None
         phase='preparing';preparation=dict(state='pending')
         record('start',program=active_program,mode=session.mode_of(target),session=folder.name);print('准备：'+(program['title'] if program else '真正待机'),flush=True)
@@ -309,6 +316,7 @@ def main(argv=None):
                     print('麦克风已就绪，请说唤醒词。'+('本次只识别，不驱动机器人。' if args.listen_only else '当前为真正待机，摄像头关闭。'),flush=True)
                     continue
                 if event.get('kind')=='worker_ready' and worker and worker.cancelled_at is None and event['pid']==worker.process.pid:
+                    warm_ready=True
                     phase=session.mode_of(active_target);record('worker_ready',program=active_program,mode=phase)
                     print('状态：'+{STANDBY:'①待机（摄像头关闭，等待唤醒）',INTERACTION:'②交互态','task':'③任务执行'}[phase],flush=True)
                     continue

@@ -247,8 +247,12 @@ def main(argv=None,default_config=None):
     parser.add_argument('--smile',choices=('on','off'),help='交互态可对照关闭微笑；真正待机固定关闭')
     parser.add_argument('--smile-strength',type=float,help='单次微笑增量0..0.5，不保存配置')
     parser.add_argument('--overlap-warmup',action='store_true',help=argparse.SUPPRESS)
+    parser.add_argument('--home-speed',type=int,help='Single-session homing cap in counts/s; saved parameters unchanged')
     parser.add_argument('--output',type=Path);parser.add_argument('--check',action='store_true')
     args=parser.parse_args(argv);robot=Robot(args.robot);settings=read_json(args.config)
+    if args.home_speed is not None:
+        if not 1<=args.home_speed<=32767:parser.error('Invalid home speed')
+        settings['home_speed_counts_s']=args.home_speed
     if args.smile_strength is not None and (not math.isfinite(args.smile_strength) or not 0<=args.smile_strength<=.5):
         parser.error('微笑增量须为有限数0..0.5')
     if args.tracking is not None:settings['tracking_enabled']=args.tracking=='on'
