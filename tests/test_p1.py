@@ -207,10 +207,13 @@ class EchoTests(unittest.TestCase):
 
 class SupervisorTests(unittest.TestCase):
     def test_fast_failed_child_reports_self_check_and_rejects_later_selection(self):
+        prompts=[]
         class Prompts:
             def __init__(self,*_):pass
             def poll(self):pass
             def stop(self):pass
+            def play(self,name):prompts.append(name)
+            def finish(self,cancelled):prompts.append(('finished',cancelled()))
             def contains(self,*_):return False
         class Input:
             def __iter__(self):
@@ -229,7 +232,10 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(commands.call_count,1)
             status=json.loads((root/'outputs/runtime/program_status.json').read_text())
             self.assertEqual(status['self_check']['state'],'failed')
-            self.assertIn('SELF-CHECK FAIL ID5',output.getvalue());self.assertIn('未执行',output.getvalue())
+            self.assertIn('SELF-CHECK FAIL ID5',output.getvalue());self.assertIn('管理器将退出',output.getvalue())
+            self.assertNotIn('识别：',output.getvalue())
+            self.assertEqual(prompts,['fault',('finished',False)])
+            self.assertEqual(status['phase'],'fault')
 
     def test_serial_permission_error_precedes_microphone_prompts_and_worker(self):
         from vivis.hardware.feetech.protocol import ProtocolError

@@ -133,6 +133,16 @@ class PromptPlayer:
             if self.clock.fault:raise RuntimeError('Voice prompt audio fault: '+str(self.clock.fault))
             if t is not None and t>=self.clock.duration:self.stop()
 
+    def finish(self,cancelled=lambda:False,timeout_s=12.):
+        """Bounded fault notification; no new program/intent is processed here."""
+        deadline=time.monotonic()+timeout_s
+        while self.clock is not None and not cancelled():
+            self.poll()
+            if self.clock is None:return
+            if time.monotonic()>=deadline:raise RuntimeError('Fault prompt timed out')
+            time.sleep(.02)
+        if self.clock is not None:self.stop()
+
     def contains(self,stamp):return any(start<=stamp<=end for start,end in self.history)
 
 
@@ -298,11 +308,19 @@ def main(argv=None):
                     cancelled=worker.cancelled_at is not None
                     worker.kill_owned_group();worker.finish();preparation.update(worker.preparation)
                     record('worker_exit',program=active_program,code=code,cancelled=cancelled,self_check=preparation)
-                    if code not in (0,130):
-                        fault='Program failed; see '+str(worker.folder.with_suffix('.log'));phase='fault'
-                        print('节目故障，已停止；请检查日志：'+str(worker.folder.with_suffix('.log')),flush=True)
+                    failed_log=worker.folder.with_suffix('.log') if code not in (0,130) else None
                     if not cancelled:desired=None
                     worker=None;active_program=None
+                    if failed_log is not None:
+                        fault='Program failed; see '+str(failed_log);phase='fault';desired=None
+                        print('节目故障，已停止；管理器将退出，处理后请重新启动。日志：'+str(failed_log),flush=True)
+                        publish(True)
+                        if prompt and not quitting:
+                            try:
+                                # play() first cancels the unfinished welcome/menu.
+                                prompt.play('fault');prompt.finish(lambda:quitting)
+                            except Exception as exc:record('fault_prompt_error',error=str(exc))
+                        quitting=True
                 elif worker.cancelled_at is not None and now-worker.cancelled_at>settings['cancel_timeout_s']:
                     worker.kill_owned_group();worker.process.wait(timeout=2);worker.finish();worker=None
                     fault='Worker cancellation timed out; hold position, no automatic recovery';phase='fault';quitting=True

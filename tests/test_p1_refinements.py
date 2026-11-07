@@ -48,11 +48,14 @@ class SpeechGainTests(unittest.TestCase):
         from vivis.speech.prompts import PROCESSING_VERSION,TEXTS,cache_matches
         speech=config('configs/perception/speech.json')
         metadata=dict(processing_version=PROCESSING_VERSION,tts=copy.deepcopy(speech['tts']),
-                      level={'config':copy.deepcopy(speech['prompt_level'])},texts=TEXTS)
+                      level={'config':copy.deepcopy(speech['prompt_level'])},texts=TEXTS,
+                      timing=copy.deepcopy(speech.get('prompt_timing')))
         self.assertTrue(cache_matches(speech,metadata))
         self.assertFalse(cache_matches(speech,[]))
         metadata['tts']['speaker_id']=3;self.assertFalse(cache_matches(speech,metadata))
         metadata['tts']=speech['tts'];metadata['processing_version']='old';self.assertFalse(cache_matches(speech,metadata))
+        metadata['processing_version']=PROCESSING_VERSION;metadata['timing']=None
+        self.assertFalse(cache_matches(speech,metadata))
 
 
 class PreparationOverlapTests(unittest.TestCase):

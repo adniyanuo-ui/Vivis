@@ -40,6 +40,11 @@
     "compression_threshold_dbfs": -24.0,
     "compression_ratio": 4.0
   },
+  "prompt_timing": {
+    "clause_pause_ms": 180,
+    "sentence_pause_ms": 420,
+    "edge_fade_ms": 5
+  },
   "aec": {
     "enabled": true,
     "reference_port": 14788,
