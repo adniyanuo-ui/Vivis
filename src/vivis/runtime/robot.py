@@ -36,6 +36,11 @@ class Robot:
                 or ids!=sorted(set(ids))):
             raise ValueError('Robot requires an ordered unique actuator inventory')
         self.axes = {a['id']: a for a in axes}
+        excluded=self.definition.get('excluded_actuator_ids',[])
+        if (not isinstance(excluded,list) or any(type(sid) is not int for sid in excluded)
+                or len(set(excluded))!=len(excluded) or not set(excluded)<set(self.axes)):
+            raise ValueError('Invalid excluded actuator inventory')
+        self.excluded_actuator_ids=set(excluded)
         for a in axes:
             if legacy and (a['neutral'] != 2047 or a.get('neutral_confirmed') is not True
                     or a['model_raw_expected'] != (10760 if 31 <= a['id'] <= 35 else 521)):
@@ -77,7 +82,10 @@ class Robot:
         p = copy.deepcopy(self.hardware['runtime'])
         p['motors'] = [{k: copy.deepcopy(v) for k, v in a.items()
                         if k not in ('role', 'playback_enabled', 'acceleration_raw', 'pid_raw', 'deadband_raw')}
-                       for a in self.axes.values() if a['playback_enabled']]
+                       for a in self.axes.values() if a['playback_enabled'] and a['id'] not in self.excluded_actuator_ids]
+        p['excluded_actuator_ids']=sorted(self.excluded_actuator_ids)
+        for key in ('diagnostic_command_ids','mouth_gain_ids','additional_monitor_ids','held_eye_ids','held_neck_ids'):
+            if key in p:p[key]=[sid for sid in p[key] if sid not in self.excluded_actuator_ids]
         for motor in p['motors']:
             if motor.get('home_position',motor['neutral'])!=motor['neutral']:
                 motor['mapping_neutral']=motor['neutral']
@@ -85,11 +93,11 @@ class Robot:
         p.update(calibration_sha256=self.calibration_sha256, calibration_path=str(self.calibration))
         shapes=read_json(self.calibration)['blendShapes']
         p['mouth_motion_ids']=sorted({point['id'] for shape in shapes
-            if shape['shape'].startswith(('Mouth','Jaw','Tongue')) for point in shape['positions']})
+            if shape['shape'].startswith(('Mouth','Jaw','Tongue')) for point in shape['positions'] if point['id'] not in self.excluded_actuator_ids})
         p['round_lip_motion_ids']=sorted({point['id'] for shape in shapes
-            if shape['shape'] in ('MouthFunnel','MouthPucker') for point in shape['positions']})
+            if shape['shape'] in ('MouthFunnel','MouthPucker') for point in shape['positions'] if point['id'] not in self.excluded_actuator_ids})
         p['jaw_open_motion_ids']=sorted({point['id'] for shape in shapes
-            if shape['shape']=='JawOpen' for point in shape['positions']})
+            if shape['shape']=='JawOpen' for point in shape['positions'] if point['id'] not in self.excluded_actuator_ids})
         if hasattr(self,'mouth_speed_override'):
             p['mouth_speed_override']=copy.deepcopy(self.mouth_speed_override)
         apply_policy(p, self.telemetry())
@@ -149,6 +157,8 @@ class Robot:
         ids=data.get('mode_axis_ids',{}).get(mode,data.get('axis_ids',list(self.axes)))
         if not ids or len(set(ids))!=len(ids) or not set(ids)<=set(self.axes):
             raise ValueError('Invalid configured home inventory')
+        ids=[sid for sid in ids if sid not in self.excluded_actuator_ids]
+        if not ids:raise ValueError('No active homing actuators')
         result=dict(schema_version='actuator-neutral-inventory-1.0',
                     axes=[dict(id=sid,neutral=self.axes[sid].get('home_position',self.axes[sid]['neutral']),
                                neutral_confirmed=self.axes[sid]['neutral_confirmed'],
@@ -159,9 +169,10 @@ class Robot:
         return result
 
     def startup(self,active_ids=None,inventory_ids=None):
-        inventory=set(self.axes) if inventory_ids is None else set(inventory_ids)
-        selected={a['id'] for a in self.axes.values() if a['playback_enabled']} if active_ids is None else set(active_ids)
-        if not selected<=inventory<=set(self.axes) or any(not self.axes[sid]['playback_enabled'] for sid in selected):
+        inventory=set(self.axes)-self.excluded_actuator_ids if inventory_ids is None else set(inventory_ids)
+        selected={a['id'] for a in self.axes.values() if a['playback_enabled']}-self.excluded_actuator_ids if active_ids is None else set(active_ids)
+        if (not selected<=inventory<=set(self.axes) or inventory&self.excluded_actuator_ids
+                or any(not self.axes[sid]['playback_enabled'] for sid in selected)):
             raise ValueError('Invalid startup actuator selection')
         axes = []
         for a in self.axes.values():

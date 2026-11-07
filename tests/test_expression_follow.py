@@ -109,12 +109,12 @@ class OwnershipTests(unittest.TestCase):
     def test_saved_original_configuration_remains_face_only(self):
         config=settings();del config['tracking_enabled']
         p=plan(Robot(ROOT/'configs/robots/xiaoshuai/robot.json'),config,1.)
-        self.assertEqual(p['mode'],'face');self.assertEqual(len(p['ids']),25)
+        self.assertEqual(p['mode'],'face');self.assertEqual(len(p['ids']),23)
 
     def test_optional_tracking_uses_robot_topology_and_preserves_face_mapping(self):
         config=settings();config['tracking_enabled']=True
         rng=np.random.default_rng(42)
-        for head,count,owned in [('xiaoshuai',32,{7,8,22,23,32,33,34}),('mojia',31,{7,8,22,23,32})]:
+        for head,count,owned in [('xiaoshuai',30,{7,8,22,23,32,33,34}),('mojia',31,{7,8,22,23,32})]:
             robot=Robot(ROOT/f'configs/robots/{head}/robot.json')
             files={p:p.read_bytes() for p in robot.directory.glob('*.json')}
             face=plan(robot,settings(),1.);combined=plan(robot,config,1.)
@@ -185,7 +185,7 @@ class OwnershipTests(unittest.TestCase):
         self.assertFalse(compatible_vision(state,config,'digest'))
 
     def test_both_heads_prepare_and_command_only_face_eyelid_axes(self):
-        for head,count in [('xiaoshuai',25),('mojia',26)]:
+        for head,count in [('xiaoshuai',23),('mojia',26)]:
             robot=Robot(ROOT/f'configs/robots/{head}/robot.json')
             files={p:p.read_bytes() for p in robot.directory.glob('*.json')}
             with patch.object(Robot,'work',side_effect=AssertionError('music lookup')):

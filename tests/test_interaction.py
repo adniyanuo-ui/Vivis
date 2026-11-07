@@ -37,6 +37,9 @@ class AnimationTests(unittest.TestCase):
         values[:,55:]=rng.uniform(-.3,.3,(70,6))
         for record in frozen['records']:
             robot=Robot(ROOT/f'configs/robots/{record["head"]}/robot.json')
+            # Frozen fingerprints cover the original full mapping; temporary
+            # actuator exclusions are separately checked against source columns.
+            robot.excluded_actuator_ids.clear()
             shapes={s['shape']:{p['id']:p['position'] for p in s['positions']} for s in json.loads(robot.calibration.read_text())['blendShapes']}
             profile=robot.motion_profile()
             for key in ('mixing','jaw_owner','paired_eye_look_is_already_in_lids'):profile[key]=record[key]

@@ -50,11 +50,14 @@ def load_targets(targets_path,profile,audio,calibration):
         raise ValueError('Target provenance mismatch')
     ids=payload['motor_ids'];positions=np.asarray(payload['positions'],dtype=float)
     configured_ids={m['id'] for m in profile['motors']}
+    excluded=set(profile.get('excluded_actuator_ids',[]))
     if (not ids or len(set(ids))!=len(ids) or any(type(sid) is not int or not 0<=sid<=253 for sid in ids)
-            or not set(ids)<=configured_ids
+            or not set(ids)<=configured_ids|excluded
             or positions.shape!=(payload['frames'],len(ids)) or not len(positions) or not np.isfinite(positions).all()):
         raise ValueError('Invalid Mojia target matrix')
-    if set(ids)!=set(profile['diagnostic_command_ids']):raise ValueError('Command IDs differ from profile')
+    columns=[i for i,sid in enumerate(ids) if sid not in excluded]
+    ids=[ids[i] for i in columns];positions=positions[:,columns]
+    if not ids or set(ids)!=set(profile['diagnostic_command_ids']):raise ValueError('Command IDs differ from profile')
     fps=payload['fps']['num']/payload['fps']['den']
     if not np.isfinite(fps) or not 1<=fps<=120:raise ValueError('Invalid FPS')
     motors={m['id']:m for m in profile['motors']}

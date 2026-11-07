@@ -105,7 +105,7 @@ class IndependentTrackingTests(unittest.TestCase):
         self.assertTrue(all('独立轴' in robot.axes[sid]['role'] for sid in (32,33,34)))
         with patch('vivis.hardware.feetech.sdk.OfficialSDKBus',side_effect=AssertionError('serial opened')), \
              patch('vivis.runtime.developer.subprocess.Popen',side_effect=AssertionError('camera opened')):
-            for mode,count,owned in (('face',25,set()),('eyes',29,{7,8,22,23}),('eyes-neck',32,{7,8,22,23,32,33,34})):
+            for mode,count,owned in (('face',23,set()),('eyes',27,{7,8,22,23}),('eyes-neck',30,{7,8,22,23,32,33,34})):
                 with redirect_stdout(io.StringIO()) as output:
                     run_example(mode,['--robot',str(CONFIG),'--work','0001','--check'])
                 result=json.loads(output.getvalue())

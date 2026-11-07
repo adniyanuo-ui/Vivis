@@ -18,7 +18,7 @@ from vivis.runtime.trajectory import load_targets
 from vivis.motion.mapping import compile_trajectory,inputs
 
 CONFIG=ROOT/'configs/robots/xiaoshuai/robot.json'
-HELD={7,8,22,23,29,32,33,34}
+HELD={7,8,9,22,23,24,29,32,33,34}
 
 
 def face_fixture():
@@ -30,6 +30,27 @@ def face_fixture():
 
 
 class XiaoshuaiTests(unittest.TestCase):
+    def test_cheek_exclusion_covers_all_live_programs_and_rejects_accidental_reentry(self):
+        from vivis.interaction.follow import plan as follow_plan
+        from vivis.interaction.singing import plan as singing_plan
+        from vivis.interaction.standby import plan as idle_plan
+        from vivis.motion.mapping import read_json,live_preflight
+        robot=Robot(CONFIG);excluded={9,24};profile=robot.motion_profile()
+        self.assertEqual(robot.excluded_actuator_ids,excluded)
+        for mode in ('face','eyes','eyes-neck'):
+            self.assertFalse(excluded&{a['id'] for a in robot.home(mode)['axes']})
+        for settings_name,plan_function in [('expression_follow',follow_plan)]:
+            c=read_json(ROOT/f'configs/interaction/{settings_name}.json');c['tracking_enabled']=True
+            p=plan_function(robot,c,1.)
+            self.assertEqual(len(p['ids']),30);self.assertFalse(excluded&set(p['ids']))
+        p=singing_plan(robot,'0001','eyes-neck',read_json(ROOT/'configs/interaction/p0.json'))
+        self.assertFalse(excluded&set(p['ids']))
+        _,ids,home,_,_,_=idle_plan(robot,read_json(ROOT/'configs/interaction/standby.json'),1.)
+        self.assertFalse(excluded&set(ids));self.assertFalse(excluded&{a['id'] for a in home['axes']})
+        robot.set_mouth_speed(600);self.assertNotIn(9,robot.mouth_speed_override['axes'])
+        with self.assertRaisesRegex(ValueError,'startup actuator selection'):robot.startup(active_ids=[9])
+        with self.assertRaisesRegex(ValueError,'Excluded actuator'):live_preflight(profile,[9],audio_required=False)
+
     def test_own_mapping_and_shared_media_do_not_use_mojia_motor_targets(self):
         robot=Robot(CONFIG);mojia=Robot();work=robot.work('0001');old=mojia.work('0001')
         self.assertEqual(set(robot.axes),set(range(2,35)))
@@ -40,10 +61,18 @@ class XiaoshuaiTests(unittest.TestCase):
         ids,actual,rate=load_targets(work['targets'],robot.profile('0001'),work['audio'],robot.calibration)
         self.assertEqual(ids,expected_ids);np.testing.assert_array_equal(actual,expected)
         self.assertEqual((len(actual),rate),(6774,60))
-        self.assertTrue({9,24}<=set(ids));self.assertFalse({29,35,36}&set(ids))
+        self.assertFalse({9,24,29,35,36}&set(ids))
+        payload=json.loads(work['targets'].read_text())
+        self.assertTrue({9,24}<=set(payload['motor_ids']))
+        columns=[payload['motor_ids'].index(sid) for sid in ids]
+        np.testing.assert_array_equal(actual,np.asarray(payload['positions'])[:,columns])
 
     def test_reference2047_is_kept_when_home_is_clipped_to2030(self):
-        robot=Robot(CONFIG);p=robot.motion_profile();motors={m['id']:m for m in p['motors']}
+        robot=Robot(CONFIG)
+        # Keep coverage of the stored neutral semantics for a future explicit
+        # re-enable; current canonical sessions exclude these cheek axes.
+        robot.excluded_actuator_ids.clear()
+        p=robot.motion_profile();motors={m['id']:m for m in p['motors']}
         self.assertEqual(robot.axes[24]['neutral'],2047)
         self.assertEqual((motors[24]['mapping_neutral'],motors[24]['neutral']),(2047,2030))
         self.assertEqual(next(a['neutral'] for a in robot.home()['axes'] if a['id']==24),2030)
@@ -80,7 +109,7 @@ class XiaoshuaiTests(unittest.TestCase):
 
     def test_session_and_home_exclude_every_held_and_unmapped_axis(self):
         robot,p,ids,trajectory=face_fixture()
-        self.assertEqual(len(ids),25);self.assertFalse(set(ids)&HELD)
+        self.assertEqual(len(ids),23);self.assertFalse(set(ids)&HELD)
         self.assertEqual(set(ids),set(p['diagnostic_command_ids']))
         self.assertEqual(set(ids),{m['id'] for m in p['motors']})
         self.assertEqual(set(ids),{a['id'] for a in robot.home()['axes']})
@@ -89,7 +118,7 @@ class XiaoshuaiTests(unittest.TestCase):
         self.assertEqual({a['id'] for a in preset['axes']},set(ids))
         self.assertEqual(next(a['model_raw'] for a in preset['axes'] if a['id']==31),11272)
         self.assertTrue(all('pid_raw' not in a and 'deadband_raw' not in a for a in preset['axes']))
-        self.assertTrue(np.all(trajectory[:,ids.index(24)]==2030))
+        self.assertFalse({9,24}&set(ids))
         self.assertNotIn(29,p['mouth_gain_ids'])
 
     def test_wrong_topology_or_unconfigured_camera_fails_before_opening_devices(self):
@@ -141,7 +170,7 @@ class XiaoshuaiTests(unittest.TestCase):
             result=play(p,ids,data,60,'fake',Path(folder)/'log.json',Path(folder)/'STOP')
         self.assertTrue(result['completed'])
         for event in result['events']:
-            self.assertEqual(set(event['goals']),set(ids));self.assertEqual(event['goals'][24],2030)
+            self.assertEqual(set(event['goals']),set(ids));self.assertFalse({9,24}&set(event['goals']))
             self.assertEqual(event['goals'][31],round(data[event['frame'],ids.index(31)]))
 
     def test_full_session_initializes_only_face_axes_with_bounded_ram_writes(self):
@@ -189,7 +218,7 @@ class XiaoshuaiTests(unittest.TestCase):
         clock=SimpleNamespace(now=100.)
         def sleep(delay):clock.now+=max(delay,.000001)
         def played(*args,**kwargs):
-            self.assertEqual(set(args[1]),allowed);self.assertEqual(args[2].shape,(6774,25))
+            self.assertEqual(set(args[1]),allowed);self.assertEqual(args[2].shape,(6774,23))
             self.assertIsNone(kwargs['gaze_override'])
             return dict(completed=True,full_clip_requested=True,audio_seconds_at_stop=112.9,sent_frames=6774,skipped_source_frames=0)
         with tempfile.TemporaryDirectory() as folder,redirect_stdout(io.StringIO()), \
@@ -206,13 +235,16 @@ class XiaoshuaiTests(unittest.TestCase):
             summary=json.loads((output/'performance/summary.json').read_text())
             prep=json.loads((output/'performance/round_1/preparation.json').read_text())
             self.assertTrue(summary['completed']);self.assertTrue(prep['homing']['completed'])
-            self.assertEqual(prep['homing']['neutral_targets']['24'],2030)
-            self.assertTrue(any(r['id']==24 and r['confirmed'] for r in prep['homing']['disabled_position_recoveries']))
+            self.assertEqual(prep['self_check']['state'],'passed')
+            self.assertEqual(prep['self_check']['excluded_ids'],[9,24])
+            self.assertEqual(set(prep['self_check']['checked_ids']),allowed)
+            self.assertFalse({9,24}&set(map(int,prep['homing']['neutral_targets'])))
+            self.assertFalse(any(r['id'] in (9,24) for r in prep['homing']['disabled_position_recoveries']))
             self.assertEqual(constructor.call_args.kwargs['feedback_mode'],'short_registers')
             self.assertEqual(constructor.call_args.kwargs['post_goal_quiet_ms'],1)
             unload.assert_not_called()
         self.assertTrue(writes);self.assertTrue(goals)
-        self.assertEqual(positions[24],2030)
+        self.assertFalse({9,24}&set(positions))
         self.assertTrue(all(ram[sid][0]==1 for sid in allowed))
 
 

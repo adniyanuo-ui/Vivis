@@ -24,7 +24,7 @@ def round_lip_gain_targets(robot,work,ids,positions,fps,gain=1.):
     profile=robot.motion_profile()
     mapped_ids,baseline,_=compile_trajectory(values,order,shapes,profile,'face_eyes')
     if mapped_ids!=ids:raise ValueError('Channel gain source motor group differs from playback')
-    affected=sorted({sid for name in report['channels'] for sid in shapes[name]})
+    affected=sorted({sid for name in report['channels'] for sid in shapes[name] if sid in ids})
     columns=[ids.index(sid) for sid in affected]
     error=float(np.max(np.abs(baseline[:,columns]-result[:,columns])))
     if error>1e-6:

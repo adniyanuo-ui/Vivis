@@ -59,7 +59,7 @@ def program_command(program,robot,folder,speech,settings):
 class Worker:
     """Only this child may own the serial lock. Cancellation is instance-local."""
     def __init__(self,command,folder,events):
-        self.folder=folder;self.cancelled_at=None;self.ready=False
+        self.folder=folder;self.cancelled_at=None;self.ready=False;self.preparation=dict(state='pending')
         folder.parent.mkdir(parents=True,exist_ok=True)
         self.log=folder.with_suffix('.log').open('w')
         try:
@@ -70,6 +70,12 @@ class Worker:
             try:
                 for line in self.process.stdout:
                     self.log.write(line)
+                    if line.startswith(('SELF-CHECK ','HOME ','PREPARE COMPLETE','PREPARE FAILED','PREPARE CANCELLED')):
+                        state={'START':'running','PASS':'passed','FAIL':'failed','CANCELLED':'cancelled'}.get(line.split()[1]) if line.startswith('SELF-CHECK ') else None
+                        if state is not None:self.preparation['state']=state
+                        self.preparation['last_message']=line.rstrip();print(line.rstrip(),flush=True)
+                        try:events.put_nowait(dict(kind='worker_preparation',pid=self.process.pid,state=state,message=line.rstrip()))
+                        except queue.Full:pass
                     if any(text in line for text in ('EXPRESSION FOLLOW START','ROUND 1/1 START','STANDBY START')):
                         self.ready=True
                         try:events.put_nowait(dict(kind='worker_ready',pid=self.process.pid))
@@ -185,7 +191,7 @@ def main(argv=None):
         except BlockingIOError:
             lock.close();raise RuntimeError('已有节目占用控制权，请先停止它，再启动P1语音管理器')
     events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_thread=None;desired=None;active_program=None
-    quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;log=(output/'events.jsonl').open('w')
+    quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;preparation={};log=(output/'events.jsonl').open('w')
     def request_shutdown(*_):
         nonlocal quitting
         quitting=True
@@ -199,14 +205,14 @@ def main(argv=None):
         if not force and now-last_published<.2:return
         last_published=now
         state=dict(schema_version='vivis-program-state-1.0',updated_monotonic=time.monotonic(),
-            phase=phase,active_program=active_program,desired_program=desired,error=fault,output=str(output))
+            phase=phase,active_program=active_program,desired_program=desired,error=fault,output=str(output),self_check=preparation)
         path=ROOT/'outputs/runtime/program_status.json';temp=path.with_suffix('.tmp');temp.write_text(json.dumps(state,ensure_ascii=False)+'\n');temp.replace(path)
     def start_worker(target):
-        nonlocal turn,active_program,phase
+        nonlocal turn,active_program,phase,preparation
         turn+=1;folder=output/f'{turn:04d}_{target or "standby"}'
         program=next((p for p in catalog['programs'] if p['id']==target),None) if target else None
         command=program_command(program,robot,folder,speech,settings)
-        active_program=target;phase='preparing' if target else 'returning_to_standby'
+        active_program=target;phase='preparing' if target else 'returning_to_standby';preparation=dict(state='pending')
         record('start',program=target,session=folder.name);print('准备：'+(program['title'] if program else '待机'),flush=True)
         return Worker(command,folder,events)
     gate=EventGate(settings['max_event_age_s'])
@@ -254,6 +260,10 @@ def main(argv=None):
                     continue
                 if event.get('kind')=='worker_ready' and worker and event['pid']==worker.process.pid:
                     phase='active' if active_program else 'standby';record('worker_ready',program=active_program);continue
+                if event.get('kind')=='worker_preparation' and worker and event['pid']==worker.process.pid:
+                    if event['state'] is not None:preparation['state']=event['state']
+                    preparation['last_message']=event['message']
+                    record('preparation',program=active_program,**preparation);continue
                 if not gate.accept(event,time.monotonic()):continue
                 intent=router.parse(event.get('text',''),active_program is not None,current_program=active_program)
                 stamp=event.get('speech_end_monotonic') or event['captured_end_monotonic']
@@ -262,6 +272,7 @@ def main(argv=None):
                 record('intent',text=event['text'],intent=intent,metrics=event.get('metrics',{}))
                 label={'standby':'待机','ignore':'未匹配','prompt':'节目说明'}.get(intent['kind'],intent['kind'])
                 if intent['kind']=='select':label='选择'+next(p['title'] for p in catalog['programs'] if p['id']==intent['program'])
+                if fault:label+='；未执行，管理器处于故障状态，请Ctrl+C后检查日志并重启'
                 print('识别：'+event['text']+' → '+label,flush=True)
                 if args.listen_only or fault:continue
                 if intent['kind'] in ('select','standby'):
@@ -276,7 +287,8 @@ def main(argv=None):
                 code=worker.process.poll()
                 if code is not None:
                     cancelled=worker.cancelled_at is not None
-                    worker.kill_owned_group();worker.finish();record('worker_exit',program=active_program,code=code,cancelled=cancelled)
+                    worker.kill_owned_group();worker.finish();preparation.update(worker.preparation)
+                    record('worker_exit',program=active_program,code=code,cancelled=cancelled,self_check=preparation)
                     if code not in (0,130):
                         fault='Program failed; see '+str(worker.folder.with_suffix('.log'));phase='fault'
                         print('节目故障，已停止；请检查日志：'+str(worker.folder.with_suffix('.log')),flush=True)

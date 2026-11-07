@@ -204,6 +204,32 @@ def prepare_recovery_clearance(bus,plan,snapshots,motors,guard,report,home_speed
 
 
 def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,telemetry_policy,guard,report,directory,publish):
+    """Report read-only self-check separately from tuning writes and homing."""
+    check=dict(state='running',axis_ids=[a['id'] for a in home_axes],
+               excluded_ids=list(profile.get('excluded_actuator_ids',[])),checked_ids=[])
+    report.update(self_check=check,preparation_phase='self_check',preparation_completed=False)
+    print(f'SELF-CHECK START 舵机自检：{len(home_axes)}轴；排除{check["excluded_ids"]}（不检查、不发送指令）',flush=True)
+    try:
+        if set(check['axis_ids'])&set(check['excluded_ids']) or set(ids)&set(check['excluded_ids']):
+            raise ValueError('Excluded actuator entered preparation inventory')
+        publish('self_check')
+        _prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,telemetry_policy,guard,report,directory,publish)
+        report.update(preparation_phase='ready',preparation_completed=True)
+        print('PREPARE COMPLETE 自检通过，参数核验及回中完成',flush=True)
+    except BaseException as exc:
+        from vivis.runtime.cancellation import operator_cancelled
+        cancelled=operator_cancelled(exc)
+        if check['state']=='running':
+            check.update(state='cancelled' if cancelled else 'failed',error=str(exc))
+            found=re.search(r'(?:ID|Servo\s+|^)(\d+)(?::|\b)',str(exc))
+            if found:check['failed_axis']=int(found.group(1))
+            print(('SELF-CHECK CANCELLED 自检取消：' if cancelled else 'SELF-CHECK FAIL 自检失败：')+str(exc),flush=True)
+        report['preparation_error']=str(exc)
+        print(f'PREPARE {"CANCELLED" if cancelled else "FAILED"} 准备阶段{report["preparation_phase"]}：{exc}',flush=True)
+        raise
+
+
+def _prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,telemetry_policy,guard,report,directory,publish):
     """Fresh full-inventory checks, tuning restoration and homing for one round."""
     home_ids=[a['id'] for a in home_axes];home_neutrals={a['id']:a['neutral'] for a in home_axes}
     motors={m['id']:m for m in profile['motors']}
@@ -226,9 +252,10 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
                            trace_path=directory/'homing_serial_trace.json',
                            snapshot_chunk_bytes=profile.get('snapshot_chunk_bytes'))
         snapshot_deadline=time.monotonic()+10
-        snapshots=[startup_feedback(bus.snapshot,sid,snapshot_deadline,
-                    report.setdefault('startup_communication_recoveries',[]),should_stop=lambda:guard() or False)
-                   for sid in home_ids]
+        snapshots=[];report['startup_snapshots']=snapshots
+        for sid in home_ids:
+            snapshots.append(startup_feedback(bus.snapshot,sid,snapshot_deadline,
+                report.setdefault('startup_communication_recoveries',[]),should_stop=lambda:guard() or False))
         validate_home_axes(home_axes,snapshots)
         original_speeds={s['id']:int.from_bytes(bytes.fromhex(s['state_40_70_hex'])[6:8],'little') for s in snapshots}
         report['startup_snapshots']=snapshots
@@ -243,6 +270,7 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
                     lambda sample:home_check(sample,s,home_neutrals[sid],20,telemetry_policy,position_plans.get(sid)),telemetry_policy,
                     report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
                 warning_recorder.observe(sid,fresh,alerts)
+                report['self_check']['checked_ids'].append(sid)
                 continue
             m=motors[sid]
             recovery=sid==29 and s['torque_enable']==0 and args.authorized_tongue_observation
@@ -260,12 +288,18 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
                 fresh,alerts=verify_sample(bus.feedback,sid,confirmed.get(sid,feedback(s)),validate,telemetry_policy,
                     report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)
                 warning_recorder.observe(sid,fresh,alerts)
+            report['self_check']['checked_ids'].append(sid)
         if hardware_preset is not None:
             # Validate the complete inventory before the first parameter write.
             startup_plan(hardware_preset,snapshots,args.home_speed)
+        report['self_check']['state']='passed'
+        print(f'SELF-CHECK PASS 舵机自检通过：{len(home_ids)}/{len(home_ids)}轴；排除轴不计入通过数',flush=True)
+        report['preparation_phase']='hardware_setup'
+        if hardware_preset is not None:
             original_speeds=restore_startup_settings(bus,hardware_preset,snapshots,args.home_speed,
                 guard,report.setdefault('hardware_restore',{}))
             print('STARTUP hardware tuning restored and verified; homing speed remains capped',flush=True)
+        report['preparation_phase']='homing'
         if args.authorized_tongue_observation:
             prepare_recovery_clearance(bus,clearance_plan,snapshots,motors,guard,
                 report.setdefault('recovery_clearance',{}),args.home_speed,position_policy)

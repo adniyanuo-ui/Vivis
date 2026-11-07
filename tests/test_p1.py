@@ -206,6 +206,31 @@ class EchoTests(unittest.TestCase):
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_fast_failed_child_reports_self_check_and_rejects_later_selection(self):
+        class Prompts:
+            def __init__(self,*_):pass
+            def poll(self):pass
+            def stop(self):pass
+            def contains(self,*_):return False
+        class Input:
+            def __iter__(self):
+                time.sleep(.3);yield '开始表情跟随'
+                time.sleep(.1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);settings=read('configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs'])
+            config=root/'p1.json';config.write_text(json.dumps(settings))
+            command=[sys.executable,'-c',"print('SELF-CHECK START test',flush=True); print('SELF-CHECK FAIL ID5: outside limits',flush=True); raise SystemExit(1)"]
+            with patch('vivis.interaction.dialogue.ROOT',root), \
+                 patch('vivis.interaction.dialogue.dependencies',return_value=({},[])), \
+                 patch('vivis.interaction.dialogue.check_competitors'),patch('vivis.interaction.dialogue.check_serial_access'), \
+                 patch('vivis.interaction.dialogue.PromptPlayer',Prompts),patch('sys.stdin',Input()), \
+                 patch('vivis.interaction.dialogue.program_command',return_value=command) as commands,redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(main(['--config',str(config),'--robot',str(ROOT/'configs/robots/xiaoshuai/robot.json'),'--text-input']),1)
+            self.assertEqual(commands.call_count,1)
+            status=json.loads((root/'outputs/runtime/program_status.json').read_text())
+            self.assertEqual(status['self_check']['state'],'failed')
+            self.assertIn('SELF-CHECK FAIL ID5',output.getvalue());self.assertIn('未执行',output.getvalue())
+
     def test_serial_permission_error_precedes_microphone_prompts_and_worker(self):
         from vivis.hardware.feetech.protocol import ProtocolError
         with patch('vivis.interaction.dialogue.dependencies',return_value=({},[])), \
@@ -327,6 +352,48 @@ class SegmentationTests(unittest.TestCase):
         self.assertAlmostEqual(segments[0]['speech_end'],10.36)
         self.assertLess(segments[0]['end'],segments[1]['speech_end'])
         self.assertTrue(np.isclose(segments[0]['audio'][::320],.1).any())
+
+
+class SelfCheckReportingTests(unittest.TestCase):
+    def test_pre_motion_failure_reports_axis_without_position_or_enable_writes(self):
+        from test_cold_start import ColdAxis
+        from vivis.runtime.robot import Robot
+        from vivis.runtime.show import prepare_round
+        from unittest.mock import Mock
+        robot=Robot();profile=robot.motion_profile();motor=next(m for m in profile['motors'] if m['id']==21)
+        profile['motors']=[motor];profile['diagnostic_command_ids']=[21]
+        axes=[a for a in robot.home()['axes'] if a['id']==21]
+        bus=ColdAxis(position=motor['device_max']+90,sid=21,low=motor['device_min'],high=motor['device_max']);bus.close=Mock()
+        args=SimpleNamespace(usb_volume_times_three=False,home_only=True,home_speed=60,authorized_tongue_observation=False)
+        report={}
+        with tempfile.TemporaryDirectory() as tmp,redirect_stdout(io.StringIO()) as out, \
+             patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus):
+            with self.assertRaisesRegex(RuntimeError,'ID21: home position outside'):
+                prepare_round(args,profile,[21],axes,None,None,robot.telemetry(),lambda:None,report,Path(tmp),lambda *_:None)
+        self.assertEqual(report['self_check']['state'],'failed');self.assertEqual(report['self_check']['failed_axis'],21)
+        self.assertFalse(report['preparation_completed']);self.assertIn('SELF-CHECK FAIL',out.getvalue())
+        self.assertFalse(any(event[0] in ('write','goal') for event in bus.events));bus.close.assert_called_once()
+
+    def test_homing_failure_keeps_successful_read_only_self_check_distinct(self):
+        from test_cold_start import ColdAxis
+        from vivis.runtime.robot import Robot
+        from vivis.runtime.show import prepare_round
+        from unittest.mock import Mock
+        robot=Robot();profile=robot.motion_profile();motor=next(m for m in profile['motors'] if m['id']==21)
+        profile['motors']=[motor];profile['diagnostic_command_ids']=[21]
+        axes=[a for a in robot.home()['axes'] if a['id']==21]
+        bus=ColdAxis(position=2047,enabled=1,sid=21,low=motor['device_min'],high=motor['device_max']);bus.close=Mock()
+        args=SimpleNamespace(usb_volume_times_three=False,home_only=True,home_speed=60,authorized_tongue_observation=False)
+        report={}
+        with tempfile.TemporaryDirectory() as tmp,redirect_stdout(io.StringIO()) as out, \
+             patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus), \
+             patch('vivis.runtime.show.home_all',side_effect=RuntimeError('ID21: home did not settle at neutral')):
+            with self.assertRaisesRegex(RuntimeError,'home did not settle'):
+                prepare_round(args,profile,[21],axes,None,None,robot.telemetry(),lambda:None,report,Path(tmp),lambda *_:None)
+        self.assertEqual(report['self_check']['state'],'passed');self.assertEqual(report['self_check']['checked_ids'],[21])
+        self.assertEqual(report['preparation_phase'],'homing');self.assertFalse(report['preparation_completed'])
+        self.assertIn('SELF-CHECK PASS',out.getvalue());self.assertIn('PREPARE FAILED',out.getvalue())
+        self.assertNotIn('SELF-CHECK FAIL',out.getvalue())
 
 
 if __name__=='__main__':unittest.main()

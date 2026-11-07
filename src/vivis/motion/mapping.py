@@ -70,7 +70,8 @@ class CompiledFaceMapping:
         if profile['mixing'] not in ['sum_deltas','bounded_weighted_deltas'] or profile['jaw_owner'] not in ['JawOpen','all_calibrated']:
             raise ValueError('Unsupported composition rule')
         motors={m['id']:m for m in profile['motors']}
-        self.active=sorted({sid for positions in shapes.values() for sid in positions if sid not in (32,33,34)})
+        excluded=set(profile.get('excluded_actuator_ids',[]))
+        self.active=sorted({sid for positions in shapes.values() for sid in positions if sid not in (32,33,34) and sid not in excluded})
         if scope=='face':self.active=[sid for sid in self.active if sid not in [7,8,22,23]]
         elif scope not in ['face_eyes','full']:raise ValueError('scope must be face, face_eyes or full')
         lookup={n:i for i,n in enumerate(order)}
@@ -160,6 +161,9 @@ def compile_trajectory(values,order,shapes,profile,scope='full',draft=False):
       'omitted_neck_by_scope':scope!='full'}
 
 def live_preflight(profile,ids,audio_required=True):
+    excluded=set(profile.get('excluded_actuator_ids',[]))
+    if excluded&(set(ids)|set(profile.get('diagnostic_command_ids') or [])|{m['id'] for m in profile['motors']}):
+        raise ValueError('Excluded actuator entered live control inventory')
     missing=[]
     required=['mixing_confirmed','jaw_owner_confirmed']+(['physical_audio_output_confirmed'] if audio_required else [])
     for key in required:

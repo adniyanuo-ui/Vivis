@@ -1,6 +1,7 @@
 {
   "schema_version": "vivis-robot-1.0",
   "name": "xiaoshuai",
+  "excluded_actuator_ids": [9, 24],
   "identity": {
     "display_name": "小帅",
     "gender": "male",
