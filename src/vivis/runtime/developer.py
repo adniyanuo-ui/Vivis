@@ -16,6 +16,7 @@ from urllib.request import urlopen
 
 from vivis.paths import ROOT
 from vivis.runtime.robot import Robot
+from vivis.motion.mapping import direct_mouth_ids
 from vivis.vision.policy import VERSION
 
 
@@ -130,8 +131,8 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     parser.add_argument('--mouth-gain', type=float)
     parser.add_argument('--round-lip-gain',type=float,default=1.,help='Runtime MouthFunnel/MouthPucker channel multiplier')
     parser.add_argument('--mouth-speed',type=int,help='Task RAM speed for calibrated mouth axes; default saved hardware speed')
-    parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),default='limited',
-                        help='Round-lip and jaw target delivery comparison; hardware speed and homing unchanged')
+    parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),
+                        help='Default from robot; direct mouth group is configured per robot')
     parser.add_argument('--home-speed', type=int)
     parser.add_argument('--control-fps', type=int, choices=(30, 60))
     parser.add_argument('--face-fps', type=int, choices=(30, 60))
@@ -151,6 +152,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         from vivis.runtime.assets import verify_model
         verify_model()
     defaults = robot.definition['defaults']
+    if args.mouth_command_mode is None:args.mouth_command_mode=defaults.get('mouth_command_mode','limited')
     output = args.output or ROOT / 'outputs/developer' / (datetime.now().strftime('%Y%m%d_%H%M%S_%f') + '_' + mode)
     command = ['--robot', str(robot.path), '--work', args.work, '--mode', mode,
                '--repeat', str(args.repeat), '--output', str(output / 'performance'),
@@ -215,7 +217,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
         if args.round_lip_gain!=1.:
             print(f'圆唇通道增益：MouthFunnel/MouthPucker ×{args.round_lip_gain}；原素材及其他通道保持。',flush=True)
         if args.mouth_command_mode=='lips-direct' and not args.home_only:
-            p=robot.motion_profile();direct=set(p['round_lip_motion_ids'])|set(p['jaw_open_motion_ids'])
+            direct=direct_mouth_ids(robot.motion_profile())
             print(f'口型对照：歌曲阶段直接发送{len(direct)}个口型轴的映射目标；启动避让、回中和硬件限速保留。',flush=True)
         if mode=='eyes-neck' and not args.home_only:
             print('上游轨迹规划：'+('开启（仅ID32）' if trajectory['enabled'] else '关闭（使用原150ms位置低通）'),flush=True)

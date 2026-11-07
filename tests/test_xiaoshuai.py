@@ -150,6 +150,11 @@ class XiaoshuaiTests(unittest.TestCase):
         motors={m['id']:m for m in p['motors']};positions={sid:m['neutral'] for sid,m in motors.items()}
         data=np.array([[positions[sid] for sid in ids]]*18,dtype=float)
         data[:,ids.index(31)]-=np.arange(18)*2
+        # Fast reversals exercise the four formerly software-limited mouth axes.
+        for sid in (11,12,26,27):
+            m=motors[sid]
+            data[1:,ids.index(sid)]=[m['safe_min'] if n%2 else m['safe_max'] for n in range(17)]
+        data[1:,ids.index(5)]=motors[5]['safe_min']
         def state(sid):
             self.assertNotIn(sid,HELD);m=motors[sid]
             return dict(position=positions[sid],temperature_c=25,load_raw=0,status_register=0,
@@ -170,9 +175,17 @@ class XiaoshuaiTests(unittest.TestCase):
              patch('vivis.runtime.playback.AudioClock',return_value=clock):
             result=play(p,ids,data,60,'fake',Path(folder)/'log.json',Path(folder)/'STOP')
         self.assertTrue(result['completed'])
+        self.assertEqual(p['direct_position_ids'],p['mouth_motion_ids'])
+        eyelid_was_limited=False
         for event in result['events']:
             self.assertEqual(set(event['goals']),set(ids));self.assertFalse({9,24}&set(event['goals']))
-            self.assertEqual(event['goals'][31],round(data[event['frame'],ids.index(31)]))
+            for sid in p['mouth_motion_ids']:
+                self.assertEqual(event['goals'][sid],round(data[event['frame'],ids.index(sid)]))
+            if event['frame']>0 and event['goals'][5]!=round(data[event['frame'],ids.index(5)]):
+                eyelid_was_limited=True
+        self.assertTrue(eyelid_was_limited)
+        for call in bus.goals.call_args_list:
+            self.assertTrue(all(call.args[1][sid]==900 for sid in p['mouth_motion_ids']))
 
     def test_full_session_initializes_only_face_axes_with_bounded_ram_writes(self):
         import vivis.runtime.developer as launcher

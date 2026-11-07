@@ -19,6 +19,10 @@ class Robot:
         self.definition = read_json(self.path)
         if self.definition.get('schema_version') != 'vivis-robot-1.0':
             raise ValueError('Unsupported robot definition')
+        defaults=self.definition.get('defaults',{})
+        if (defaults.get('mouth_command_mode','limited') not in ('limited','lips-direct')
+                or defaults.get('direct_mouth_scope','round-lip-jaw') not in ('round-lip-jaw','all')):
+            raise ValueError('Invalid robot mouth delivery configuration')
         self.directory = self.path.parent
         self.calibration = self.resolve('calibration')
         self.calibration_sha256 = hashlib.sha256(self.calibration.read_bytes()).hexdigest()
@@ -80,6 +84,9 @@ class Robot:
 
     def motion_profile(self):
         p = copy.deepcopy(self.hardware['runtime'])
+        defaults=self.definition.get('defaults',{})
+        p['default_mouth_command_mode']=defaults.get('mouth_command_mode','limited')
+        p['direct_mouth_scope']=defaults.get('direct_mouth_scope','round-lip-jaw')
         p['motors'] = [{k: copy.deepcopy(v) for k, v in a.items()
                         if k not in ('role', 'playback_enabled', 'acceleration_raw', 'pid_raw', 'deadband_raw')}
                        for a in self.axes.values() if a['playback_enabled'] and a['id'] not in self.excluded_actuator_ids]

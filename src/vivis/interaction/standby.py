@@ -19,7 +19,7 @@ from vivis.runtime.playback import play
 from vivis.runtime.cancellation import operator_cancelled
 from vivis.interaction.follow import MonotonicClock
 from vivis.interaction.animation import FrameMapper
-from vivis.motion.mapping import compile_trajectory,read_json,live_preflight
+from vivis.motion.mapping import compile_trajectory,read_json,live_preflight,direct_mouth_ids
 
 
 class IdleFrames:
@@ -80,6 +80,8 @@ def plan(robot,settings,seconds):
     profile.update(diagnostic_command_ids=ids,held_eye_ids=[],held_neck_ids=[],gaze_owner_ids=[],
         developer_mode='face',scheduled_feedback=True,post_goal_quiet_ms=1,snapshot_chunk_bytes=2,
         face_update_hz=60,control_hz=60,capture_serial_trace=False,retain_event_limit=600)
+    profile['mouth_command_mode']=profile.get('default_mouth_command_mode','limited')
+    profile['direct_position_ids']=direct_mouth_ids(profile) if profile['mouth_command_mode']=='lips-direct' else []
     live_preflight(profile,ids,audio_required=False)
     mapper=FrameMapper(order,shapes,profile,ids,smile_strength=0.,scope='face')
     source=IdleFrames(mapper,settings)

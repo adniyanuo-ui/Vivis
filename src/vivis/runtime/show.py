@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 
 from vivis.runtime.trajectory import load_targets, startup_target, feedback
-from vivis.motion.mapping import ROOT, read_json, live_preflight
+from vivis.motion.mapping import ROOT, read_json, live_preflight,direct_mouth_ids
 from vivis.runtime.playback import play, check_feedback,startup_feedback
 from vivis.vision.policy import TargetReceiver
 from vivis.motion.ownership import tracking_profile, MojiaPlaybackGaze
@@ -76,9 +76,10 @@ def configure_show_volume(device):
                      digital_trim=gain,output_amplitude_factor=3.,before=before,after=after)
 
 
-def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,telemetry_policy=None,mode='eyes-neck',mouth_command_mode='limited',audio_required=True):
+def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,telemetry_policy=None,mode='eyes-neck',mouth_command_mode=None,audio_required=True):
     if mode not in ('face','eyes','eyes-neck'):
         raise ValueError('Unknown developer mode')
+    if mouth_command_mode is None:mouth_command_mode=profile.get('default_mouth_command_mode','limited')
     if mouth_command_mode not in ('limited','lips-direct'):
         raise ValueError('Unknown mouth command mode')
     extra=profile.get('additional_monitor_ids',[32,33,34])
@@ -122,7 +123,7 @@ def prepare(config,profile,ids,positions,authorize_tongue=False,mouth_gain=1.,te
         p['diagnostic_command_ids']=[sid for sid in p['diagnostic_command_ids'] if sid in monitored]
     trajectory,p['mouth_gain_report']=mouth_gain_targets(p,monitored,trajectory,mouth_gain)
     p['mouth_motion_gain']=mouth_gain
-    direct=sorted(set(p.get('round_lip_motion_ids',[]))|set(p.get('jaw_open_motion_ids',[]))) if mouth_command_mode=='lips-direct' else []
+    direct=direct_mouth_ids(p) if mouth_command_mode=='lips-direct' else []
     if mouth_command_mode=='lips-direct' and (not direct or len(set(direct))!=len(direct)
             or any(type(sid) is not int or sid not in p['diagnostic_command_ids'] for sid in direct)
             or set(direct)&set(p['gaze_owner_ids'])):
@@ -340,8 +341,8 @@ def main(argv=None):
     parser.add_argument('--mouth-gain',type=float,default=1.,help='Mouth displacement multiplier, clipped to existing command limits')
     parser.add_argument('--round-lip-gain',type=float,default=1.,help='Runtime MouthFunnel/MouthPucker channel multiplier')
     parser.add_argument('--mouth-speed',type=int,help='Task RAM speed preset for calibrated mouth axes')
-    parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),default='limited',
-                        help='Direct song targets for calibrated Funnel/Pucker and JawOpen axes; hardware speed and homing unchanged')
+    parser.add_argument('--mouth-command-mode',choices=('limited','lips-direct'),
+                        help='Default from robot; lips-direct uses its calibrated direct group, keeping hardware speed and homing')
     parser.add_argument('--home-speed',type=int,default=60,help='Temporary neutral homing speed cap in counts/s')
     parser.add_argument('--home-only',action='store_true',help='Home all inventory axes; no camera, audio or task execution')
     parser.add_argument('--face-fps',type=int,choices=(30,60),default=60,

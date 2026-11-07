@@ -11,6 +11,57 @@ import test_runtime
 
 
 class MouthCommandTests(unittest.TestCase):
+    def test_xiaoshuai_default_and_legacy_direct_cli_cover_all_mouth_axes(self):
+        from vivis.paths import ROOT
+        from vivis.runtime.developer import run_example
+        path=ROOT/'configs/robots/xiaoshuai/robot.json'
+        expected=[10,11,12,13,15,25,26,27,28,30,31]
+        with patch('vivis.hardware.feetech.sdk.OfficialSDKBus',side_effect=AssertionError('serial opened')), \
+             patch('vivis.runtime.developer.subprocess.Popen',side_effect=AssertionError('camera started')):
+            for mode in ('face','eyes','eyes-neck'):
+                for options in ([],['--mouth-command-mode','lips-direct'],['--mouth-command-mode','limited']):
+                    with redirect_stdout(io.StringIO()) as output:
+                        run_example(mode,['--robot',str(path),'--work','0001','--check',*options])
+                    report=json.loads(output.getvalue())
+                    self.assertEqual(report['direct_position_ids'],[] if options[-1:]==['limited'] else expected)
+                    self.assertFalse(set(report['direct_position_ids'])&set(report['gaze_owner_ids']))
+
+    def test_xiaoshuai_song_follow_and_standby_share_direct_group(self):
+        from vivis.paths import ROOT
+        from vivis.motion.mapping import read_json
+        from vivis.interaction.follow import plan as follow
+        from vivis.interaction.singing import plan as song
+        from vivis.interaction.standby import plan as standby
+        robot=Robot(ROOT/'configs/robots/xiaoshuai/robot.json')
+        settings=read_json(ROOT/'configs/interaction/expression_follow.json');settings['tracking_enabled']=True
+        profiles=[follow(robot,settings,1.)['profile'],
+                  song(robot,'0001','eyes-neck',read_json(ROOT/'configs/interaction/p0.json'))['profile'],
+                  standby(robot,read_json(ROOT/'configs/interaction/standby.json'),1.)[0]]
+        for profile in profiles:
+            self.assertEqual(len(profile['direct_position_ids']),11)
+            self.assertEqual(profile['direct_position_ids'],profile['mouth_motion_ids'])
+            self.assertFalse(set(profile['direct_position_ids'])&set(profile['gaze_owner_ids']))
+            self.assertFalse({9,24}&set(profile['diagnostic_command_ids']))
+
+    def test_all_mouth_direct_keeps_initial_approach_and_rejects_partial_group(self):
+        profile,bus,clock=self.fixture(True)
+        profile.update(direct_mouth_scope='all',round_lip_motion_ids=[])
+        trajectory=np.full((9,2),2250.);trajectory[0]=2100.
+        with tempfile.TemporaryDirectory() as directory,patch('vivis.runtime.playback.Bus',return_value=bus), \
+             patch('vivis.runtime.playback.AudioClock',return_value=clock):
+            result=play(profile,[2,12],trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP')
+        self.assertGreater(result['initial_approach_commands'],1)
+        for event in result['events']:
+            self.assertEqual(event['goals'][12],round(trajectory[event['frame'],1]))
+        for invalid in ('partial','scope'):
+            p=copy.deepcopy(profile)
+            if invalid=='partial':p['mouth_motion_ids']=[2,12]
+            else:p['direct_mouth_scope']='unknown'
+            with tempfile.TemporaryDirectory() as directory,patch('vivis.runtime.playback.Bus') as hardware:
+                with self.assertRaises(ValueError):
+                    play(p,[2,12],trajectory,60,'fake',Path(directory)/'log.json',Path(directory)/'STOP')
+                hardware.assert_not_called()
+
     def test_mode_changes_delivery_only_and_derives_all_mouth_axes_from_calibration(self):
         robot=Robot();config=robot.tracking();profile=robot.profile('wz2');before=copy.deepcopy(profile)
         ids=profile['diagnostic_command_ids'];positions=np.full((3,len(ids)),2047.)

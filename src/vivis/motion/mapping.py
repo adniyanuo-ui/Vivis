@@ -9,6 +9,14 @@ import numpy as np
 
 from vivis.paths import ROOT
 
+def direct_mouth_ids(profile):
+    """Derive the robot's direct-delivery group from its active calibration."""
+    scope=profile.get('direct_mouth_scope','round-lip-jaw')
+    if scope=='all':return sorted(set(profile.get('mouth_motion_ids',[])))
+    if scope=='round-lip-jaw':
+        return sorted(set(profile.get('round_lip_motion_ids',[]))|set(profile.get('jaw_open_motion_ids',[])))
+    raise ValueError('Unknown direct mouth scope')
+
 def read_json(path):
     def pairs(items):
         result={}
