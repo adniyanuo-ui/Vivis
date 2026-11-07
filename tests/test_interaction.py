@@ -166,6 +166,22 @@ class SmileTests(unittest.TestCase):
 
 
 class OfflineP0Tests(unittest.TestCase):
+    def test_face_only_mapping_excludes_held_eyes_and_does_not_require_a_camera(self):
+        for name in ('xiaoshuai','mojia'):
+            robot=Robot(ROOT/f'configs/robots/{name}/robot.json')
+            robot.definition['cameras']['right']['device']=None
+            with patch('vivis.hardware.feetech.sdk.OfficialSDKBus',side_effect=AssertionError('serial opened')), \
+                 patch('vivis.interaction.stream.subprocess.Popen',side_effect=AssertionError('camera/model opened')):
+                p=plan(robot,'0001','face',settings(),smile=False)
+                mapper=FrameMapper(p['order'],p['shapes'],p['profile'],p['ids'],
+                    scope=p['mapping_scope'],channel_gains=p['source_gains'])
+                targets=mapper.map_weights([0.]*52)
+            self.assertEqual(p['mapping_scope'],'face')
+            self.assertFalse({7,8,22,23,32,33,34}&set(p['profile']['diagnostic_command_ids']))
+            self.assertEqual(p['profile']['gaze_owner_ids'],[])
+            self.assertEqual(p['tracking']['camera']['device'],'unused')
+            np.testing.assert_array_equal(targets,mapper.neutral)
+
     def test_plan_never_reads_source_expression_or_old_target_json(self):
         original_text=Path.read_text;original_bytes=Path.read_bytes
         def guarded_text(path,*args,**kwargs):

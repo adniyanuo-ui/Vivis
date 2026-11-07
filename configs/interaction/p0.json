@@ -10,8 +10,8 @@
   "social_channels": [
     "MouthSmileLeft", "MouthSmileRight", "CheekSquintLeft", "CheekSquintRight"
   ],
-  "mouth_channel_gain": 1.2,
-  "round_lip_channel_gain": 1.2,
+  "mouth_channel_gain": 1.0,
+  "round_lip_channel_gain": 1.0,
   "social_smile": {
     "enabled": true,
     "gate": {

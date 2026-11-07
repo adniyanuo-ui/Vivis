@@ -87,11 +87,12 @@ def plan(robot, work_name, mode, settings, smile=True):
     source_gains=speech_channel_gains(settings,order)
     calibration=read_json(robot.calibration)
     shapes={s['shape']:{p['id']:p['position'] for p in s['positions']} for s in calibration['blendShapes']}
-    face_ids,zero,_=compile_trajectory(np.zeros((1,61)),order,shapes,profile,scope='face_eyes')
+    mapping_scope='face' if mode=='face' else 'face_eyes'
+    face_ids,zero,_=compile_trajectory(np.zeros((1,61)),order,shapes,profile,scope=mapping_scope)
     # A neutral scaffold defines duration/ownership only; every song target
     # comes from runtime A2F. No expression or target JSON is loaded.
     neutral=np.repeat(zero,max(1,math.ceil(duration*60)),axis=0)
-    config=robot.tracking()
+    config=robot.tracking(device='unused' if mode=='face' else None)
     if robot.definition['defaults'].get('hold_vertical_eyes'):
         held={a['id'] for a in config['control']['axes'] if a['coordinate']=='y'}
         config['control']['vertical_enabled']=False
@@ -110,9 +111,10 @@ def plan(robot, work_name, mode, settings, smile=True):
     live_preflight(profile,ids)
     # Validate social configuration during --check, before opening any device.
     FrameMapper(order,shapes,profile,ids,settings['smile_strength'],
-        channel_gains=source_gains,social_channels=settings.get('social_channels'))
+        channel_gains=source_gains,social_channels=settings.get('social_channels'),scope=mapping_scope)
     return dict(work=work,audio=audio,inference_audio=inference,duration=duration,profile=profile,ids=ids,neutral=neutral,
-                tracking=config,order=order,shapes=shapes,authorize=authorize,perception=perception,source_gains=source_gains)
+                tracking=config,order=order,shapes=shapes,authorize=authorize,perception=perception,source_gains=source_gains,
+                mapping_scope=mapping_scope)
 
 
 def main(argv=None):
@@ -232,7 +234,7 @@ def main(argv=None):
                             packet=receiver.poll(now)
                             return packet.get('social_smile') if packet else None
                         mapper=FrameMapper(p['order'],p['shapes'],profile,ids,settings['smile_strength'],
-                            channel_gains=p['source_gains'],social_channels=settings.get('social_channels'))
+                            channel_gains=p['source_gains'],social_channels=settings.get('social_channels'),scope=p['mapping_scope'])
                         source=LiveFrames(ROOT/settings['binary'],ROOT/settings['model'],inference,p['duration'],
                             directory/'a2f',mapper,social if args.smile=='on' else None,
                             settings['buffer_frames'],settings['prebuffer_frames'],settings['underflow_grace_s'],args.capture_animation)

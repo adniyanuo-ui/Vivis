@@ -76,7 +76,7 @@ class SpeechGainTests(unittest.TestCase):
         reference=FrameMapper(p['order'],p['shapes'],p['profile'],p['ids'])
         np.testing.assert_array_equal(mapper.map_weights(original),reference.map_weights(expected))
         self.assertEqual(original,saved);self.assertEqual(mapper.last_fused,expected)
-        self.assertEqual(speech_channel_gains(config('configs/interaction/p0.json'),p['order'])['MouthPucker'],1.2)
+        self.assertTrue(all(g==1. for g in speech_channel_gains(config('configs/interaction/p0.json'),p['order']).values()))
         with self.assertRaises(ValueError):speech_channel_gains({'mouth_channel_gain':float('nan')},p['order'])
 
     def test_prompt_cache_rejects_old_voice_or_old_level_processing(self):
