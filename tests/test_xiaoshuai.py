@@ -97,7 +97,8 @@ class XiaoshuaiTests(unittest.TestCase):
         self.assertLess(targets[:,jaw].min(),1920);self.assertGreater(old[:,jaw].min(),1990)
         self.assertEqual(sum(31 in points for points in shapes.values()),50)
         self.assertEqual(Robot().motion_profile()['jaw_owner'],'all_calibrated')
-        self.assertTrue(all(robot.axes[sid]['max_speed_counts_s']==600 for sid in (5,6,20,21,31)))
+        self.assertTrue(all(robot.axes[sid]['max_speed_counts_s']==600 for sid in (5,6,20,21)))
+        self.assertTrue(all(robot.axes[sid]['max_speed_counts_s']==900 for sid in p['mouth_motion_ids']))
 
     def test_round_lip_gain_does_not_reintroduce_cross_channel_jaw_dilution(self):
         from vivis.motion.channel_gain import round_lip_gain_targets
