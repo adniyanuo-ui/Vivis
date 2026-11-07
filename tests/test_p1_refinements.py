@@ -1,5 +1,5 @@
 """P1 source gains, deferred readiness and home-before-program contracts."""
-from contextlib import contextmanager,ExitStack,redirect_stdout
+from contextlib import contextmanager,ExitStack,redirect_stdout,redirect_stderr
 import copy
 import io
 import json
@@ -18,6 +18,41 @@ def config(name):return json.loads((ROOT/name).read_text())
 
 
 class SpeechGainTests(unittest.TestCase):
+    def test_isolated_jaw_gain_scales_linear_stroke_keeps_neutral_and_clamps_at_endpoint(self):
+        from vivis.interaction.singing import plan
+        robot=Robot(ROOT/'configs/robots/xiaoshuai/robot.json');settings=config('configs/interaction/p0.json')
+        p=plan(robot,'0001','eyes-neck',settings)
+        gains=speech_channel_gains({**settings,'jaw_open_channel_gain':1.8,'round_lip_channel_gain':1.8},p['order'])
+        mapper=FrameMapper(p['order'],p['shapes'],p['profile'],p['ids'],channel_gains=gains)
+        raw=[0.]*52;index=p['ids'].index(31);endpoint=p['shapes']['JawOpen'][31]
+        neutral=mapper.map_weights(raw).copy();self.assertEqual(neutral[index],2047.)
+        raw[p['order'].index('JawOpen')]=.25
+        result=mapper.map_weights(raw);self.assertAlmostEqual(result[index],2047+.25*1.8*(endpoint-2047))
+        for j,sid in enumerate(p['ids']):
+            if sid!=31:self.assertEqual(result[j],neutral[j])
+        raw[p['order'].index('JawOpen')]=1.
+        self.assertEqual(mapper.map_weights(raw)[index],endpoint)
+        self.assertEqual(settings,config('configs/interaction/p0.json'))
+
+    def test_trial_cli_changes_only_three_source_gains_without_opening_hardware_or_saving_defaults(self):
+        from vivis.interaction.singing import main
+        original=(ROOT/'configs/interaction/p0.json').read_bytes()
+        base=['--robot',str(ROOT/'configs/robots/xiaoshuai/robot.json'),'--smile','off','--check']
+        reports=[]
+        with patch('vivis.interaction.stream.subprocess.Popen',side_effect=AssertionError('model opened')), \
+             patch('vivis.hardware.feetech.sdk.OfficialSDKBus',side_effect=AssertionError('serial opened')):
+            for options in ([],['--jaw-open-gain','1.8','--round-lip-gain','1.8']):
+                with redirect_stdout(io.StringIO()) as out:main(base+options)
+                reports.append(json.loads(out.getvalue()))
+            for value in ('nan','0','3.1'):
+                with redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):main(base+['--jaw-open-gain',value])
+        before,after=[r['source_channel_gains'] for r in reports]
+        self.assertEqual({n for n in before if before[n]!=after[n]},{'JawOpen','MouthFunnel','MouthPucker'})
+        self.assertTrue(all(after[n]==1.8 for n in ('JawOpen','MouthFunnel','MouthPucker')))
+        self.assertEqual(reports[0]['inference_audio'],reports[1]['inference_audio'])
+        self.assertEqual(reports[0]['commanded'],reports[1]['commanded'])
+        self.assertEqual((ROOT/'configs/interaction/p0.json').read_bytes(),original)
+
     def test_larger_social_increment_moves_eligible_smile_axes_without_changing_jaw(self):
         from vivis.interaction.singing import plan
         p=plan(Robot(ROOT/'configs/robots/xiaoshuai/robot.json'),'0001','eyes-neck',config('configs/interaction/p0.json'))

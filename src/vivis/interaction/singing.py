@@ -125,6 +125,8 @@ def main(argv=None):
     parser.add_argument('--smile',choices=('on','off'),default='on')
     parser.add_argument('--smile-strength',type=float,help='One-run social smile increment0..0.5; saved default unchanged')
     parser.add_argument('--mouth-speed',type=int)
+    parser.add_argument('--jaw-open-gain',type=float,help='One-run absolute JawOpen source gain; default saved mouth/jaw gain')
+    parser.add_argument('--round-lip-gain',type=float,help='One-run absolute Funnel/Pucker source gain; default saved round-lip gain')
     parser.add_argument('--inference-audio',type=Path,help='Optional sample-aligned dry voice; caller must verify alignment')
     parser.add_argument('--capture-animation',action='store_true',help='Opt-in bounded asynchronous animation trace')
     parser.add_argument('--output',type=Path)
@@ -140,6 +142,11 @@ def main(argv=None):
     if args.mode=='face' and args.smile=='on':parser.error('Smile requires the single camera/target service; use eyes or eyes-neck')
     settings=read_json(args.config)
     if settings.get('schema_version')!='vivis-interactive-singing-1.0':parser.error('Unsupported P0 configuration')
+    for argument,key in (('jaw_open_gain','jaw_open_channel_gain'),('round_lip_gain','round_lip_channel_gain')):
+        value=getattr(args,argument)
+        if value is not None:
+            if not math.isfinite(value) or not 0<value<=3:parser.error(argument.replace('_','-')+' must be finite in (0,3]')
+            settings[key]=value
     if args.smile_strength is not None:
         if not math.isfinite(args.smile_strength) or not 0<=args.smile_strength<=.5:parser.error('Smile strength must be finite0..0.5')
         settings['smile_strength']=args.smile_strength
@@ -170,7 +177,7 @@ def main(argv=None):
     for path in required:
         if not path.is_file():parser.error('Missing P0 dependency: '+str(path)+'; run tools/setup_p0.py')
     check_competitors(args.mode!='face')
-    print(f'TUNING 实时歌曲：口部通道×{settings.get("mouth_channel_gain",1.):g}；圆唇通道绝对×{settings.get("round_lip_channel_gain",1.):g}（不叠乘）；微笑增量{settings["smile_strength"]:g}',flush=True)
+    print(f'TUNING 实时歌曲：其余口部通道×{settings.get("mouth_channel_gain",1.):g}；张嘴绝对×{p["source_gains"]["JawOpen"]:g}；圆唇绝对×{p["source_gains"]["MouthFunnel"]:g}（不叠乘）；微笑增量{settings["smile_strength"]:g}',flush=True)
     print(f'AUDIO INPUT A2F：{inference}；播放：{p["audio"]}',flush=True)
     output=args.output or ROOT/'outputs/p0'/datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     output.mkdir(parents=True,exist_ok=False)

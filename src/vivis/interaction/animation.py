@@ -47,10 +47,11 @@ class A2FAdapter:
 def speech_channel_gains(settings,order):
     """Absolute source gains; round lips override, never multiply a second time."""
     mouth=settings.get('mouth_channel_gain',1.);round_lip=settings.get('round_lip_channel_gain',1.)
-    if any(type(v) not in (int,float) or not math.isfinite(v) or not 0<v<=3 for v in (mouth,round_lip)):
+    jaw=settings.get('jaw_open_channel_gain',mouth)
+    if any(type(v) not in (int,float) or not math.isfinite(v) or not 0<v<=3 for v in (mouth,round_lip,jaw)):
         raise ValueError('Speech channel gains must be finite in (0,3]')
     gains={name:mouth for name in order[:52] if name.startswith(('Mouth','Jaw','Tongue'))}
-    gains.update(MouthFunnel=round_lip,MouthPucker=round_lip)
+    gains.update(JawOpen=jaw,MouthFunnel=round_lip,MouthPucker=round_lip)
     return gains
 
 
