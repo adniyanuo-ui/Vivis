@@ -1,0 +1,125 @@
+{
+  "schema_version": "vivis-inference-audio-alignment-1.0",
+  "sample_rate_hz": 16000,
+  "sample_count": 1806294,
+  "time_origin": "sample_zero",
+  "playback_sha256": "cbd18a1080ce5c1830df8c4e1cbc3cacbcbee37f5075e18ab344549e0a36e3a6",
+  "inference_sha256": "1a509a4c0db143be649f78384ec22cefcffaa48d7cff3b86e7e573ceeaf85c00",
+  "method": "Independent2s voiced-window cross-correlation, fourth-order180..3500Hz bandpass, search+-100ms; no samples shifted or removed",
+  "source": "Original source-project assets/audio/vocals_v3.0.wav used by0001 offline export; restored byte-for-byte",
+  "verification": "All16 window peaks at zero lag;14 windows have correlation>0.5. Weaker20s/60s windows are retained as unverified observations.",
+  "windows": [
+    {
+      "start_seconds": 3,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.7492337115164106,
+      "verified": true
+    },
+    {
+      "start_seconds": 7,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.5961307859475661,
+      "verified": true
+    },
+    {
+      "start_seconds": 20,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.3837915412621712,
+      "verified": false
+    },
+    {
+      "start_seconds": 24,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.8778016867124906,
+      "verified": true
+    },
+    {
+      "start_seconds": 29,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.8997204597165444,
+      "verified": true
+    },
+    {
+      "start_seconds": 33,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.9411830859049654,
+      "verified": true
+    },
+    {
+      "start_seconds": 38,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.9523867877555386,
+      "verified": true
+    },
+    {
+      "start_seconds": 43,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.9479935100690725,
+      "verified": true
+    },
+    {
+      "start_seconds": 49,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.9362513524331655,
+      "verified": true
+    },
+    {
+      "start_seconds": 54,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.73579974713198,
+      "verified": true
+    },
+    {
+      "start_seconds": 60,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.08845812935105789,
+      "verified": false
+    },
+    {
+      "start_seconds": 65,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.9208844658737844,
+      "verified": true
+    },
+    {
+      "start_seconds": 70,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.8822611687542545,
+      "verified": true
+    },
+    {
+      "start_seconds": 75,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.9052845725160585,
+      "verified": true
+    },
+    {
+      "start_seconds": 80,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.7211032035086166,
+      "verified": true
+    },
+    {
+      "start_seconds": 107,
+      "window_seconds": 2,
+      "best_lag_samples": 0,
+      "normalized_peak_correlation": 0.5969562426945196,
+      "verified": true
+    }
+  ]
+}

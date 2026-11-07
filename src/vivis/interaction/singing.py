@@ -54,11 +54,32 @@ def model_audio(path, output):
     return destination
 
 
+def inference_source(work):
+    """Choose verified, sample-aligned model audio; never replace playback PCM."""
+    playback=work['audio'];path=work.get('inference_audio',playback)
+    if 'inference_audio' not in work:return path
+    digest=hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest!=work.get('inference_audio_sha256'):raise ValueError('Inference audio hash mismatch')
+    report_path=work.get('inference_alignment')
+    if report_path is None or hashlib.sha256(report_path.read_bytes()).hexdigest()!=work.get('inference_alignment_sha256'):
+        raise ValueError('Missing or changed inference alignment report')
+    report=read_json(report_path)
+    n,rate,_=audio_info(path);play_n,play_rate,_=audio_info(playback)
+    if (report.get('schema_version')!='vivis-inference-audio-alignment-1.0'
+            or report.get('time_origin')!='sample_zero' or report.get('sample_rate_hz')!=16000
+            or report.get('sample_count')!=round(n/rate*16000)
+            or abs(n/rate-play_n/play_rate)>1/16000
+            or report.get('inference_sha256')!=digest or report.get('playback_sha256')!=work['audio_sha256']):
+        raise ValueError('Inference/playback alignment does not match these audio files')
+    return path
+
+
 def plan(robot, work_name, mode, settings, smile=True):
     work=robot.work(work_name)
     audio=work['audio']
     if hashlib.sha256(audio.read_bytes()).hexdigest()!=work['audio_sha256']:
         raise ValueError('Playback audio hash mismatch')
+    inference=inference_source(work)
     frames,rate,_=audio_info(audio);duration=frames/rate
     profile=robot.motion_profile()
     with robot.resolve('channels').open(encoding='utf-8-sig',newline='') as f:
@@ -90,7 +111,7 @@ def plan(robot, work_name, mode, settings, smile=True):
     # Validate social configuration during --check, before opening any device.
     FrameMapper(order,shapes,profile,ids,settings['smile_strength'],
         channel_gains=source_gains,social_channels=settings.get('social_channels'))
-    return dict(work=work,audio=audio,duration=duration,profile=profile,ids=ids,neutral=neutral,
+    return dict(work=work,audio=audio,inference_audio=inference,duration=duration,profile=profile,ids=ids,neutral=neutral,
                 tracking=config,order=order,shapes=shapes,authorize=authorize,perception=perception,source_gains=source_gains)
 
 
@@ -133,7 +154,7 @@ def main(argv=None):
     if args.audio_reference_port is not None:
         if not 1024<=args.audio_reference_port<=65535 or not args.session_id:parser.error('Invalid audio reference session')
         profile['audio_reference']=dict(host='127.0.0.1',port=args.audio_reference_port,session_id=args.session_id)
-    inference=args.inference_audio or p['audio']
+    inference=args.inference_audio or p['inference_audio']
     n,rate,_=audio_info(inference)
     if abs(n/rate-p['duration'])>1/16000:parser.error('Inference/playback durations differ; need sample-aligned sources')
     required=[ROOT/settings['binary'],ROOT/settings['model']]
@@ -141,6 +162,7 @@ def main(argv=None):
     if args.check:
         print(json.dumps(dict(offline_valid=True,source='runtime_a2f',prerecorded_animation_read=False,
             robot=robot.definition['name'],audio=str(p['audio']),duration_seconds=p['duration'],
+            inference_audio=str(inference),inference_audio_override=args.inference_audio is not None,
             commanded=profile['diagnostic_command_ids'],source_channel_gains=p['source_gains'],social_smile_strength=settings['smile_strength'],
             missing_dependencies=[str(x) for x in required if not x.is_file()],
             motion_hardware_opened=False),ensure_ascii=False))
@@ -149,6 +171,7 @@ def main(argv=None):
         if not path.is_file():parser.error('Missing P0 dependency: '+str(path)+'; run tools/setup_p0.py')
     check_competitors(args.mode!='face')
     print(f'TUNING 实时歌曲：口部通道×{settings.get("mouth_channel_gain",1.):g}；圆唇通道绝对×{settings.get("round_lip_channel_gain",1.):g}（不叠乘）；微笑增量{settings["smile_strength"]:g}',flush=True)
+    print(f'AUDIO INPUT A2F：{inference}；播放：{p["audio"]}',flush=True)
     output=args.output or ROOT/'outputs/p0'/datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     output.mkdir(parents=True,exist_ok=False)
     config_path=output/'tracking.json';config_path.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n')
@@ -175,7 +198,8 @@ def main(argv=None):
         if stop or stop_file.exists() or args.session_stop_file is not None and args.session_stop_file.exists():
             raise RuntimeError('Operator stop')
     handlers={sig:signal.signal(sig,request_stop) for sig in (signal.SIGINT,signal.SIGTERM)}
-    summary=dict(completed=False,source='runtime_a2f',prerecorded_animation_read=False,rounds=[],overlap_warmup=args.overlap_warmup)
+    summary=dict(completed=False,source='runtime_a2f',prerecorded_animation_read=False,rounds=[],overlap_warmup=args.overlap_warmup,
+        inference_audio=str(inference),inference_audio_sha256=hashlib.sha256(inference.read_bytes()).hexdigest(),playback_audio=str(p['audio']))
     status=ROOT/'outputs/runtime/control_status.json';status.parent.mkdir(parents=True,exist_ok=True)
     def publish(state,error=None):
         temporary=status.with_suffix('.tmp');temporary.write_text(json.dumps(dict(active=False,state=state,error=error,

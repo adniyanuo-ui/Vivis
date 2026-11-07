@@ -93,7 +93,9 @@ class PreparationOverlapTests(unittest.TestCase):
             self.assertFalse(kwargs['wait_ready']);events.append('vision_started');yield Vision()
         class Source:
             error=None
-            def __init__(self,*_,**__):events.append('model_started')
+            def __init__(source,*args,**__):
+                if song:self.assertEqual(args[2],p['inference_audio'])
+                events.append('model_started')
             def wait_ready(self,guard):guard();events.append('a2f_ready')
             def close(self):events.append('model_closed')
             def summary(self):return {}
@@ -112,7 +114,7 @@ class PreparationOverlapTests(unittest.TestCase):
             stack.enter_context(patch.object(Path,'is_file',return_value=True))
             stack.enter_context(redirect_stdout(io.StringIO()))
             if song:
-                stack.enter_context(patch.object(singing,'model_audio',return_value=p['audio']))
+                stack.enter_context(patch.object(singing,'model_audio',return_value=p['inference_audio']))
                 stack.enter_context(patch.object(singing,'LiveFrames',Source))
             else:stack.enter_context(patch.object(follow,'ExpressionFrames',Source))
             args=['--robot',str(robot.path),'--config',str(ROOT/setting_name),'--output',str(Path(tmp)/'run'),'--overlap-warmup']

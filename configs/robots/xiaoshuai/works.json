@@ -42,7 +42,11 @@
         28,
         30,
         31
-      ]
+      ],
+      "inference_audio": "assets/works/0001/inference_vocals.wav",
+      "inference_audio_sha256": "1a509a4c0db143be649f78384ec22cefcffaa48d7cff3b86e7e573ceeaf85c00",
+      "inference_alignment": "assets/works/0001/inference_alignment.json",
+      "inference_alignment_sha256": "f465680a08ac89901d3c1f1ae009bbd42ef32e6f6547d5d01af430f782e5dd68"
     }
   }
 }

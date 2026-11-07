@@ -22,7 +22,7 @@ class DistributionTests(unittest.TestCase):
         self.assertTrue({'0001','wz2','Face_ControlBoard_CtrlRig'}.issubset(robot.works['works']))
         rows = verify_assets(robot)
         expected = [(name,kind) for name,work in robot.works['works'].items()
-                    for kind in ('audio','targets',*(('source_clip',) if 'source_clip' in work else ()))]
+                    for kind in ('audio','targets',*(k for k in ('source_clip','inference_audio','inference_alignment') if k in work))]
         self.assertCountEqual([(row['work'],row['kind']) for row in rows],expected)
         self.assertTrue(all(Path(row['path']).stat().st_size > 1000 for row in rows))
         self.assertEqual(verify_model().stat().st_size, 232589)

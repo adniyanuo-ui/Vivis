@@ -43,7 +43,11 @@
         36
       ],
       "source_clip": "assets/works/0001/source.json",
-      "source_clip_sha256": "d023e6f09cf0a381dd3b12b713a178b5e40a6cf2b32a3e4033352cac86512b96"
+      "source_clip_sha256": "d023e6f09cf0a381dd3b12b713a178b5e40a6cf2b32a3e4033352cac86512b96",
+      "inference_audio": "assets/works/0001/inference_vocals.wav",
+      "inference_audio_sha256": "1a509a4c0db143be649f78384ec22cefcffaa48d7cff3b86e7e573ceeaf85c00",
+      "inference_alignment": "assets/works/0001/inference_alignment.json",
+      "inference_alignment_sha256": "f465680a08ac89901d3c1f1ae009bbd42ef32e6f6547d5d01af430f782e5dd68"
     },
     "wz2": {
       "name": "wz2",
