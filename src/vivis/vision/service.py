@@ -97,7 +97,7 @@ def main(argv=None):
                 resources.callback(landmarker.close)
             if social_config.get('enabled'):
                 from vivis.interaction.smile import SmileGate
-                social=SmileGate(social_config['gate'])
+                social=SmileGate(social_config['gate'],max_gap_s=config['transport']['max_age_s'])
             camera = LatestCamera(camera_config)
             resources.callback(camera.close)
             summary['camera_actual'] = camera.actual

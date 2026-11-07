@@ -36,6 +36,7 @@ class IdleFrames:
         self.mapper,self.c=mapper,settings;self.rng=random.Random(seed)
         self.tracking,self.perception=tracking,perception
         self.receiver=self.publisher=None;self.smile=0.;self.last_time=None;self.last_publish=-math.inf
+        self.missing_since=None;self.missing_origin=0.
         self.smile_ticks=0;self.smile_peak=0.;self.social_delta_by_id={}
         self.response=settings.get('social_response',{'enabled':False})
         self.tracking_enabled=settings.get('tracking_enabled',False)
@@ -48,6 +49,11 @@ class IdleFrames:
             if type(tau) not in (int,float) or not math.isfinite(tau) or not .01<=tau<=1:
                 raise ValueError('Invalid standby response filter')
         self.response_tau=self.response['filter_tau_s'] if self.response['enabled'] else .08
+        self.missing_hold=self.response.get('missing_hold_s',0.)
+        self.missing_release=self.response.get('missing_release_s',.08)
+        if (any(type(v) not in (int,float) or not math.isfinite(v) for v in (self.missing_hold,self.missing_release))
+                or not 0<=self.missing_hold<=1 or not .05<=self.missing_release<=3):
+            raise ValueError('Invalid standby missing-smile release')
         self.glance_tau=settings.get('glance_blend_tau_s',.25)
         if type(self.glance_tau) not in (int,float) or not math.isfinite(self.glance_tau) or not .05<=self.glance_tau<=2:
             raise ValueError('Invalid standby glance blend')
@@ -75,7 +81,7 @@ class IdleFrames:
                 phase=u/.4 if u<.4 else (1-u)/.6
                 value=c['blink_peak']*self.smooth(max(0.,min(1.,phase)))
                 for name in ('EyeBlinkLeft','EyeBlinkRight'):weights[self.mapper.order.index(name)]=value
-        desired=0.
+        desired=0.;observed=False
         if self.receiver is not None and self.response['enabled']:
             packet=self.receiver.poll(now)
             try:
@@ -84,8 +90,14 @@ class IdleFrames:
                 if (packet['target'] is not None and event.get('schema_version')=='vivis-smile-event-1.0'
                         and event.get('valid') is True and type(strength) in (int,float)
                         and math.isfinite(strength) and 0<=strength<=1
-                        and type(stamp) in (int,float) and stamp==packet['timestamp_monotonic']):desired=strength
+                        and type(stamp) in (int,float) and stamp==packet['timestamp_monotonic']):
+                    desired=strength;observed=True
             except (TypeError,ValueError,KeyError,AttributeError):pass
+        if observed:self.missing_since=None
+        else:
+            if self.missing_since is None:self.missing_since=now;self.missing_origin=self.smile
+            u=max(0.,min(1.,(now-self.missing_since-self.missing_hold)/self.missing_release))
+            desired=self.missing_origin*(1-self.smooth(u))
         dt=1/60 if self.last_time is None else max(0.,min(.1,now-self.last_time));self.last_time=now
         self.smile+=(desired-self.smile)*(-math.expm1(-dt/self.response_tau))
         target=self.mapper.map_weights(weights,self.smile)

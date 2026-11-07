@@ -27,6 +27,48 @@ def packet(now,strength=1.,target=True):
 
 
 class StandbySocialTests(unittest.TestCase):
+    def test_sustained_smile_stays_up_until_relax_then_holds_and_releases(self):
+        from vivis.interaction.smile import SmileGate
+        gate=SmileGate(settings()['social_response']['gate'])
+        for i in range(301):
+            cue=gate.step(.9,.9,i/60)
+            if i>=60:self.assertAlmostEqual(cue['strength'],1.)
+        # A prolonged smile never self-expires on the old pulse timer.
+        for i in range(301,331):cue=gate.step(0.,0.,i/60)
+        self.assertAlmostEqual(cue['strength'],1.)
+        release=[]
+        for i in range(331,451):release.append(gate.step(0.,0.,i/60)['strength'])
+        self.assertTrue(all(b<=a for a,b in zip(release,release[1:])))
+        self.assertEqual(release[-1],0.)
+
+    def test_sustained_smile_tolerates_brief_missing_landmarks_but_not_permanent_loss(self):
+        from vivis.interaction.smile import SmileGate
+        gate=SmileGate(settings()['social_response']['gate'])
+        for i in range(120):gate.step(.9,.9,i/60)
+        for i in range(120,128):
+            self.assertEqual(gate.step(0.,0.,i/60,valid=False)['strength'],1.)
+        for i in range(128,188):
+            self.assertEqual(gate.step(.9,.9,i/60)['strength'],1.)
+        for i in range(188,368):cue=gate.step(0.,0.,i/60,valid=False)
+        self.assertEqual(cue['strength'],0.)
+
+    def test_legacy_song_smile_remains_a_pulse(self):
+        from vivis.interaction.smile import SmileGate
+        legacy=read_json(ROOT/'configs/interaction/p0.json')['social_smile']['gate']
+        gate=SmileGate(legacy);peak=0.
+        for i in range(300):
+            cue=gate.step(.9,.9,i/60);peak=max(peak,cue['strength'])
+        self.assertGreater(peak,.9);self.assertEqual(cue['strength'],0.)
+
+    def test_camera_processing_pause_cannot_restore_a_stale_held_smile(self):
+        from vivis.interaction.smile import SmileGate
+        gate=SmileGate(settings()['social_response']['gate'],max_gap_s=.3)
+        for i in range(120):gate.step(.9,.9,i/60)
+        self.assertEqual(gate.envelope,1.)
+        # Camera calls stopped; a fresh neutral face must not resurrect the smile.
+        self.assertEqual(gate.step(0.,0.,10.)['strength'],0.)
+        for i in range(1,20):self.assertEqual(gate.step(0.,0.,10.+i/60)['strength'],0.)
+
     def test_multi_face_standby_smiles_use_the_tracked_largest_roi_legacy_is_unchanged(self):
         from vivis.interaction.smile import selected_face_allowed,SmileGate
         standby=settings()['social_response'];legacy=read_json(ROOT/'configs/interaction/p0.json')['social_smile']
@@ -49,6 +91,7 @@ class StandbySocialTests(unittest.TestCase):
             for name in ('xiaoshuai','mojia'):
                 with redirect_stdout(io.StringIO()) as out:main(['--robot',str(robot(name).path),'--check'])
                 report=json.loads(out.getvalue());self.assertTrue(report['tracking_enabled']);self.assertTrue(report['smile_enabled'])
+                self.assertEqual(report['smile_channel_gain'],.5)
                 self.assertFalse(report['hardware_opened']);self.assertFalse(report['camera_opened']);self.assertFalse(report['a2f_used'])
             for options,expected in (([],False),(['--smile','on'],True)):
                 with redirect_stdout(io.StringIO()) as out:singing(['--check',*options])
@@ -77,7 +120,7 @@ class StandbySocialTests(unittest.TestCase):
             for i in range(60):
                 now=i/60;receiver.event=packet(now);source.sample(now,now)
             self.assertGreater(source.smile,.99);before=source.smile
-            for i in range(60,120):
+            for i in range(60,240):
                 now=i/60;receiver.event=packet(now)
                 if bad=='stale':receiver.event['timestamp_monotonic']-=1
                 elif bad=='nan':receiver.event['social_smile']['strength']=float('nan')
@@ -86,7 +129,7 @@ class StandbySocialTests(unittest.TestCase):
                 elif bad=='invalid':receiver.event['social_smile']['valid']=False
                 else:receiver.event['schema_version']='old'
                 goals=source.sample(now,now)
-                if i==60:self.assertTrue(0<source.smile<before)
+                if i==60:self.assertAlmostEqual(source.smile,before)
             self.assertLess(source.smile,.0001);self.assertGreater(source.smile_ticks,0)
             self.assertGreater(source.social_delta_by_id[10],10.)
             self.assertAlmostEqual(goals[ids.index(10)],mapper.neutral[ids.index(10)],places=2)

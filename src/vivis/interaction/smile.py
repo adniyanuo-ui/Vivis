@@ -11,14 +11,23 @@ def selected_face_allowed(config,faces):
 
 
 class SmileGate:
-    """One response per sustained smile; rearm after a low observation."""
-    def __init__(self, config):
+    """Legacy pulse or sustained response to an observable bilateral smile."""
+    def __init__(self, config, max_gap_s=1.):
         self.config = dict(config)
         for key in ('enter', 'exit', 'sustain_s', 'filter_tau_s', 'attack_s', 'hold_s', 'release_s', 'cooldown_s'):
             if type(config[key]) not in (float, int) or not math.isfinite(config[key]) or config[key] < 0:
                 raise ValueError('Invalid smile setting: ' + key)
         if not 0 <= config['exit'] < config['enter'] <= 1 or min(config[k] for k in ('filter_tau_s','attack_s','release_s')) <= 0:
             raise ValueError('Invalid smile hysteresis/timing')
+        self.mode=config.get('response_mode','pulse')
+        if self.mode not in ('pulse','sustained'):raise ValueError('Invalid smile response mode')
+        if type(max_gap_s) not in (int,float) or not math.isfinite(max_gap_s) or not .02<=max_gap_s<=2:
+            raise ValueError('Invalid smile observation freshness')
+        self.max_gap=max_gap_s
+        self.invalid_hold=config.get('invalid_hold_s',.25)
+        if type(self.invalid_hold) not in (int,float) or not math.isfinite(self.invalid_hold) or not 0<=self.invalid_hold<=1:
+            raise ValueError('Invalid smile observation grace')
+        self.active=False;self.low_since=self.invalid_since=None
         self.filtered = 0.
         self.last = None
         self.since = self.trigger = None
@@ -29,7 +38,8 @@ class SmileGate:
     def step(self, left, right, now, valid=True):
         if type(now) not in (int, float) or not math.isfinite(now) or self.last is not None and now < self.last:
             raise ValueError('Smile clock must be finite and monotonic')
-        dt = 0. if self.last is None else min(1., now-self.last)
+        elapsed=0. if self.last is None else now-self.last
+        dt = min(1.,elapsed)
         self.last = now
         values = (left, right)
         if valid and any(type(v) not in (int, float) or not math.isfinite(v) or not 0<=v<=1 for v in values):
@@ -37,6 +47,10 @@ class SmileGate:
         c = self.config
         score = min(values) if valid else 0.
         self.filtered += (score-self.filtered)*(1-math.exp(-dt/c['filter_tau_s']))
+        if self.mode=='sustained':
+            if elapsed>self.max_gap:
+                self.active=False;self.since=self.low_since=self.invalid_since=None
+            return self._sustained(now,dt,valid,elapsed)
         if not valid:
             self.since = self.trigger = None
             self.armed = True
@@ -66,6 +80,33 @@ class SmileGate:
         self.envelope = max(desired, self.envelope-dt/c['release_s']) if desired<self.envelope else desired
         return dict(schema_version='vivis-smile-event-1.0', timestamp_monotonic=now,
                     valid=bool(valid), strength=float(self.envelope), score=float(self.filtered))
+
+    def _sustained(self,now,dt,valid,elapsed):
+        c=self.config
+        if not valid:
+            self.since=None
+            if self.invalid_since is None:self.invalid_since=now
+            if now-self.invalid_since>=self.invalid_hold:
+                self.active=False;self.low_since=None
+        else:
+            self.invalid_since=None
+            if self.active:
+                if self.filtered<=c['exit']:
+                    if self.low_since is None:self.low_since=now
+                    if now-self.low_since>=c['hold_s']:self.active=False
+                else:self.low_since=None
+            elif self.filtered>=c['enter']:
+                if self.since is None:self.since=now
+                if now-self.since>=c['sustain_s'] and now-self.last_trigger>=c['cooldown_s']:
+                    self.active=True;self.last_trigger=now;self.since=self.low_since=None
+            else:self.since=None
+        desired=1. if self.active else 0.
+        self.envelope=(min(desired,self.envelope+dt/c['attack_s']) if desired>self.envelope
+                       else max(desired,self.envelope-elapsed/c['release_s']))
+        phase=('release_wait' if self.active and self.low_since is not None else 'rising' if self.active and self.envelope<1
+               else 'holding' if self.active else 'releasing' if self.envelope>0 else 'neutral')
+        return dict(schema_version='vivis-smile-event-1.0',timestamp_monotonic=now,
+                    valid=bool(valid),strength=float(self.envelope),score=float(self.filtered),phase=phase)
 
 
 class SmileDetector:

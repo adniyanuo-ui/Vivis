@@ -13,19 +13,23 @@
   "social_response": {
     "enabled": true,
     "perception": "configs/perception/face_landmarker.json",
-    "strength": 0.30,
+    "strength": 0.50,
     "face_selection": "largest",
     "channels": ["MouthSmileLeft", "MouthSmileRight", "CheekSquintLeft", "CheekSquintRight"],
     "filter_tau_s": 0.08,
+    "missing_hold_s": 0.25,
+    "missing_release_s": 0.8,
     "gate": {
+      "response_mode": "sustained",
       "enter": 0.45,
       "exit": 0.30,
       "sustain_s": 0.25,
       "filter_tau_s": 0.10,
-      "attack_s": 0.25,
-      "hold_s": 0.50,
-      "release_s": 0.50,
-      "cooldown_s": 2.0
+      "attack_s": 0.40,
+      "hold_s": 0.80,
+      "release_s": 1.0,
+      "invalid_hold_s": 0.25,
+      "cooldown_s": 0.0
     }
   }
 }
