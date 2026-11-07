@@ -1,7 +1,7 @@
 {
   "schema_version": "vivis-programs-1.0",
   "programs": [
-    {"id": "baigufuren", "title": "白骨夫人", "kind": "runtime_a2f", "work": "0001", "aliases": ["白骨夫人", "白骨", "作品一", "节目一", "歌曲一"]},
+    {"id": "baigufuren", "title": "白骨夫人", "kind": "runtime_a2f", "work": "0001", "realtime_response": false, "aliases": ["白骨夫人", "白骨", "作品一", "节目一", "歌曲一"]},
     {"id": "expression-follow", "title": "表情跟随", "kind": "expression_follow", "tracking": true, "aliases": ["表情跟随", "表情模仿", "模仿表情", "跟我学", "学我的表情", "照镜子", "节目二"]}
   ],
   "standby_phrases": ["停止", "结束", "退出", "不用学了", "不用模仿了", "别学了", "不要学了", "别模仿了", "停一下", "停下来", "停止播放", "结束节目", "退出节目", "别唱了", "不用唱了", "停止跟随", "停止表情跟随", "待机", "进入待机", "回到待机", "休息", "休息一下", "休息一会", "休息一会儿", "自己玩一会", "自己玩一会儿", "你自己玩吧"]

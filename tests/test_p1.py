@@ -151,7 +151,8 @@ class IdleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp,redirect_stdout(io.StringIO()), \
              patch('vivis.interaction.standby.prepare_round') as prepare, \
              patch('vivis.interaction.standby.play',return_value={'completed':True}):
-            self.assertEqual(standby(['--robot',str(robot.path),'--seconds','1','--output',str(Path(tmp)/'run')]),0)
+            self.assertEqual(standby(['--robot',str(robot.path),'--seconds','1','--tracking','off','--smile','off',
+                                      '--output',str(Path(tmp)/'run')]),0)
             _,profile,ids,_,preset,*_=prepare.call_args.args
             self.assertEqual(preset,robot.startup(active_ids={m['id']:m for m in profile['motors']},inventory_ids=ids))
             self.assertIsNotNone(preset)

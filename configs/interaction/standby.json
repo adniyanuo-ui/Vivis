@@ -7,5 +7,25 @@
   "look_interval_s": [15.0, 28.0],
   "look_duration_s": 4.5,
   "eye_yaw_span_counts": 35,
-  "neck_yaw_span_counts": 16
+  "neck_yaw_span_counts": 16,
+  "tracking_enabled": true,
+  "glance_blend_tau_s": 0.25,
+  "social_response": {
+    "enabled": true,
+    "perception": "configs/perception/face_landmarker.json",
+    "strength": 0.30,
+    "face_selection": "largest",
+    "channels": ["MouthSmileLeft", "MouthSmileRight", "CheekSquintLeft", "CheekSquintRight"],
+    "filter_tau_s": 0.08,
+    "gate": {
+      "enter": 0.45,
+      "exit": 0.30,
+      "sustain_s": 0.25,
+      "filter_tau_s": 0.10,
+      "attack_s": 0.25,
+      "hold_s": 0.50,
+      "release_s": 0.50,
+      "cooldown_s": 2.0
+    }
+  }
 }

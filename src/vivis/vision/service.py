@@ -51,6 +51,8 @@ def main(argv=None):
     if expression_config.get('enabled') and expression_config.get('face_selection')!='largest':
         raise ValueError('Expression follow requires the existing largest-face selector')
     if social_config.get('enabled'):
+        from vivis.interaction.smile import selected_face_allowed
+        selected_face_allowed(social_config,0)
         identity['target_features'].append('social_smile')
     if expression_config.get('enabled'):
         identity['target_features'].append('face_expression')
@@ -130,14 +132,16 @@ def main(argv=None):
                 packet, jpeg, metrics = vision.detect(sample)
                 if landmarker is not None:
                     # Expression-follow uses the SAME selected largest-face ROI.
-                    # P0 social cues still require exactly one detected face.
-                    selected=expression_config.get('enabled') or metrics['faces']==1
+                    # Standby follows and responds to this SAME selected ROI.
+                    # Legacy/P0 defaults retain the single-face requirement.
+                    social_selected=social is not None and selected_face_allowed(social_config,metrics['faces'])
+                    selected=expression_config.get('enabled') or social_selected
                     observation=landmarker.observe(sample,packet['target'] if selected else None)
                     if expression_config.get('enabled'):packet['face_expression']=observation
                     if social is not None:
                         weights=observation['weights']
                         packet['social_smile']=social.step(weights.get('mouthSmileLeft',0.),weights.get('mouthSmileRight',0.),
-                            observation['timestamp_monotonic'],observation['valid'] and metrics['faces']==1)
+                            observation['timestamp_monotonic'],observation['valid'] and social_selected)
                 now = time.monotonic()
                 last_sequence = sample[0]
                 age = now - sample[1]

@@ -2,6 +2,14 @@
 import math
 
 
+def selected_face_allowed(config,faces):
+    """Allow the tracker's selected largest ROI, or require one face in frame."""
+    selection=config.get('face_selection','single')
+    if selection not in ('single','largest') or type(faces) is not int or faces<0:
+        raise ValueError('Invalid smile face-selection policy/count')
+    return faces>0 if selection=='largest' else faces==1
+
+
 class SmileGate:
     """One response per sustained smile; rearm after a low observation."""
     def __init__(self, config):

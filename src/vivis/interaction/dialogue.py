@@ -1,4 +1,4 @@
-"""P1 local voice program selection, cancellation and camera-free standby."""
+"""P1 local voice selection, cancellation and socially responsive standby."""
 import argparse
 from datetime import datetime
 import fcntl
@@ -51,11 +51,14 @@ def program_command(program,robot,folder,speech,settings):
     common=['--robot',str(robot.path),'--output',str(folder),'--session-stop-file',str(stop)]
     if program is None:
         return base+['vivis.interaction.standby',*common,'--seconds',str(settings['standby_seconds']),
-                     '--config',str(ROOT/settings['standby'])]
+                     '--config',str(ROOT/settings['standby'])]+(['--overlap-warmup'] if settings.get('overlap_warmup',False) else [])
     if not settings.get('diagnostics',False):common+=['--compact-logs']
     if settings.get('overlap_warmup',False):common+=['--overlap-warmup']
     if program['kind']=='runtime_a2f':
+        response=program.get('realtime_response',False)
+        if type(response) is not bool:raise ValueError('Program realtime_response must be boolean')
         return base+['vivis.interaction.singing',*common,'--work',program['work'],'--repeat','1',
+            '--smile','on' if response else 'off',
             '--audio-reference-port',str(speech['aec']['reference_port']),'--session-id',folder.name,
             '--soft-audio-cancel-ms',str(settings['soft_audio_cancel_ms'])]
     if program['kind']=='expression_follow':

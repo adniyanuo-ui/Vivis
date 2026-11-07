@@ -74,7 +74,7 @@ def inference_source(work):
     return path
 
 
-def plan(robot, work_name, mode, settings, smile=True):
+def plan(robot, work_name, mode, settings, smile=False):
     work=robot.work(work_name)
     audio=work['audio']
     if hashlib.sha256(audio.read_bytes()).hexdigest()!=work['audio_sha256']:
@@ -124,7 +124,7 @@ def main(argv=None):
     parser.add_argument('--config',type=Path,default=ROOT/'configs/interaction/p0.json')
     parser.add_argument('--repeat',type=int,default=1)
     parser.add_argument('--mode',choices=('face','eyes','eyes-neck'),default='eyes-neck')
-    parser.add_argument('--smile',choices=('on','off'),default='on')
+    parser.add_argument('--smile',choices=('on','off'),default='off',help='节目默认关闭实时微笑叠加；on仅作显式对照')
     parser.add_argument('--smile-strength',type=float,help='One-run social smile increment0..0.5; saved default unchanged')
     parser.add_argument('--mouth-speed',type=int)
     parser.add_argument('--jaw-open-gain',type=float,help='One-run absolute JawOpen source gain; default saved mouth/jaw gain')
@@ -172,14 +172,14 @@ def main(argv=None):
         print(json.dumps(dict(offline_valid=True,source='runtime_a2f',prerecorded_animation_read=False,
             robot=robot.definition['name'],audio=str(p['audio']),duration_seconds=p['duration'],
             inference_audio=str(inference),inference_audio_override=args.inference_audio is not None,
-            commanded=profile['diagnostic_command_ids'],source_channel_gains=p['source_gains'],social_smile_strength=settings['smile_strength'],
+            commanded=profile['diagnostic_command_ids'],source_channel_gains=p['source_gains'],social_smile_enabled=args.smile=='on',social_smile_strength=settings['smile_strength'],
             missing_dependencies=[str(x) for x in required if not x.is_file()],
             motion_hardware_opened=False),ensure_ascii=False))
         return 0
     for path in required:
         if not path.is_file():parser.error('Missing P0 dependency: '+str(path)+'; run tools/setup_p0.py')
     check_competitors(args.mode!='face')
-    print(f'TUNING 实时歌曲：其余口部通道×{settings.get("mouth_channel_gain",1.):g}；张嘴绝对×{p["source_gains"]["JawOpen"]:g}；圆唇绝对×{p["source_gains"]["MouthFunnel"]:g}（不叠乘）；微笑增量{settings["smile_strength"]:g}',flush=True)
+    print(f'TUNING 实时歌曲：其余口部通道×{settings.get("mouth_channel_gain",1.):g}；张嘴绝对×{p["source_gains"]["JawOpen"]:g}；圆唇绝对×{p["source_gains"]["MouthFunnel"]:g}（不叠乘）；微笑回应={args.smile}（增量{settings["smile_strength"]:g}）',flush=True)
     print(f'AUDIO INPUT A2F：{inference}；播放：{p["audio"]}',flush=True)
     output=args.output or ROOT/'outputs/p0'/datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     output.mkdir(parents=True,exist_ok=False)
