@@ -49,10 +49,29 @@ def preview_state():
         return None
 
 
+class VisionReadiness:
+    """Non-actuating worker startup, optionally overlapped with bounded homing."""
+    def __init__(self,child,config,digest,output,ready=False):
+        self.child,self.config,self.digest,self.output=child,config,digest,output
+        self.started=time.monotonic();self.deadline=self.started+20;self.ready=ready;self.ready_at=None
+
+    def check(self):
+        if self.child is not None and self.child.poll() is not None:
+            raise RuntimeError('视觉服务启动失败或已退出，查看 '+str(self.output/'vision.log'))
+
+    def wait_ready(self,guard=lambda:None):
+        while True:
+            guard();self.check()
+            if self.ready or compatible_vision(preview_state(),self.config,self.digest):
+                self.ready=True;self.ready_at=time.monotonic();return
+            if time.monotonic()>=self.deadline:raise RuntimeError('视觉服务20秒内未就绪，查看 '+str(self.output/'vision.log'))
+            time.sleep(.1)
+
+
 @contextmanager
-def vision_service(config_path, output, required, python=None):
+def vision_service(config_path, output, required, python=None,wait_ready=True):
     """Stop only our own child. Reuse an external service only after hash match."""
-    child = log = None
+    child = log = readiness = None
     try:
         if required:
             wanted = hashlib.sha256(config_path.read_bytes()).hexdigest()
@@ -68,18 +87,10 @@ def vision_service(config_path, output, required, python=None):
                                          cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                          env={**os.environ, 'PYTHONPATH': str(ROOT / 'src'),'PYTHONNOUSERSITE':'1'},
                                          start_new_session=os.environ.get('VIVIS_MANAGED_SESSION')!='1')
-                deadline = time.monotonic() + 20
-                while time.monotonic() < deadline:
-                    if child.poll() is not None:
-                        raise RuntimeError('视觉服务启动失败，查看 ' + str(output / 'vision.log'))
-                    current = preview_state()
-                    if compatible_vision(current,config,wanted):
-                        break
-                    time.sleep(.1)
-                else:
-                    raise RuntimeError('视觉服务20秒内未就绪，查看 ' + str(output / 'vision.log'))
+            readiness=VisionReadiness(child,config,wanted,output,ready=current is not None)
+            if wait_ready:readiness.wait_ready()
             print('监控：http://127.0.0.1:8765/', flush=True)
-        yield
+        yield readiness
     finally:
         try:
             if child is not None and child.poll() is None:

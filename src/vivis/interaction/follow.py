@@ -103,6 +103,7 @@ def main(argv=None):
     parser.add_argument('--output',type=Path)
     parser.add_argument('--session-stop-file',type=Path,help=argparse.SUPPRESS)
     parser.add_argument('--compact-logs',action='store_true',help=argparse.SUPPRESS)
+    parser.add_argument('--overlap-warmup',action='store_true',help=argparse.SUPPRESS)
     parser.add_argument('--check',action='store_true',help='离线检查，不打开相机、串口、音频或模型')
     args=parser.parse_args(argv)
     settings=read_json(args.config)
@@ -144,7 +145,7 @@ def main(argv=None):
             raise RuntimeError('Operator stop')
     handlers={sig:signal.signal(sig,request_stop) for sig in (signal.SIGINT,signal.SIGTERM)}
     summary=dict(completed=False,program='expression-follow',robot=robot.definition['name'],audio_opened=False,
-                 a2f_used=False,command_ids=ids,eye_neck_held=mode=='face',tracking_mode=mode)
+                 a2f_used=False,command_ids=ids,eye_neck_held=mode=='face',tracking_mode=mode,overlap_warmup=args.overlap_warmup)
     status=ROOT/'outputs/runtime/control_status.json';status.parent.mkdir(parents=True,exist_ok=True)
     publisher=receiver=source=None;report={}
     def publish(state,error=None):
@@ -158,11 +159,21 @@ def main(argv=None):
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             publisher=PreviewPublisher(status)
             try:
-                with vision_service(output/'tracking.json',output,True,python=str(ROOT/p['perception']['python'])):
-                    receiver=TargetReceiver(p['tracking']);receiver.wait_ready()
+                options={'wait_ready':False} if args.overlap_warmup else {}
+                with vision_service(output/'tracking.json',output,True,python=str(ROOT/p['perception']['python']),**options) as vision:
+                    receiver=TargetReceiver(p['tracking'])
+                    def preparing_guard():
+                        guard()
+                        if vision is not None:vision.check()
+                    if not args.overlap_warmup:receiver.wait_ready()
+                    else:print('WARMUP START 视觉预热与自检回中并行；回中后才启用跟随',flush=True)
                     guard();print('PREPARE '+mode,flush=True)
                     prepare_round(home_args,profile,ids,home['axes'],startup,clearance,robot.telemetry(),
-                                  guard,report,output,publish)
+                                  preparing_guard if args.overlap_warmup else guard,report,output,publish)
+                    if args.overlap_warmup:
+                        if vision is not None:vision.wait_ready(guard)
+                        receiver.wait_ready();guard()
+                        print('WARMUP READY 视觉与回中均已就绪',flush=True)
                     # One preview publisher and one receiver are shared by both
                     # sources. Gaze uses the existing reviewed controller only.
                     gaze=MojiaPlaybackGaze(p['tracking'],profile,ids,receiver,neck=True) if mode!='face' else None

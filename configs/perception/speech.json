@@ -20,12 +20,25 @@
     "hotwords_score": 1.5
   },
   "tts": {
-    "directory": "outputs/speech/models/tts",
-    "model": "model.int8.onnx",
+    "engine": "kokoro",
+    "directory": "outputs/speech/models/tts_kokoro_zh",
+    "model": "model.onnx",
+    "voices": "voices.bin",
     "tokens": "tokens.txt",
-    "lexicon": "lexicon.txt",
-    "dict": "dict",
-    "threads": 2
+    "lexicon": "lexicon-zh.txt",
+    "speaker_id": 58,
+    "speaker_name": "zm_009",
+    "speed": 1.0,
+    "threads": 2,
+    "rule_fsts": ["date-zh.fst", "number-zh.fst", "phone-zh.fst"]
+  },
+  "prompt_level": {
+    "method": "r128",
+    "reference_audio": "assets/works/0001/audio.wav",
+    "relative_loudness_lu": -3.0,
+    "true_peak_dbfs": -1.0,
+    "compression_threshold_dbfs": -24.0,
+    "compression_ratio": 4.0
   },
   "aec": {
     "enabled": true,

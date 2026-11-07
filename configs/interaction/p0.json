@@ -6,7 +6,9 @@
   "buffer_frames": 180,
   "prebuffer_frames": 120,
   "underflow_grace_s": 0.2,
-  "smile_strength": 0.15,
+  "smile_strength": 0.30,
+  "mouth_channel_gain": 1.2,
+  "round_lip_channel_gain": 1.2,
   "social_smile": {
     "enabled": true,
     "gate": {

@@ -36,6 +36,13 @@ def dependencies(config,listener_only=False):
         required.extend(ROOT/perception[k] for k in ('python','model'))
     for path in required:
         if not path.is_file():missing.append(str(path))
+    if not listener_only:
+        try:
+            from vivis.speech.prompts import cache_matches
+            metadata=read_json(ROOT/speech['prompts']/'metadata.json')
+            valid=cache_matches(speech,metadata)
+        except (OSError,ValueError):valid=False
+        if not valid:missing.append('Prompt cache voice/level differs; run python3 tools/setup_p1.py')
     return speech,missing
 
 
@@ -46,6 +53,7 @@ def program_command(program,robot,folder,speech,settings):
         return base+['vivis.interaction.standby',*common,'--seconds',str(settings['standby_seconds']),
                      '--config',str(ROOT/settings['standby'])]
     if not settings.get('diagnostics',False):common+=['--compact-logs']
+    if settings.get('overlap_warmup',False):common+=['--overlap-warmup']
     if program['kind']=='runtime_a2f':
         return base+['vivis.interaction.singing',*common,'--work',program['work'],'--repeat','1',
             '--audio-reference-port',str(speech['aec']['reference_port']),'--session-id',folder.name,
@@ -70,7 +78,7 @@ class Worker:
             try:
                 for line in self.process.stdout:
                     self.log.write(line)
-                    if line.startswith(('SELF-CHECK ','HOME ','PREPARE COMPLETE','PREPARE FAILED','PREPARE CANCELLED')):
+                    if line.startswith(('SELF-CHECK ','HOME ','WARMUP ','TUNING ','PREPARE COMPLETE','PREPARE FAILED','PREPARE CANCELLED')):
                         state={'START':'running','PASS':'passed','FAIL':'failed','CANCELLED':'cancelled'}.get(line.split()[1]) if line.startswith('SELF-CHECK ') else None
                         if state is not None:self.preparation['state']=state
                         self.preparation['last_message']=line.rstrip();print(line.rstrip(),flush=True)
@@ -150,6 +158,7 @@ def main(argv=None):
     args=parser.parse_args(argv);settings=read_json(args.config)
     if args.diagnostics is not None:settings['diagnostics']=args.diagnostics=='on'
     if settings.get('schema_version')!='vivis-dialog-programs-1.0':parser.error('Unsupported P1 config')
+    if type(settings.get('overlap_warmup',False)) is not bool:parser.error('Invalid overlapping warmup switch')
     if args.seconds is not None and (not math.isfinite(args.seconds) or args.seconds<=0):parser.error('Invalid duration')
     if args.listen_only and args.text_input:parser.error('Choose microphone-only or typed-input mode')
     catalog=read_json(ROOT/settings['programs']);router=IntentRouter(catalog)

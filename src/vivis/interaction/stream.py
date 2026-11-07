@@ -20,6 +20,7 @@ class LiveFrames:
                 or not 1<=prebuffer<=capacity<=600 or not .02<=underflow_grace_s<=.5):
             raise ValueError('Invalid animation queue policy')
         self.mapper,self.social=mapper,social
+        self.started=time.monotonic();self.first_window_ready=None
         self.capacity,self.prebuffer,self.grace=capacity,prebuffer,underflow_grace_s
         self.playback_id=str(uuid.uuid4())
         self.adapter=A2FAdapter(mapper.order[:52],self.playback_id)
@@ -34,6 +35,7 @@ class LiveFrames:
         self.capture_dropped=0
         self.capture_error=None
         self.capture_thread=None
+        self.smile_ticks=0;self.smile_peak=0.;self.social_delta_peak=0.
         try:
             self.process=subprocess.Popen([str(binary),str(model),str(audio),str(self.output/'native'),
                 str(duration),'--stream',self.playback_id],stdout=subprocess.PIPE,stderr=self.log,
@@ -75,6 +77,7 @@ class LiveFrames:
                         self.condition.wait(.1)
                     if self.stop.is_set():break
                     self.frames.append(frame);self.generated+=1
+                    if self.first_window_ready is None and len(self.frames)>=self.prebuffer:self.first_window_ready=time.monotonic()
                     self.max_queued=max(self.max_queued,len(self.frames))
                     self.condition.notify_all()
             if not self.stop.is_set() and self.process.wait(timeout=5)!=0:
@@ -122,6 +125,8 @@ class LiveFrames:
         self.last_time=now
         self.smile+=(desired-self.smile)*(1-math.exp(-dt/.08))
         target=self.mapper.map_weights(frame['weights'],self.smile)
+        self.smile_ticks+=int(self.smile>.01);self.smile_peak=max(self.smile_peak,self.smile)
+        self.social_delta_peak=max(self.social_delta_peak,float(max((abs(v) for v in getattr(self.mapper,'last_social_delta',[])),default=0)))
         if self.capture:
             record={**frame,'submitted_audio_seconds':audio_seconds,'social_smile_strength':self.smile,
                     'fused_weights':self.mapper.last_fused,'protected_ids':self.mapper.protected_ids,
@@ -134,8 +139,11 @@ class LiveFrames:
         return dict(kind='runtime_a2f',playback_id=self.playback_id,generated_frames=self.generated,
                     discarded_past_frames=self.discarded,underflow_ticks=self.underflows,
                     queue_capacity=self.capacity,max_queued=self.max_queued,error=self.error,
+                    prebuffer_frames=self.prebuffer,first_window_ready_s=(None if self.first_window_ready is None else self.first_window_ready-self.started),
                     channel_mapping_version='a2f-skin52-v1',raw_animation_capture=bool(self.capture),
                     social_smile_channel_gain=getattr(self.mapper,'smile_strength',None),
+                    source_channel_gains=dict(getattr(self.mapper,'channel_gains',{})),social_response_ticks=self.smile_ticks,
+                    social_envelope_peak=self.smile_peak,social_target_delta_peak_counts=self.social_delta_peak,
                     capture_dropped=self.capture_dropped,capture_error=self.capture_error)
 
     def close(self):

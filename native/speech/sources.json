@@ -60,103 +60,68 @@
     },
     {
       "kind": "tts",
-      "repository": "csukuangfj/vits-melo-tts-zh_en",
-      "revision": "a0d5c6a264c0ef92d70d8661d8cc502d79627cd6",
+      "repository": "csukuangfj/kokoro-multi-lang-v1_1",
+      "revision": "423bfb9ccd6a66115a76602a9630ffea265ae176",
       "files": [
         {
           "rfilename": "LICENSE",
-          "blobId": "7c49476032fa4cd6c8faa8eda042f38a31c4ea88",
-          "size": 1053
+          "blobId": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+          "size": 11358
         },
         {
           "rfilename": "README.md",
-          "blobId": "146aa4632b14918d7f2212fd490d69ea010b3e4c",
-          "size": 257
+          "blobId": "9a76d7b77d202bdbf2a5bc96ad58b3b34d4b950d",
+          "size": 114
         },
         {
-          "rfilename": "date.fst",
+          "rfilename": "date-zh.fst",
           "blobId": "20ec7f4c077f9ec85ca9d01c4b4f4581f6e552ee",
           "size": 59154
         },
         {
-          "rfilename": "dict/README.md",
-          "blobId": "887911898611a1032f606bdbbdd6315b7bf992f6",
-          "size": 683
-        },
-        {
-          "rfilename": "dict/hmm_model.utf8",
-          "blobId": "2e1f807a0f31eeee3abe4cd1e0a0419d143af96a",
-          "size": 519739
-        },
-        {
-          "rfilename": "dict/idf.utf8",
-          "blobId": "4ca9cecfc1d4108d639f06b83d42ab930a79fa92",
-          "size": 5998717
-        },
-        {
-          "rfilename": "dict/jieba.dict.utf8",
-          "blobId": "0015948de30f38fa97dd20adef231c1909bd8efd",
-          "size": 5071204
-        },
-        {
-          "rfilename": "dict/pos_dict/char_state_tab.utf8",
-          "blobId": "e1e4d8d815b2938d199f14c922398714286eef95",
-          "size": 327139
-        },
-        {
-          "rfilename": "dict/pos_dict/prob_emit.utf8",
-          "blobId": "cc207d11dc958a46f8f91d142bdb330f2b5d28a0",
-          "size": 1687686
-        },
-        {
-          "rfilename": "dict/pos_dict/prob_start.utf8",
-          "blobId": "433750d56bed6affb5b1b2989044403bcef4448e",
-          "size": 4347
-        },
-        {
-          "rfilename": "dict/pos_dict/prob_trans.utf8",
-          "blobId": "87e5ac5ca772a625f0a0f67352e9b31d6872461c",
-          "size": 124159
-        },
-        {
-          "rfilename": "dict/stop_words.utf8",
-          "blobId": "32ac9e67dc44222534de99cc298dccd4b8de9907",
-          "size": 8974
-        },
-        {
-          "rfilename": "dict/user.dict.utf8",
-          "blobId": "6a42ee4e06fb197d968d2bb39becad65e01b2e57",
-          "size": 49
-        },
-        {
-          "rfilename": "lexicon.txt",
-          "blobId": "1a1119efceca0c2dae243f84061e70e4e3d99710",
-          "size": 6837671
-        },
-        {
-          "rfilename": "model.int8.onnx",
-          "blobId": "918a7e5c90be318d1f14e8c3efb4651c3c44bcd7",
-          "size": 53517430,
+          "rfilename": "lexicon-zh.txt",
+          "blobId": "e401048e41032e5a9bedc5bd38353c8ec8ae6cc4",
+          "size": 2120131,
           "lfs": {
-            "sha256": "f085f5079e05f039b800aeb542f5253c26a303211b0c6465d0d9387977855a63",
-            "size": 53517430,
-            "pointerSize": 133
+            "sha256": "fea060803db3e59193987f1a3436f56917bda09f3b3595b6588e46ae60cebf93",
+            "size": 2120131,
+            "pointerSize": 132
           }
         },
         {
-          "rfilename": "number.fst",
+          "rfilename": "model.onnx",
+          "blobId": "592dca056f041871ed271ada7e225cdc99adb74e",
+          "size": 325561476,
+          "lfs": {
+            "sha256": "99db0bc8fd0c5033d249fe922db16768b71b4a6b26cfd93d206fbf66c76efb5f",
+            "size": 325561476,
+            "pointerSize": 134
+          }
+        },
+        {
+          "rfilename": "number-zh.fst",
           "blobId": "66c0bd468903fc98d212cd6c3c5b2793ce8eb2c3",
           "size": 64482
         },
         {
-          "rfilename": "phone.fst",
+          "rfilename": "phone-zh.fst",
           "blobId": "2eba908c27ec0767281cad25d322008b16869c5b",
           "size": 88630
         },
         {
           "rfilename": "tokens.txt",
-          "blobId": "78ed7abf73cfa7955577a2894388dcd8f5a317c3",
-          "size": 655
+          "blobId": "615ded432c9d405350bbbce619ee3548147f9713",
+          "size": 1111
+        },
+        {
+          "rfilename": "voices.bin",
+          "blobId": "d9118e949e673fdceae8dcd3102bbb2508512a33",
+          "size": 53790720,
+          "lfs": {
+            "sha256": "e64a5a581d8c2a350d848f51c3121657cd83aa07ed6109172177345874a7244c",
+            "size": 53790720,
+            "pointerSize": 133
+          }
         }
       ]
     },

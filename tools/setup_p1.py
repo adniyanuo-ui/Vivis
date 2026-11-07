@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import urllib.parse
 import urllib.request
@@ -21,6 +22,8 @@ def valid(data,entry):
 def main():
     os.environ.pop('PYTHONPATH',None);os.environ['PYTHONNOUSERSITE']='1'
     cfg=json.loads((ROOT/'configs/perception/speech.json').read_text());python=ROOT/cfg['python']
+    if cfg.get('prompt_level',{}).get('method')=='r128' and shutil.which('sox') is None:
+        raise RuntimeError('Prepare voice prompts first requires: sudo apt-get install sox')
     if not python.exists():subprocess.run([sys.executable,'-m','venv',str(python.parent.parent)],check=True)
     subprocess.run([str(python),'-m','pip','install','-r',str(ROOT/'tools/requirements/speech.txt')],check=True)
     sources=json.loads((ROOT/'native/speech/sources.json').read_text())

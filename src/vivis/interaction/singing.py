@@ -29,7 +29,7 @@ from vivis.vision.policy import TargetReceiver
 from vivis.motion.upstream import configure as configure_trajectory
 from vivis.vision.parallel_follow import configure as configure_parallel
 from vivis.vision.independent_follow import configure as configure_independent
-from vivis.interaction.animation import FrameMapper
+from vivis.interaction.animation import FrameMapper,speech_channel_gains
 from vivis.interaction.stream import LiveFrames
 
 
@@ -63,6 +63,7 @@ def plan(robot, work_name, mode, settings, smile=True):
     profile=robot.motion_profile()
     with robot.resolve('channels').open(encoding='utf-8-sig',newline='') as f:
         order=next(csv.reader(f))[2:]
+    source_gains=speech_channel_gains(settings,order)
     calibration=read_json(robot.calibration)
     shapes={s['shape']:{p['id']:p['position'] for p in s['positions']} for s in calibration['blendShapes']}
     face_ids,zero,_=compile_trajectory(np.zeros((1,61)),order,shapes,profile,scope='face_eyes')
@@ -87,7 +88,7 @@ def plan(robot, work_name, mode, settings, smile=True):
     profile.update(face_update_hz=60,control_hz=60,snapshot_chunk_bytes=2)
     live_preflight(profile,ids)
     return dict(work=work,audio=audio,duration=duration,profile=profile,ids=ids,neutral=neutral,
-                tracking=config,order=order,shapes=shapes,authorize=authorize,perception=perception)
+                tracking=config,order=order,shapes=shapes,authorize=authorize,perception=perception,source_gains=source_gains)
 
 
 def main(argv=None):
@@ -108,6 +109,7 @@ def main(argv=None):
     parser.add_argument('--session-id',default='',help=argparse.SUPPRESS)
     parser.add_argument('--soft-audio-cancel-ms',type=int,default=0,help=argparse.SUPPRESS)
     parser.add_argument('--compact-logs',action='store_true',help=argparse.SUPPRESS)
+    parser.add_argument('--overlap-warmup',action='store_true',help=argparse.SUPPRESS)
     parser.add_argument('--check',action='store_true',help='Offline configuration checks; no devices/models opened')
     args=parser.parse_args(argv)
     if not 1<=args.repeat<=20:parser.error('Repeat must be1..20')
@@ -136,12 +138,14 @@ def main(argv=None):
     if args.check:
         print(json.dumps(dict(offline_valid=True,source='runtime_a2f',prerecorded_animation_read=False,
             robot=robot.definition['name'],audio=str(p['audio']),duration_seconds=p['duration'],
-            commanded=profile['diagnostic_command_ids'],missing_dependencies=[str(x) for x in required if not x.is_file()],
+            commanded=profile['diagnostic_command_ids'],source_channel_gains=p['source_gains'],social_smile_strength=settings['smile_strength'],
+            missing_dependencies=[str(x) for x in required if not x.is_file()],
             motion_hardware_opened=False),ensure_ascii=False))
         return 0
     for path in required:
         if not path.is_file():parser.error('Missing P0 dependency: '+str(path)+'; run tools/setup_p0.py')
     check_competitors(args.mode!='face')
+    print(f'TUNING 实时歌曲：口部通道×{settings.get("mouth_channel_gain",1.):g}；圆唇通道绝对×{settings.get("round_lip_channel_gain",1.):g}（不叠乘）；微笑增量{settings["smile_strength"]:g}',flush=True)
     output=args.output or ROOT/'outputs/p0'/datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     output.mkdir(parents=True,exist_ok=False)
     config_path=output/'tracking.json';config_path.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n')
@@ -168,7 +172,7 @@ def main(argv=None):
         if stop or stop_file.exists() or args.session_stop_file is not None and args.session_stop_file.exists():
             raise RuntimeError('Operator stop')
     handlers={sig:signal.signal(sig,request_stop) for sig in (signal.SIGINT,signal.SIGTERM)}
-    summary=dict(completed=False,source='runtime_a2f',prerecorded_animation_read=False,rounds=[])
+    summary=dict(completed=False,source='runtime_a2f',prerecorded_animation_read=False,rounds=[],overlap_warmup=args.overlap_warmup)
     status=ROOT/'outputs/runtime/control_status.json';status.parent.mkdir(parents=True,exist_ok=True)
     def publish(state,error=None):
         temporary=status.with_suffix('.tmp');temporary.write_text(json.dumps(dict(active=False,state=state,error=error,
@@ -180,25 +184,37 @@ def main(argv=None):
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             resources.push(lambda _,exc,__:publish('stopped',str(exc) if exc is not None else None))
             vision_python=str(ROOT/p['perception']['python']) if args.smile=='on' else None
-            with vision_service(config_path,output,args.mode!='face',python=vision_python):
+            options={'wait_ready':False} if args.overlap_warmup else {}
+            with vision_service(config_path,output,args.mode!='face',python=vision_python,**options) as vision:
                 for lap in range(1,args.repeat+1):
                     guard();directory=output/f'round_{lap}';directory.mkdir()
                     receiver=TargetReceiver(config) if args.mode!='face' else None
                     source=None
                     report={}
                     try:
-                        if receiver:receiver.wait_ready()
+                        if receiver and not args.overlap_warmup:receiver.wait_ready()
                         def social(now):
                             if receiver is None:return None
                             packet=receiver.poll(now)
                             return packet.get('social_smile') if packet else None
-                        mapper=FrameMapper(p['order'],p['shapes'],profile,ids,settings['smile_strength'])
+                        mapper=FrameMapper(p['order'],p['shapes'],profile,ids,settings['smile_strength'],channel_gains=p['source_gains'])
                         source=LiveFrames(ROOT/settings['binary'],ROOT/settings['model'],inference,p['duration'],
                             directory/'a2f',mapper,social if args.smile=='on' else None,
                             settings['buffer_frames'],settings['prebuffer_frames'],settings['underflow_grace_s'],args.capture_animation)
-                        source.wait_ready(guard)
-                        print(f'ROUND {lap}/{args.repeat} PREPARE runtime-A2F ready',flush=True)
-                        prepare_round(home_args,profile,ids,home['axes'],startup,clearance,robot.telemetry(),guard,report,directory,publish)
+                        def preparing_guard():
+                            guard()
+                            if vision is not None:vision.check()
+                            if source.error:raise RuntimeError(source.error)
+                        if not args.overlap_warmup:source.wait_ready(guard)
+                        else:print('WARMUP START 视觉/A2F预热与自检回中并行；回中后才播放',flush=True)
+                        print(f'ROUND {lap}/{args.repeat} PREPARE runtime-A2F',flush=True)
+                        prepare_round(home_args,profile,ids,home['axes'],startup,clearance,robot.telemetry(),
+                                      preparing_guard if args.overlap_warmup else guard,report,directory,publish)
+                        if args.overlap_warmup:
+                            if vision is not None:vision.wait_ready(guard)
+                            if receiver:receiver.wait_ready()
+                            source.wait_ready(guard);guard()
+                            print('WARMUP READY 视觉、A2F与回中均已就绪',flush=True)
                         gaze=MojiaPlaybackGaze(config,profile,ids,receiver,status,lap,args.repeat,
                             neck=args.mode=='eyes-neck') if receiver else None
                         guard();print(f'ROUND {lap}/{args.repeat} START runtime-A2F + smile={args.smile}',flush=True)
