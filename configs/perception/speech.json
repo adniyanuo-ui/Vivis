@@ -11,13 +11,12 @@
   },
   "sample_rate_hz": 16000,
   "asr": {
-    "directory": "outputs/speech/models/asr_zh_2025",
+    "backend": "paraformer",
+    "directory": "outputs/speech/models/paraformer_zh_en",
     "encoder": "encoder.int8.onnx",
-    "decoder": "decoder.onnx",
-    "joiner": "joiner.int8.onnx",
+    "decoder": "decoder.int8.onnx",
     "tokens": "tokens.txt",
-    "threads": 2,
-    "hotwords_score": 1.5
+    "threads": 2
   },
   "tts": {
     "engine": "qwen3",
@@ -55,7 +54,8 @@
     "model": "model.int8.onnx",
     "tokens": "tokens.txt",
     "threads": 2,
-    "language": "zh"
+    "language": "zh",
+    "enabled": true
   },
   "segmentation": {
     "aggressiveness": 2,

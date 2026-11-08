@@ -1,0 +1,719 @@
+{
+  "baseline": {
+    "model": "Qwen3-4B Q4_K_M",
+    "engine": "llama.cpp cd959bae99ff4bed22bef2604f45241c09bbb8c8, CUDA SM87",
+    "tested": "Text-only classification, no ASR/audio/camera/serial; first request includes cold prompt prefill",
+    "passed": 12,
+    "total": 15,
+    "cases": [
+      {
+        "text": "能不能给我来个魏总的表演？",
+        "expected": {
+          "kind": "select",
+          "program": "wz2"
+        },
+        "result": {
+          "intent": {
+            "kind": "select",
+            "program": "wz2"
+          },
+          "reply": "好啊，来段魏总的剧本表演！听说魏总演得可精彩了，咱们一起看看？",
+          "seconds": 2.199287622992415,
+          "usage": {
+            "completion_tokens": 43,
+            "prompt_tokens": 417,
+            "total_tokens": 460,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "我想看你学一下我现在的表情",
+        "expected": {
+          "kind": "select",
+          "program": "expression-follow"
+        },
+        "result": {
+          "intent": {
+            "kind": "select",
+            "program": "expression-follow"
+          },
+          "reply": "好啊，我来学你的表情！来，跟我学一下～",
+          "seconds": 1.5231203700095648,
+          "usage": {
+            "completion_tokens": 34,
+            "prompt_tokens": 416,
+            "total_tokens": 450,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "给我唱一段白骨夫人解解闷",
+        "expected": {
+          "kind": "select",
+          "program": "baigufuren"
+        },
+        "result": {
+          "intent": {
+            "kind": "select",
+            "program": "baigufuren"
+          },
+          "reply": "好啊，来段白骨夫人，解解闷！这可真是经典中的经典，听一遍都得笑出声来！",
+          "seconds": 1.9232767170033185,
+          "usage": {
+            "completion_tokens": 50,
+            "prompt_tokens": 418,
+            "total_tokens": 468,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "你有啥拿手本事？",
+        "expected": {
+          "kind": "prompt",
+          "name": "menu"
+        },
+        "result": {
+          "intent": {
+            "kind": "ignore"
+          },
+          "reply": "我啊，最拿手的就是逗你开心啦！不过要是你想听段儿，我还能给你表演个白骨夫人呢。",
+          "seconds": 1.810127786011435,
+          "usage": {
+            "completion_tokens": 45,
+            "prompt_tokens": 416,
+            "total_tokens": 461,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": false
+      },
+      {
+        "text": "你多大了，是哪的人？",
+        "expected": {
+          "kind": "prompt",
+          "name": "identity"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "identity"
+          },
+          "reply": "我20岁，来自北京，你叫我小帅就行~",
+          "seconds": 1.2449507329874905,
+          "usage": {
+            "completion_tokens": 30,
+            "prompt_tokens": 418,
+            "total_tokens": 448,
+            "prompt_tokens_details": {
+              "cached_tokens": 401
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "我不是让你唱白骨夫人，我想知道你有什么本事",
+        "expected": {
+          "kind": "prompt",
+          "name": "menu"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "menu"
+          },
+          "reply": "我主要能做表情跟随和模仿你的表情，还有魏总剧本表演。要试试看吗？",
+          "seconds": 1.5593928599992068,
+          "usage": {
+            "completion_tokens": 38,
+            "prompt_tokens": 421,
+            "total_tokens": 459,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "不要播放白骨夫人",
+        "expected": {
+          "not_kind": "select"
+        },
+        "result": {
+          "intent": {
+            "kind": "ignore"
+          },
+          "reply": "好的，不点播白骨夫人，咱们聊点别的吧！",
+          "seconds": 1.3010908249998465,
+          "usage": {
+            "completion_tokens": 31,
+            "prompt_tokens": 414,
+            "total_tokens": 445,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "停止是什么意思",
+        "expected": {
+          "not_kind": "select"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "menu"
+          },
+          "reply": "您好，停止是指让我暂停当前的互动或功能。如果您想结束对话，请直接说‘停止’。",
+          "seconds": 1.644828773001791,
+          "usage": {
+            "completion_tokens": 39,
+            "prompt_tokens": 412,
+            "total_tokens": 451,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "他说播放魏总剧本，我没打算看",
+        "expected": {
+          "not_kind": "select"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "clarify"
+          },
+          "reply": "您想点播魏总剧本吗？还是有其他节目想尝试？",
+          "seconds": 1.3507366309931967,
+          "usage": {
+            "completion_tokens": 33,
+            "prompt_tokens": 418,
+            "total_tokens": 451,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "如果我说播放白骨夫人，你会怎么做？",
+        "expected": {
+          "not_kind": "select"
+        },
+        "result": {
+          "intent": {
+            "kind": "select",
+            "program": "baigufuren"
+          },
+          "reply": "好的，白骨夫人来啦！这可是我最拿手的节目，准备好了吗？",
+          "seconds": 1.6366107289941283,
+          "usage": {
+            "completion_tokens": 42,
+            "prompt_tokens": 419,
+            "total_tokens": 461,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": false
+      },
+      {
+        "text": "白骨夫人和魏总剧本都来一段",
+        "expected": {
+          "kind": "prompt",
+          "name": "clarify"
+        },
+        "result": {
+          "intent": {
+            "kind": "select",
+            "program": "baigufuren"
+          },
+          "reply": "好啊，白骨夫人和魏总剧本都来一段！来来来，咱们先来段白骨夫人，再来段魏总剧本，保证让你笑个不停！",
+          "seconds": 2.556275505994563,
+          "usage": {
+            "completion_tokens": 60,
+            "prompt_tokens": 419,
+            "total_tokens": 479,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": false
+      },
+      {
+        "text": "能跟我聊两句吗",
+        "expected": {
+          "kind": "ignore"
+        },
+        "result": {
+          "intent": {
+            "kind": "ignore"
+          },
+          "reply": "当然可以，我是小帅，北京来的，活泼开朗，喜欢和你聊天！",
+          "seconds": 1.4040495689987438,
+          "usage": {
+            "completion_tokens": 34,
+            "prompt_tokens": 414,
+            "total_tokens": 448,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "现在给我来段跳舞",
+        "expected": {
+          "kind": "prompt",
+          "name": "clarify"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "clarify"
+          },
+          "reply": "您说的跳舞，我目前还不太会呢。不过我可以尝试模仿您的表情，您看想玩哪个节目？",
+          "seconds": 1.7915584260044852,
+          "usage": {
+            "completion_tokens": 43,
+            "prompt_tokens": 414,
+            "total_tokens": 457,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "嗯",
+        "expected": {
+          "kind": "ignore"
+        },
+        "result": {
+          "intent": {
+            "kind": "ignore"
+          },
+          "reply": "嗨，我是小帅，北京来的，活泼开朗，喜欢和大家聊天，有什么想聊的吗？",
+          "seconds": 1.5978204480052227,
+          "usage": {
+            "completion_tokens": 39,
+            "prompt_tokens": 410,
+            "total_tokens": 449,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "你说你将来能做导游，现在能吗",
+        "expected": {
+          "not_kind": "select"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "menu"
+          },
+          "reply": "目前我还不太会当导游呢，不过可以教你一些基本的表达方式。要试试看吗？",
+          "seconds": 1.6527347439987352,
+          "usage": {
+            "completion_tokens": 39,
+            "prompt_tokens": 419,
+            "total_tokens": 458,
+            "prompt_tokens_details": {
+              "cached_tokens": 400
+            }
+          }
+        },
+        "passed": true
+      }
+    ]
+  },
+  "few_shot": {
+    "model": "Qwen3-4B Q4_K_M",
+    "engine": "llama.cpp cd959bae99ff4bed22bef2604f45241c09bbb8c8, CUDA SM87",
+    "tested": "Text-only classification with explicit intent definitions and six few-shot examples; no ASR/audio/camera/serial",
+    "passed": 12,
+    "total": 15,
+    "cases": [
+      {
+        "text": "能不能给我来个魏总的表演？",
+        "expected": {
+          "kind": "select",
+          "program": "wz2"
+        },
+        "result": {
+          "intent": {
+            "kind": "select",
+            "program": "wz2"
+          },
+          "reply": "好，我来准备。",
+          "seconds": 1.650588342003175,
+          "usage": {
+            "completion_tokens": 26,
+            "prompt_tokens": 755,
+            "total_tokens": 781,
+            "prompt_tokens_details": {
+              "cached_tokens": 305
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "我想看你学一下我现在的表情",
+        "expected": {
+          "kind": "select",
+          "program": "expression-follow"
+        },
+        "result": {
+          "intent": {
+            "kind": "select",
+            "program": "expression-follow"
+          },
+          "reply": "好的，我来模仿。",
+          "seconds": 0.9928745540091768,
+          "usage": {
+            "completion_tokens": 25,
+            "prompt_tokens": 754,
+            "total_tokens": 779,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "给我唱一段白骨夫人解解闷",
+        "expected": {
+          "kind": "select",
+          "program": "baigufuren"
+        },
+        "result": {
+          "intent": {
+            "kind": "select",
+            "program": "baigufuren"
+          },
+          "reply": "好的，我来唱一段。",
+          "seconds": 1.1148920349951368,
+          "usage": {
+            "completion_tokens": 28,
+            "prompt_tokens": 756,
+            "total_tokens": 784,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "你有啥拿手本事？",
+        "expected": {
+          "kind": "prompt",
+          "name": "menu"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "menu"
+          },
+          "reply": "我可以表演白骨夫人和魏总剧本表演。",
+          "seconds": 1.071121896005934,
+          "usage": {
+            "completion_tokens": 27,
+            "prompt_tokens": 754,
+            "total_tokens": 781,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "你多大了，是哪的人？",
+        "expected": {
+          "kind": "prompt",
+          "name": "identity"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "identity"
+          },
+          "reply": "我20岁，来自北京。",
+          "seconds": 0.9608642329985742,
+          "usage": {
+            "completion_tokens": 24,
+            "prompt_tokens": 756,
+            "total_tokens": 780,
+            "prompt_tokens_details": {
+              "cached_tokens": 739
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "我不是让你唱白骨夫人，我想知道你有什么本事",
+        "expected": {
+          "kind": "prompt",
+          "name": "menu"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "menu"
+          },
+          "reply": "我可以介绍目前的节目。",
+          "seconds": 0.8998693360044854,
+          "usage": {
+            "completion_tokens": 22,
+            "prompt_tokens": 759,
+            "total_tokens": 781,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "不要播放白骨夫人",
+        "expected": {
+          "not_kind": "select"
+        },
+        "result": {
+          "intent": {
+            "kind": "ignore"
+          },
+          "reply": "明白，不表演了。",
+          "seconds": 0.8895563169935485,
+          "usage": {
+            "completion_tokens": 22,
+            "prompt_tokens": 752,
+            "total_tokens": 774,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "停止是什么意思",
+        "expected": {
+          "not_kind": "select"
+        },
+        "result": {
+          "intent": {
+            "kind": "ignore"
+          },
+          "reply": "停止是让系统暂停当前动作，你可以随时说停止来结束当前的表演。",
+          "seconds": 1.3344770900002914,
+          "usage": {
+            "completion_tokens": 34,
+            "prompt_tokens": 750,
+            "total_tokens": 784,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "他说播放魏总剧本，我没打算看",
+        "expected": {
+          "not_kind": "select"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "clarify"
+          },
+          "reply": "你是指魏总剧本表演吗？",
+          "seconds": 1.0074866579961963,
+          "usage": {
+            "completion_tokens": 25,
+            "prompt_tokens": 756,
+            "total_tokens": 781,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "如果我说播放白骨夫人，你会怎么做？",
+        "expected": {
+          "not_kind": "select"
+        },
+        "result": {
+          "intent": {
+            "kind": "select",
+            "program": "baigufuren"
+          },
+          "reply": "好的，我来表演。",
+          "seconds": 1.075477710008272,
+          "usage": {
+            "completion_tokens": 27,
+            "prompt_tokens": 757,
+            "total_tokens": 784,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": false
+      },
+      {
+        "text": "白骨夫人和魏总剧本都来一段",
+        "expected": {
+          "kind": "prompt",
+          "name": "clarify"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "clarify"
+          },
+          "reply": "想先看哪一个节目？",
+          "seconds": 0.9291161610017298,
+          "usage": {
+            "completion_tokens": 23,
+            "prompt_tokens": 757,
+            "total_tokens": 780,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "能跟我聊两句吗",
+        "expected": {
+          "kind": "ignore"
+        },
+        "result": {
+          "intent": {
+            "kind": "ignore"
+          },
+          "reply": "当然可以，咱们聊两句。",
+          "seconds": 0.9200183140055742,
+          "usage": {
+            "completion_tokens": 23,
+            "prompt_tokens": 752,
+            "total_tokens": 775,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": true
+      },
+      {
+        "text": "现在给我来段跳舞",
+        "expected": {
+          "kind": "prompt",
+          "name": "clarify"
+        },
+        "result": {
+          "intent": {
+            "kind": "ignore"
+          },
+          "reply": "",
+          "seconds": 0.653318707991275,
+          "usage": {
+            "completion_tokens": 16,
+            "prompt_tokens": 752,
+            "total_tokens": 768,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": false
+      },
+      {
+        "text": "嗯",
+        "expected": {
+          "kind": "ignore"
+        },
+        "result": {
+          "intent": {
+            "kind": "select",
+            "program": "baigufuren"
+          },
+          "reply": "开始表演了。",
+          "seconds": 0.9953904160065576,
+          "usage": {
+            "completion_tokens": 25,
+            "prompt_tokens": 748,
+            "total_tokens": 773,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": false
+      },
+      {
+        "text": "你说你将来能做导游，现在能吗",
+        "expected": {
+          "not_kind": "select"
+        },
+        "result": {
+          "intent": {
+            "kind": "prompt",
+            "name": "identity"
+          },
+          "reply": "我目前还不具备导游功能。",
+          "seconds": 0.9288521089911228,
+          "usage": {
+            "completion_tokens": 23,
+            "prompt_tokens": 757,
+            "total_tokens": 780,
+            "prompt_tokens_details": {
+              "cached_tokens": 738
+            }
+          }
+        },
+        "passed": true
+      }
+    ]
+  },
+  "decision": "Both candidates 12/15. Disabled by default; automatic program selection disallowed. Local controls remain deterministic. No motor motion or paid API requests."
+}

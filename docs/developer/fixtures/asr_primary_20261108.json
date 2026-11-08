@@ -1,0 +1,656 @@
+{
+  "schema_version": "vivis-asr-comparison-1.0",
+  "date": "2026-11-08",
+  "hardware": "Jetson AGX Orin 64GB",
+  "method": "Offline file replay, CPU2 threads, same VAD, review disabled; decode wall time includes 1.5s zero padding processing, denominator excludes padding. No live microphones or motors.",
+  "files": {
+    "outputs/speech/prompts/test_wake.wav": {
+      "sha256": "5ed47badb2c74d2a3aa6359b8d468c0ee423e9fa85e9951db25f2e9667b4c552",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "frames": 24086
+    },
+    "outputs/speech/prompts/test_stop.wav": {
+      "sha256": "15c32107f7ddd49ac9624c10f99e4245a510fba41f6feebdb1c087a91b044447",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "frames": 24485
+    },
+    "outputs/speech/prompts/test_exit.wav": {
+      "sha256": "481d00d5730877191a48d9d88d33c8902a18805f1b1968522ef867d36172080e",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "frames": 22185
+    },
+    "outputs/speech/prompts/test_return.wav": {
+      "sha256": "2c9ac5a68a44065fb07d2a57a7e3bb54f5b73d4cbe5bd580026bc85e3ad05931",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "frames": 31416
+    },
+    "outputs/speech/prompts/test_idle.wav": {
+      "sha256": "3e1b6a4f00bfd9b49e3cecf6ded7f9dcb238a58ea2b46412176e49a083baf86d",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "frames": 35924
+    },
+    "outputs/speech/prompts/test_song.wav": {
+      "sha256": "c26e8717a69852d86e1365c73ccea8d1450318e82252205b8378b99bcde165de",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "frames": 50181
+    },
+    "outputs/speech/prompts/test_mirror.wav": {
+      "sha256": "21789b711ddb5551cfd5d73821ff56585b3af0c04a04d65ad8d1e973f7e901b3",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "frames": 53774
+    },
+    "assets/speech/xiaoshuai_qwen3_mandarin/menu.wav": {
+      "sha256": "b6bf770f653720c92f316de772d3d7ac214df9ca9775c1f49341485c1f3a8eb8",
+      "sample_rate_hz": 24000,
+      "channels": 1,
+      "frames": 253440
+    },
+    "outputs/speech/models/paraformer_zh_en/test_wavs/0.wav": {
+      "sha256": "7d93384ca14702cc584a7a33fe2fed92e89e708549161cb12ea38c916882103b",
+      "sample_rate_hz": 16000,
+      "channels": 1,
+      "frames": 160850
+    }
+  },
+  "measurements": [
+    {
+      "backend": "zipformer",
+      "file": "outputs/speech/prompts/test_wake.wav",
+      "result": {
+        "seconds": 1.003625,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 8.000716761001968,
+        "wall_seconds": 0.5962157710018801,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "小帅",
+          "audio_end_seconds": 1.42,
+          "audio_speech_end_seconds": 1.12,
+          "intent": {
+            "kind": "prompt",
+            "name": "welcome"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "zipformer",
+      "file": "outputs/speech/prompts/test_stop.wav",
+      "result": {
+        "seconds": 1.02025,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 7.8237230210070265,
+        "wall_seconds": 0.6616415509924991,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "停止",
+          "audio_end_seconds": 1.32,
+          "audio_speech_end_seconds": 1.02,
+          "intent": {
+            "kind": "interaction",
+            "reason": "停止"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "zipformer",
+      "file": "outputs/speech/prompts/test_exit.wav",
+      "result": {
+        "seconds": 0.924375,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 7.8030906620115275,
+        "wall_seconds": 0.5919139599864138,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "退出",
+          "audio_end_seconds": 1.32,
+          "audio_speech_end_seconds": 1.02,
+          "intent": {
+            "kind": "interaction",
+            "reason": "退出"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "zipformer",
+      "file": "outputs/speech/prompts/test_return.wav",
+      "result": {
+        "seconds": 1.309,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 8.013126868012478,
+        "wall_seconds": 0.6768119810003554,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "不用播了",
+          "audio_end_seconds": 1.7,
+          "audio_speech_end_seconds": 1.4,
+          "intent": {
+            "kind": "interaction",
+            "reason": "不用播了"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "zipformer",
+      "file": "outputs/speech/prompts/test_idle.wav",
+      "result": {
+        "seconds": 1.496875,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 8.066248029994313,
+        "wall_seconds": 0.7532955600036075,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "休息一下",
+          "audio_end_seconds": 1.9,
+          "audio_speech_end_seconds": 1.6,
+          "intent": {
+            "kind": "standby",
+            "reason": "休息一下"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "zipformer",
+      "file": "outputs/speech/prompts/test_song.wav",
+      "result": {
+        "seconds": 2.090875,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 8.124879365001107,
+        "wall_seconds": 0.8406657190062106,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "播放白骨夫人",
+          "audio_end_seconds": 2.5,
+          "audio_speech_end_seconds": 2.2,
+          "intent": {
+            "kind": "select",
+            "program": "baigufuren"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "zipformer",
+      "file": "outputs/speech/prompts/test_mirror.wav",
+      "result": {
+        "seconds": 2.240625,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 8.041159603002598,
+        "wall_seconds": 0.9194118029990932,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "开始表情跟随",
+          "audio_end_seconds": 2.64,
+          "audio_speech_end_seconds": 2.34,
+          "intent": {
+            "kind": "select",
+            "program": "expression-follow"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "zipformer",
+      "file": "assets/speech/xiaoshuai_qwen3_mandarin/menu.wav",
+      "result": {
+        "seconds": 10.56,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 7.977508062002016,
+        "wall_seconds": 3.0225676059926627,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "我能唱白骨夫人演魏总剧本还能学你的表情你点节目我来演",
+          "audio_end_seconds": 9.86,
+          "audio_speech_end_seconds": 9.559999999999999,
+          "intent": {
+            "kind": "prompt",
+            "name": "clarify"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "zipformer",
+      "file": "outputs/speech/models/paraformer_zh_en/test_wavs/0.wav",
+      "result": {
+        "seconds": 10.053125,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 8.014427713002078,
+        "wall_seconds": 3.127524034003727,
+        "utterances": 4,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "昨天是MANDY",
+          "audio_end_seconds": 2.7,
+          "audio_speech_end_seconds": 2.4,
+          "intent": {
+            "kind": "ignore"
+          }
+        },
+        {
+          "text": "推动I礼拜二",
+          "audio_end_seconds": 6.34,
+          "audio_speech_end_seconds": 6.039999999999999,
+          "intent": {
+            "kind": "ignore"
+          }
+        },
+        {
+          "text": "只得AFTMORO",
+          "audio_end_seconds": 8.7,
+          "audio_speech_end_seconds": 8.4,
+          "intent": {
+            "kind": "ignore"
+          }
+        },
+        {
+          "text": "是星期三",
+          "audio_end_seconds": 10.34,
+          "audio_speech_end_seconds": 10.04,
+          "intent": {
+            "kind": "ignore"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "paraformer",
+      "file": "outputs/speech/prompts/test_wake.wav",
+      "result": {
+        "seconds": 1.003625,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 2.1804850970074767,
+        "wall_seconds": 0.32927549099258613,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "小帅",
+          "audio_end_seconds": 1.42,
+          "audio_speech_end_seconds": 1.12,
+          "intent": {
+            "kind": "prompt",
+            "name": "welcome"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "paraformer",
+      "file": "outputs/speech/prompts/test_stop.wav",
+      "result": {
+        "seconds": 1.02025,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 2.1392143400007626,
+        "wall_seconds": 0.25834806500643026,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "停止",
+          "audio_end_seconds": 1.32,
+          "audio_speech_end_seconds": 1.02,
+          "intent": {
+            "kind": "interaction",
+            "reason": "停止"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "paraformer",
+      "file": "outputs/speech/prompts/test_exit.wav",
+      "result": {
+        "seconds": 0.924375,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 2.1004943209991325,
+        "wall_seconds": 0.26030097699549515,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "退出",
+          "audio_end_seconds": 1.32,
+          "audio_speech_end_seconds": 1.02,
+          "intent": {
+            "kind": "interaction",
+            "reason": "退出"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "paraformer",
+      "file": "outputs/speech/prompts/test_return.wav",
+      "result": {
+        "seconds": 1.309,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 2.1309283769951435,
+        "wall_seconds": 0.3460503999958746,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "不用播了",
+          "audio_end_seconds": 1.7,
+          "audio_speech_end_seconds": 1.4,
+          "intent": {
+            "kind": "interaction",
+            "reason": "不用播了"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "paraformer",
+      "file": "outputs/speech/prompts/test_idle.wav",
+      "result": {
+        "seconds": 1.496875,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 2.1129868349962635,
+        "wall_seconds": 0.35030538801220246,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "休息一下",
+          "audio_end_seconds": 1.9,
+          "audio_speech_end_seconds": 1.6,
+          "intent": {
+            "kind": "standby",
+            "reason": "休息一下"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "paraformer",
+      "file": "outputs/speech/prompts/test_song.wav",
+      "result": {
+        "seconds": 2.090875,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 2.1473441459966125,
+        "wall_seconds": 0.4344474999961676,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "播放白骨夫人",
+          "audio_end_seconds": 2.5,
+          "audio_speech_end_seconds": 2.2,
+          "intent": {
+            "kind": "select",
+            "program": "baigufuren"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "paraformer",
+      "file": "outputs/speech/prompts/test_mirror.wav",
+      "result": {
+        "seconds": 2.240625,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 2.134849427995505,
+        "wall_seconds": 0.5078020990040386,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "开始表情跟随",
+          "audio_end_seconds": 2.64,
+          "audio_speech_end_seconds": 2.34,
+          "intent": {
+            "kind": "select",
+            "program": "expression-follow"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "paraformer",
+      "file": "assets/speech/xiaoshuai_qwen3_mandarin/menu.wav",
+      "result": {
+        "seconds": 10.56,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 2.1390514130034717,
+        "wall_seconds": 1.71580911098863,
+        "utterances": 1,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "我能唱白骨夫人演未总剧本还能学你的表情你点节目我来演",
+          "audio_end_seconds": 9.86,
+          "audio_speech_end_seconds": 9.559999999999999,
+          "intent": {
+            "kind": "ignore"
+          }
+        }
+      ]
+    },
+    {
+      "backend": "paraformer",
+      "file": "outputs/speech/models/paraformer_zh_en/test_wavs/0.wav",
+      "result": {
+        "seconds": 10.053125,
+        "padding_seconds": 1.5,
+        "model_load_seconds": 2.139203838989488,
+        "wall_seconds": 1.6299599600024521,
+        "utterances": 4,
+        "review": {
+          "submitted": 0,
+          "skipped_busy": 0,
+          "completed": 0,
+          "errors": 0
+        }
+      },
+      "finals": [
+        {
+          "text": "昨天是 monday",
+          "audio_end_seconds": 2.7,
+          "audio_speech_end_seconds": 2.4,
+          "intent": {
+            "kind": "ignore"
+          }
+        },
+        {
+          "text": "他等 is 礼拜二",
+          "audio_end_seconds": 6.34,
+          "audio_speech_end_seconds": 6.039999999999999,
+          "intent": {
+            "kind": "ignore"
+          }
+        },
+        {
+          "text": "the day after tomor",
+          "audio_end_seconds": 8.7,
+          "audio_speech_end_seconds": 8.4,
+          "intent": {
+            "kind": "ignore"
+          }
+        },
+        {
+          "text": "是星期三",
+          "audio_end_seconds": 10.34,
+          "audio_speech_end_seconds": 10.04,
+          "intent": {
+            "kind": "ignore"
+          }
+        }
+      ]
+    }
+  ],
+  "stress": {
+    "test": "Accelerated file replay with live no-queue review policy, concurrent compiler load; no devices",
+    "audio_seconds": 64.26125,
+    "wall_seconds": 17.190193090005778,
+    "rtf": 0.2675048040616355,
+    "primary_finals": 25,
+    "primary_texts": [
+      "小帅",
+      "播放白骨夫人",
+      "停止",
+      "开始表情跟随",
+      "休息一下",
+      "小帅",
+      "播放白骨夫人",
+      "停止",
+      "开始表情跟随",
+      "休息一下",
+      "小帅",
+      "播放白骨夫人",
+      "停止",
+      "开始表情跟随",
+      "休息一下",
+      "小帅",
+      "播放白骨夫人",
+      "停止",
+      "开始表情跟随",
+      "休息一下",
+      "小帅",
+      "播放白骨夫人",
+      "停止",
+      "开始表情跟随",
+      "休息一下"
+    ],
+    "review": {
+      "submitted": 24,
+      "skipped_busy": 1,
+      "completed": 24,
+      "errors": 0
+    },
+    "fatal_events": [],
+    "feed_p95_ms": 0.590667405049304,
+    "feed_max_ms": 357.40806499961764
+  }
+}

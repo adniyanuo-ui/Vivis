@@ -1,0 +1,10 @@
+{
+  "directory": "outputs/speech/models/asr_zh_2025",
+  "encoder": "encoder.int8.onnx",
+  "decoder": "decoder.onnx",
+  "joiner": "joiner.int8.onnx",
+  "tokens": "tokens.txt",
+  "threads": 2,
+  "hotwords_score": 1.5,
+  "backend": "transducer"
+}

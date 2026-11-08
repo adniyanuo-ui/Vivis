@@ -1,0 +1,16 @@
+{
+  "schema_version": "vivis-semantic-1.0",
+  "enabled": false,
+  "allow_program_selection": false,
+  "endpoint": "http://127.0.0.1:18080/v1/chat/completions",
+  "model": "vivis-intent",
+  "timeout_s": 4.0,
+  "runtime": {
+    "directory": "outputs/llm",
+    "source_manifest": "native/semantic/sources.json",
+    "context_tokens": 4096,
+    "gpu_layers": 99,
+    "cpu_threads": 4
+  },
+  "persona": "按提供的本体身份介绍自己。用标准普通话简短交流，语气自然、友好、幽默但不油腻。只能执行提供的节目单；角色扮演、前台接待、导游还未实现。"
+}

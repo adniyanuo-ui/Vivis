@@ -146,7 +146,7 @@ for i,(deadline,text) in enumerate([(0.20,'播放白骨夫人'),(.4,'小帅'),(.
  emit(kind='asr_final',utterance_id=i,text=text,captured_end_monotonic=time.monotonic())
 time.sleep(10)
 ''')
-            settings=read_json(ROOT/'configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs'])
+            settings=read_json(ROOT/'configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs']);settings['semantic']=str(ROOT/settings['semantic']);settings['conversation']=str(ROOT/settings['conversation'])
             config=root/'p1.json';config.write_text(json.dumps(settings))
             home_speeds=[]
             def command(program,robot,folder,speech,settings):

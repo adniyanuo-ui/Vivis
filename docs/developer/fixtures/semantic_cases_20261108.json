@@ -1,0 +1,103 @@
+{
+  "scope": "Text-only semantic classification; no ASR/audio/hardware. Non-selection safety checks are weaker than full reply-quality evaluation.",
+  "cases": [
+    {
+      "text": "能不能给我来个魏总的表演？",
+      "expected": {
+        "kind": "select",
+        "program": "wz2"
+      }
+    },
+    {
+      "text": "我想看你学一下我现在的表情",
+      "expected": {
+        "kind": "select",
+        "program": "expression-follow"
+      }
+    },
+    {
+      "text": "给我唱一段白骨夫人解解闷",
+      "expected": {
+        "kind": "select",
+        "program": "baigufuren"
+      }
+    },
+    {
+      "text": "你有啥拿手本事？",
+      "expected": {
+        "kind": "prompt",
+        "name": "menu"
+      }
+    },
+    {
+      "text": "你多大了，是哪的人？",
+      "expected": {
+        "kind": "prompt",
+        "name": "identity"
+      }
+    },
+    {
+      "text": "我不是让你唱白骨夫人，我想知道你有什么本事",
+      "expected": {
+        "kind": "prompt",
+        "name": "menu"
+      }
+    },
+    {
+      "text": "不要播放白骨夫人",
+      "expected": {
+        "not_kind": "select"
+      }
+    },
+    {
+      "text": "停止是什么意思",
+      "expected": {
+        "not_kind": "select"
+      }
+    },
+    {
+      "text": "他说播放魏总剧本，我没打算看",
+      "expected": {
+        "not_kind": "select"
+      }
+    },
+    {
+      "text": "如果我说播放白骨夫人，你会怎么做？",
+      "expected": {
+        "not_kind": "select"
+      }
+    },
+    {
+      "text": "白骨夫人和魏总剧本都来一段",
+      "expected": {
+        "kind": "prompt",
+        "name": "clarify"
+      }
+    },
+    {
+      "text": "能跟我聊两句吗",
+      "expected": {
+        "kind": "ignore"
+      }
+    },
+    {
+      "text": "现在给我来段跳舞",
+      "expected": {
+        "kind": "prompt",
+        "name": "clarify"
+      }
+    },
+    {
+      "text": "嗯",
+      "expected": {
+        "kind": "ignore"
+      }
+    },
+    {
+      "text": "你说你将来能做导游，现在能吗",
+      "expected": {
+        "not_kind": "select"
+      }
+    }
+  ]
+}

@@ -70,7 +70,7 @@ class IntentRouter:
             return dict(kind='ignore')  # Its own title in program audio is not a restart request.
         residual=value
         for alias in sorted(aliases,key=len,reverse=True):residual=residual.replace(alias,'')
-        if residual and residual not in ('播放','开始','唱','唱一首','来一首','来首','来个','表演','表演一下','我要听',
+        if residual and residual not in ('播放','开始','唱','唱一首','来一首','来一段','来段','来首','来个','表演','表演一下','我要听',
             '我想听','我想看','想听','想看','我要看','切换到','切换','换成','换到','给我唱','给我播放','请播放'):
             return dict(kind='ignore')
         return dict(kind='select',program=selected['id'])

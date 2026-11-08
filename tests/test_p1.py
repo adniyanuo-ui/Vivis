@@ -224,7 +224,7 @@ class SupervisorTests(unittest.TestCase):
                 time.sleep(.3);yield '开始表情跟随'
                 time.sleep(.1)
         with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp);settings=read('configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs'])
+            root=Path(tmp);settings=read('configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs']);settings['semantic']=str(ROOT/settings['semantic']);settings['conversation']=str(ROOT/settings['conversation'])
             config=root/'p1.json';config.write_text(json.dumps(settings))
             command=[sys.executable,'-c',"print('SELF-CHECK START test',flush=True); print('SELF-CHECK FAIL ID5: outside limits',flush=True); raise SystemExit(1)"]
             with patch('vivis.interaction.dialogue.ROOT',root), \
@@ -268,7 +268,7 @@ class SupervisorTests(unittest.TestCase):
             cancel=lambda:calls.append('cancel'),kill_owned_group=lambda:calls.append('kill_owned'),
             finish=lambda:calls.append('finish'),cancelled_at=None)
         with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp);settings=read('configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs'])
+            root=Path(tmp);settings=read('configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs']);settings['semantic']=str(ROOT/settings['semantic']);settings['conversation']=str(ROOT/settings['conversation'])
             config=root/'p1.json';config.write_text(json.dumps(settings))
             with patch('vivis.interaction.dialogue.ROOT',root), \
                  patch('vivis.interaction.dialogue.dependencies',return_value=(read('configs/perception/speech.json'),[])), \
@@ -283,7 +283,7 @@ class SupervisorTests(unittest.TestCase):
         import fcntl
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);lock_path=root/'outputs/developer/control.lock';lock_path.parent.mkdir(parents=True)
-            config=read('configs/interaction/p1.json');config['programs']=str(ROOT/config['programs'])
+            config=read('configs/interaction/p1.json');config['programs']=str(ROOT/config['programs']);config['semantic']=str(ROOT/config['semantic']);config['conversation']=str(ROOT/config['conversation'])
             file=root/'p1.json';file.write_text(json.dumps(config))
             with lock_path.open('a') as held:
                 fcntl.flock(held,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -333,7 +333,7 @@ flag.unlink()
 with trace.open('a') as f:f.write('end '+str(name)+'\\n')
 sys.exit(130)
 ''')
-            settings=read('configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs'])
+            settings=read('configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs']);settings['semantic']=str(ROOT/settings['semantic']);settings['conversation']=str(ROOT/settings['conversation'])
             config=root/'p1.json';config.write_text(json.dumps(settings))
             def command(program,robot,folder,speech,settings):
                 return [sys.executable,str(script),str(folder),str(flag),str(trace),program['id'] if program else 'standby']

@@ -18,7 +18,7 @@ import uuid
 from vivis.paths import ROOT
 from vivis.runtime.robot import Robot
 from vivis.runtime.developer import check_competitors,preview_state
-from vivis.interaction.intents import IntentRouter
+from vivis.interaction.intents import IntentRouter,normalize
 from vivis.interaction.session import SessionPolicy,STANDBY,INTERACTION
 from vivis.motion.mapping import read_json
 from vivis.hardware.feetech.sdk import check_serial_access
@@ -28,9 +28,8 @@ from vivis.hardware.feetech.protocol import ProtocolError
 def dependencies(config,listener_only=False):
     speech=read_json(ROOT/config['speech']);missing=[]
     required=[ROOT/speech['python']]
-    for k in ('encoder','decoder','joiner','tokens'):required.append(ROOT/speech['asr']['directory']/speech['asr'][k])
-    if 'asr_final' in speech:
-        for k in ('model','tokens'):required.append(ROOT/speech['asr_final']['directory']/speech['asr_final'][k])
+    keys=('encoder','decoder','tokens') if speech['asr'].get('backend')=='paraformer' else ('encoder','decoder','joiner','tokens')
+    for k in keys:required.append(ROOT/speech['asr']['directory']/speech['asr'][k])
     if not listener_only:
         catalog=read_json(ROOT/config['programs'])
         if any(p['kind']=='runtime_a2f' for p in catalog['programs']):
@@ -180,6 +179,8 @@ def main(argv=None):
     parser.add_argument('--simulate-text',action='append',help='Offline routing only; no devices or models')
     parser.add_argument('--seconds',type=float);parser.add_argument('--output',type=Path)
     parser.add_argument('--diagnostics',choices=('on','off'),help='按需保留节目完整控制记录与串口追踪')
+    parser.add_argument('--semantic',choices=('on','off'),help='交互态的可选LLM语义旁路；本地停止/退出始终优先')
+    parser.add_argument('--cloud-chat',choices=('on','off'),help='交互态在线闲聊；无任务或硬件控制权')
     args=parser.parse_args(argv);settings=read_json(args.config)
     warm_speed=settings.get('warm_home_speed_counts_s',60)
     if type(warm_speed) is not int or not 1<=warm_speed<=32767:parser.error('Invalid warm homing speed')
@@ -189,6 +190,14 @@ def main(argv=None):
     if args.seconds is not None and (not math.isfinite(args.seconds) or args.seconds<=0):parser.error('Invalid duration')
     if args.listen_only and args.text_input:parser.error('Choose microphone-only or typed-input mode')
     catalog=read_json(ROOT/settings['programs'])
+    semantic_config=read_json(ROOT/settings['semantic']) if settings.get('semantic') else None
+    conversation_config=read_json(ROOT/settings['conversation']) if settings.get('conversation') else None
+    if args.semantic is not None:
+        if semantic_config is None:parser.error('No semantic provider configuration')
+        semantic_config['enabled']=args.semantic=='on'
+    if args.cloud_chat is not None:
+        if conversation_config is None:parser.error('No conversation provider configuration')
+        conversation_config['enabled']=args.cloud_chat=='on'
     robot=Robot(args.robot or ROOT/settings['robot']);speech,missing=dependencies(settings,listener_only=args.listen_only)
     wake_words=settings.get('wake_words') or robot.definition.get('identity',{}).get('wake_words')
     if wake_words is None:wake_words=[robot.definition.get('identity',{}).get('display_name',robot.definition['name'])]
@@ -237,9 +246,9 @@ def main(argv=None):
             with control.open('a') as probe:fcntl.flock(probe,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:
             lock.close();raise RuntimeError('已有节目占用控制权，请先停止它，再启动P1语音管理器')
-    events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_thread=None;active_target=None;active_program=None
+    events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_trace=asr_thread=None;active_target=None;active_program=None
     quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;preparation={};log=(output/'events.jsonl').open('w')
-    ready=False;warm_ready=False;reported_fault=None
+    ready=False;warm_ready=False;reported_fault=None;semantic=cloud=None
     def request_shutdown(*_):
         nonlocal quitting
         quitting=True
@@ -274,8 +283,22 @@ def main(argv=None):
         return Worker(command,folder,events)
     gate=EventGate(settings['max_event_age_s'])
     try:
+        def optional_event(event):
+            try:events.put_nowait(event)
+            except queue.Full:pass  # Optional result, never displace a control/capture event.
+        identity=robot.definition.get('identity',dict(display_name=robot.definition['name']))
+        if semantic_config and semantic_config.get('enabled',False):
+            from vivis.interaction.semantic import SemanticRouter,SemanticWorker
+            semantic=SemanticWorker(SemanticRouter(semantic_config,catalog,identity),optional_event)
+            record('semantic_config',config=semantic_config,identity=identity,spoken_chat=False)
+        if conversation_config and conversation_config.get('enabled',False):
+            from vivis.interaction.conversation import ConversationRouter
+            from vivis.interaction.semantic import SemanticWorker
+            cloud=SemanticWorker(ConversationRouter(conversation_config,catalog,identity),optional_event,event_kind='cloud_result')
+            record('conversation_config',config=conversation_config,identity=identity,spoken_chat=False)
         if not args.text_input:
             asr_log=(output/'asr.log').open('w')
+            asr_trace=(output/'asr_events.jsonl').open('w')
             asr=subprocess.Popen([str(ROOT/speech['python']),'-m','vivis.speech.listen','--config',str(speech_path)],
                 cwd=ROOT,env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'PYTHONNOUSERSITE':'1'},stdout=subprocess.PIPE,
                 stderr=asr_log,text=True,start_new_session=True)
@@ -283,10 +306,13 @@ def main(argv=None):
                 for line in asr.stdout:
                     try:event=json.loads(line)
                     except ValueError:continue
-                    try:events.put_nowait(event)
-                    except queue.Full:
-                        try:events.get_nowait();events.put_nowait(event)
-                        except (queue.Empty,queue.Full):pass
+                    asr_trace.write(json.dumps(event,ensure_ascii=False)+'\n');asr_trace.flush()
+                    # Partials/review are diagnostics. They cannot evict a stop, capture fault or ready event.
+                    if event.get('kind') not in ('asr_final','asr_error','ready'):continue
+                    while not quitting:
+                        try:events.put(event,timeout=.05);break
+                        except queue.Full:
+                            if asr.poll() is not None:break
             asr_thread=threading.Thread(target=read_asr,daemon=True);asr_thread.start()
         else:
             def read_text():
@@ -307,10 +333,12 @@ def main(argv=None):
                 try:event=events.get_nowait()
                 except queue.Empty:break
                 if event.get('kind')=='shutdown':quitting=True;continue
-                if event.get('kind') in ('asr_error','asr_overload'):
+                if event.get('kind')=='asr_error':
                     fault='Speech input unavailable: '+str(event);quitting=True
                     if worker:worker.cancel()
                     record('speech_fault',detail=event);continue
+                if event.get('kind') in ('asr_partial','asr_refinement','asr_refinement_error','asr_refinement_skipped','asr_overload'):
+                    record('speech_diagnostic',detail=event);continue
                 if event.get('kind')=='ready':
                     ready=True;record('speech_ready',detail=event)
                     print('麦克风已就绪，请说唤醒词。'+('本次只识别，不驱动机器人。' if args.listen_only else '当前为真正待机，摄像头关闭。'),flush=True)
@@ -324,18 +352,75 @@ def main(argv=None):
                     if event['state'] is not None:preparation['state']=event['state']
                     preparation['last_message']=event['message']
                     record('preparation',program=active_program,**preparation);continue
+                if event.get('kind')=='cloud_result':
+                    if not cloud or not cloud.accepts(event,session.mode) or quitting or fault:
+                        record('cloud_stale',detail=event);continue
+                    record('cloud_result',detail=event)
+                    if event.get('error'):print('在线聊天暂不可用；本地控制继续。'+event['error'],flush=True)
+                    else:
+                        cloud.router.commit(event['text'],event['reply'])
+                        print(identity['display_name']+'：'+event['reply'],flush=True)
+                    continue  # Text only: never apply cloud output to SessionPolicy.
+                if event.get('kind')=='semantic_result':
+                    if not semantic or not semantic.accepts(event,session.mode) or quitting or fault:
+                        record('semantic_stale',detail=event);continue
+                    record('semantic_result',detail=event)
+                    if event.get('error'):
+                        print('语义辅助暂不可用；本地控制继续。'+event['error'],flush=True)
+                        if not args.listen_only:session.request(dict(kind='prompt',name='clarify'))
+                        continue
+                    if event['intent']['kind']=='ignore' and cloud:
+                        offered=cloud.offer(event,session.mode)
+                        record('cloud_offered',utterance_id=event['utterance_id'],accepted=offered)
+                        continue
+                    if event['intent']['kind']=='select' and not semantic_config.get('allow_program_selection',False):
+                        record('semantic_selection_blocked',detail=event)
+                        title=next(p['title'] for p in catalog['programs'] if p['id']==event['intent']['program'])
+                        event={**event,'intent':dict(kind='prompt',name='clarify'),
+                               'reply':'本地模型仅给出候选；要播放可直接说“播放'+title+'”。'}
+                    if event.get('reply'):
+                        print(robot.definition.get('identity',{}).get('display_name',robot.definition['name'])+'：'+event['reply'],flush=True)
+                    restart=session.request(event['intent'])
+                    if args.listen_only:session.pending_prompt=None;phase=session.mode;continue
+                    if event['intent']['kind'] in ('select','prompt'):
+                        if prompt:prompt.stop()
+                        if worker and (session.desired!=active_target or restart):
+                            worker.cancel();phase='stopping'
+                            record('cancel_requested',program=active_program,reason=event['text'],source='semantic')
+                    continue
                 if not gate.accept(event,time.monotonic()):continue
                 intent=router.parse(event.get('text',''),session.mode=='task',
                     current_program=session.desired if session.mode=='task' else None,state=session.mode)
                 stamp=event.get('speech_end_monotonic') or event['captured_end_monotonic']
                 if prompt and prompt.contains(stamp) and intent['kind'] not in ('standby','interaction'):
                     record('prompt_turn_ignored',text=event['text']);continue
+                if intent['kind']=='ignore' and normalize(event.get('text','')) in ('','嗯','呃','啊','哦','噢','对','是'):
+                    record('filler_ignored',text=event.get('text',''));continue
+                if semantic:semantic.invalidate()
+                if cloud:
+                    cloud.invalidate()
+                    if intent['kind']=='standby':cloud.router.clear()
                 record('intent',text=event['text'],intent=intent,metrics=event.get('metrics',{}))
+                use_semantic=semantic and session.mode==INTERACTION and intent['kind']=='ignore'
+                use_cloud=cloud and not semantic and session.mode==INTERACTION and intent['kind']=='ignore'
                 label={'standby':'真正待机','interaction':'回到交互','wake':'唤醒交互','ignore':'未匹配','prompt':'交互问答'}.get(intent['kind'],intent['kind'])
+                if use_semantic:label='语义理解中'
+                elif use_cloud:label='在线聊天中'
                 if intent['kind']=='select':label='选择'+next(p['title'] for p in catalog['programs'] if p['id']==intent['program'])
                 if fault:label+='；未执行，管理器处于故障状态，请Ctrl+C后检查日志并重启'
                 print('识别：'+event['text']+' → '+label,flush=True)
                 if fault:continue
+                if use_cloud:
+                    offered=cloud.offer(event,session.mode)
+                    record('cloud_offered',utterance_id=event['utterance_id'],accepted=offered)
+                    if not offered:print('在线聊天忙，已跳过本句；本地控制继续。',flush=True)
+                    continue
+                if use_semantic:
+                    offered=semantic.offer(event,session.mode)
+                    record('semantic_offered',utterance_id=event['utterance_id'],accepted=offered)
+                    if offered:continue
+                    print('语义辅助忙，已跳过本句；停止／退出仍随时有效。',flush=True)
+                    continue
                 restart=session.request(intent)
                 if args.listen_only:
                     session.pending_prompt=None;phase=session.mode;continue
@@ -386,6 +471,8 @@ def main(argv=None):
         def cleanup(action):
             try:action()
             except Exception as exc:cleanup_errors.append(str(exc))
+        if semantic:cleanup(semantic.close)
+        if cloud:cleanup(cloud.close)
         if prompt:cleanup(prompt.stop)
         if worker is not None:
             cleanup(worker.cancel)
@@ -404,6 +491,7 @@ def main(argv=None):
             if asr_thread:cleanup(lambda:asr_thread.join(timeout=2))
             if asr.stdout:cleanup(asr.stdout.close)
         if asr_log:cleanup(asr_log.close)
+        if asr_trace:cleanup(asr_trace.close)
         if cleanup_errors:fault=fault or 'Resource cleanup failed: '+'; '.join(cleanup_errors)
         phase='fault' if fault else 'stopped';cleanup(lambda:publish(True));cleanup(lambda:record('closed',error=fault));cleanup(log.close)
         cleanup(lambda:(output/'summary.json').write_text(json.dumps(dict(phase=phase,error=fault,program_sessions=turn,

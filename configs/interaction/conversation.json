@@ -1,0 +1,21 @@
+{
+  "schema_version": "vivis-cloud-chat-1.0",
+  "enabled": false,
+  "provider": "deepseek",
+  "timeout_s": 8.0,
+  "history_turns": 4,
+  "max_reply_chars": 300,
+  "persona": "按本体身份自然交谈，使用标准普通话。友好、活泼、开朗，幽默但不油腻，认真回应用户感受。每次通常1到3句，不使用舞台指示或假装做了动作。",
+  "providers": {
+    "deepseek": {
+      "endpoint": "https://api.deepseek.com/chat/completions",
+      "model": "deepseek-flash",
+      "api_key_env": "DEEPSEEK_API_KEY"
+    },
+    "qwen": {
+      "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "model": "qwen-plus",
+      "api_key_env": "DASHSCOPE_API_KEY"
+    }
+  }
+}

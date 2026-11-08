@@ -41,6 +41,8 @@ printf 'Joint expression/eye/neck offline check passed.\n'
 "$PYTHON" -m vivis.interaction.standby --check > /dev/null
 "$PYTHON" -m vivis.interaction.programs interaction --check > /dev/null
 "$PYTHON" -m vivis.speech.prompts --check-cache
+"$PYTHON" -m vivis.interaction.semantic --check
+"$PYTHON" -m vivis.interaction.conversation --check
 for program in baigufuren wz2; do
     "$PYTHON" -m vivis.interaction.programs "$program" --robot configs/robots/xiaoshuai/robot.json --check > /dev/null
     printf 'Prepared P1 program check passed: %s (no A2F/devices).\n' "$program"

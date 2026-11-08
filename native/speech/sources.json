@@ -3,58 +3,56 @@
   "sources": [
     {
       "kind": "asr",
-      "repository": "csukuangfj/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30",
-      "revision": "ad658fa0201659a09ea3c176129a191c77ecae8f",
+      "repository": "csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en",
+      "revision": "8e40c43232a1c5c66c82111efc5820d3accca11b",
       "files": [
         {
           "rfilename": "README.md",
-          "blobId": "ba400b5371cb302ea54095d954895cae2b1cda6d",
-          "size": 317
+          "blobId": "23c9cb2b0edb172e6790f2ed5ff398fdba6e233a",
+          "size": 415
         },
         {
-          "rfilename": "decoder.onnx",
-          "blobId": "cda50263c731e02460f604237bcab0e5b85d6e0f",
-          "size": 5165083,
+          "rfilename": "decoder.int8.onnx",
+          "blobId": "18c36b66c025f8db9b365e6fc36e06fe9c831d71",
+          "size": 71664561,
           "lfs": {
-            "sha256": "06522ad63cec0fdf6809f4e1db9bb4f7d710c34582e3b35db62ac60eccafac7e",
-            "size": 5165083,
-            "pointerSize": 132
+            "sha256": "f3cca9f77bb9d93c8fcbfb63ae617b6b1ee96818df3aa3b151c40658fe38594f",
+            "size": 71664561
           }
         },
         {
           "rfilename": "encoder.int8.onnx",
-          "blobId": "562db5d38485a02738f07ef006b56a8e954d57f5",
-          "size": 161141793,
+          "blobId": "b5b21f1634200180753bb8ae31975ab6c05b6c5c",
+          "size": 165462184,
           "lfs": {
-            "sha256": "5ac51e27981bb4dab01bb9be4958453ba50c3b61c063ddda0eab23fd3671aa4f",
-            "size": 161141793,
-            "pointerSize": 134
-          }
-        },
-        {
-          "rfilename": "joiner.int8.onnx",
-          "blobId": "5fab9efce42c2a86a7b9876977eb9cec22a586a2",
-          "size": 1033416,
-          "lfs": {
-            "sha256": "b34584dc6f561089e1d747fedebb3765f2caa72c927ef54d7ca55e5ae40a814b",
-            "size": 1033416,
-            "pointerSize": 132
+            "sha256": "81a70226a8934e6ed92aa1d4fc486b428b5398e2f2619ed4897b7294cab90e9a",
+            "size": 165462184
           }
         },
         {
           "rfilename": "test_wavs/0.wav",
-          "blobId": "f6f2b4b96e3fd542e84e859478bb577f76c4e123",
-          "size": 179646,
-          "lfs": {
-            "sha256": "668bf8df51a10027b84d5d8816a1ce11ae93545538dc05cfe2aa6811d399c250",
-            "size": 179646,
-            "pointerSize": 131
-          }
+          "blobId": "6ef8fc2940e6b87d14ccd80274a50465ad978b35",
+          "size": 321744
+        },
+        {
+          "rfilename": "test_wavs/1.wav",
+          "blobId": "22d84d23a4c3b7d4589aac0198e156becbda9f0e",
+          "size": 163244
+        },
+        {
+          "rfilename": "test_wavs/2.wav",
+          "blobId": "1d4872e920721d5a4b46f12b2fe5b1f05e85e369",
+          "size": 150124
+        },
+        {
+          "rfilename": "test_wavs/3.wav",
+          "blobId": "1ff8ff91ee07500aa5966687c5cdd041d3f9c785",
+          "size": 282604
         },
         {
           "rfilename": "tokens.txt",
-          "blobId": "f15034ba47f26a74abdf68168b3e02c7055bb8b3",
-          "size": 20628
+          "blobId": "57bc045ddda0434ed4440c38e14287c595b258d9",
+          "size": 75756
         }
       ]
     },
