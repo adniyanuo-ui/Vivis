@@ -117,6 +117,14 @@ class FrontendTests(unittest.TestCase):
             self.assertAlmostEqual(stage['backends']['uplink']['attenuation_db'],6.0206,places=3)
             for name,data in before.items():self.assertEqual((folder/name).read_bytes(),data)
             self.assertNotIn('passed',report)  # Numerical reports must not invent acoustic acceptance.
+            # Numerical trim is useful, but it must not cut first/last spoken words.
+            with patch('vivis.speech.voice_analysis.asr_engine',return_value=object()), \
+                 patch('vivis.speech.voice_analysis.transcribe',return_value='完整短句') as asr:
+                full=analyze(folder,Path(tmp)/'with-transcription',recognize=True)
+            self.assertEqual(full['stages'][0]['end_sample']-full['stages'][0]['start_sample'],16000)
+            self.assertEqual(full['stages'][0]['transcription_end_s']-full['stages'][0]['transcription_start_s'],3.)
+            self.assertEqual(asr.call_count,2)
+            for call in asr.call_args_list:self.assertEqual(len(call.args[1]),48000)
 
     @unittest.skipUnless(importlib.util.find_spec('pywebrtc_audio'),'optional audio environment only')
     def test_real_aec3_preserves_near_speech_and_attenuates_delayed_echo(self):

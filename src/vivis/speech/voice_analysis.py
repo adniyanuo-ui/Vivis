@@ -38,16 +38,16 @@ def correlation_peak(near,far,rate=16000,max_delay_ms=300):
     return dict(delay_ms=lag*1000/rate,normalized_correlation=magnitude)
 
 
-def stage_ranges(folder,summary,length):
+def stage_ranges(folder,summary,length,trim_s=1.):
     frames_path=folder/'frames.jsonl'
     if not frames_path.exists():return [dict(name='unlabelled',start_sample=0,end_sample=length)]
     frames=[json.loads(line) for line in frames_path.read_text().splitlines()]
     result=[]
     for index,stage in enumerate(summary.get('stages',[])):
-        # Exclude first and last1s from scores, leaving transitions/convergence out of comparison.
-        begin=stage['start_monotonic']+1.
+        # Trim only numerical scores, never the speech recognition input.
+        begin=stage['start_monotonic']+trim_s
         end=(stage['end_monotonic'] if 'end_monotonic' in stage
-             else stage['start_monotonic']+stage['duration_s'])-1.
+             else stage['start_monotonic']+stage['duration_s'])-trim_s
         selected=[f['sample'] for f in frames if begin<=f['adc_monotonic']<end]
         if selected:result.append(dict(name=stage['name'],stage_index=index,start_sample=min(selected),
                                        end_sample=min(length,max(selected)+320)))
@@ -103,11 +103,15 @@ def analyze(folder,output,replay_backends=(),recognize=False):
             wav.setparams((1,2,16000,0,'NONE','not compressed'))
             wav.writeframes(np.clip(result*32768,-32768,32767).astype('<i2').tobytes())
     engine=asr_engine() if recognize else None
+    full_ranges={s.get('stage_index'):s for s in stage_ranges(folder,summary,length,trim_s=0.)}
     for stage in stage_ranges(folder,summary,length):
         override=annotations.get('stage_overrides',{}).get(str(stage.get('stage_index')))
         if override:stage['operator_annotation']=override
         start,end=stage['start_sample'],stage['end_sample'];pieces={k:v[start:end] for k,v in signal.items()}
+        full=full_ranges[stage.get('stage_index')]
+        first,last=full['start_sample'],full['end_sample']
         stage.update(start_s=start/16000,end_s=end/16000,raw_rms=rms(pieces['microphone']),
+                     transcription_start_s=first/16000,transcription_end_s=last/16000,
                      reference_rms=rms(pieces['reference']),
                      microphone_reference_peak=correlation_peak(pieces['microphone'],pieces['reference']),backends={})
         for key,values in pieces.items():
@@ -115,7 +119,10 @@ def analyze(folder,output,replay_backends=(),recognize=False):
             result=dict(rms=rms(values),attenuation_db=attenuation(pieces['microphone'],values),
                         clipped_samples=int(np.count_nonzero(np.abs(values)>=.999)),
                         reference_peak=correlation_peak(values,pieces['reference']))
-            if engine:result['local_transcript']=transcribe(engine,values)
+            if engine:
+                phrase=signal[key][first:last]
+                result['local_transcript']=transcribe(engine,phrase) if rms(phrase)>=1e-4 else ''
+                if rms(phrase)<1e-4:result['transcription_skipped']='below_diagnostic_floor'
             stage['backends'][key]=result
         report['stages'].append(stage)
     events_path=folder/'events.jsonl'
