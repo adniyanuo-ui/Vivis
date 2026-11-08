@@ -9,7 +9,8 @@ import time
 import numpy as np
 from scipy.signal import firwin,lfilter
 
-from vivis.speech.echo import ReferencePublisher,ReferenceBuffer,EchoCanceller
+from vivis.speech.echo import ReferencePublisher,ReferenceBuffer
+from vivis.speech.voice_frontend import VoiceFrontEnd
 
 
 class VoiceBuffer:
@@ -77,11 +78,15 @@ class VoiceBuffer:
 
 
 class AudioIO:
-    def __init__(self, speech, output_device, player, aec=True):
+    def __init__(self, speech, output_device, player, aec=True,frontend=None):
         self.speech=speech;self.output_device=output_device;self.player=player;self.aec=aec
+        self.frontend=frontend or {}
         self.capture=queue.Queue(maxsize=25);self.uplink=queue.Queue(maxsize=25)
         self.stop=threading.Event();self.fault=None;self.stack=None
-        self.stats=dict(captured_frames=0,processed_frames=0,callback_warnings=[],reference_covered_frames=0)
+        self.stats=dict(captured_frames=0,processed_frames=0,callback_warnings=[],reference_covered_frames=0,
+                        processing_total_s=0.,processing_max_ms=0.,capture_age_max_ms=0.,
+                        raw_clipped_samples=0,uplink_clipped_samples=0,reference_missing_frames=0,
+                        callback_warning_count=0,callback_warning_events=[])
         self.last_capture=None;self.last_output=None
         self.meters=queue.Queue(maxsize=2)
 
@@ -102,8 +107,13 @@ class AudioIO:
             udp.bind(('127.0.0.1',ref['reference_port']));udp.setblocking(False)
             publisher=ReferencePublisher(dict(host='127.0.0.1',port=ref['reference_port'],session_id='realtime-voice'),48000)
             self.stack.callback(publisher.close)
-            echo=EchoCanceller(ref) if self.aec else None
-            if echo:self.stack.callback(echo.close)
+            front=VoiceFrontEnd(self.speech,self.frontend,self.aec)
+            self.stack.callback(front.close);self.stats['aec_backend']=front.backend
+            def warning(stream,status):
+                self.stats['callback_warning_count']+=1
+                if len(self.stats['callback_warnings'])<128:
+                    self.stats['callback_warnings'].append(stream+':'+str(status))
+                    self.stats['callback_warning_events'].append(dict(stream=stream,status=str(status),monotonic=time.monotonic()))
             def output(data,n,timing,status):
                 self.last_output=time.monotonic()
                 try:
@@ -111,12 +121,12 @@ class AudioIO:
                     data[:]=self.player.render(n,stamp)[:,None]
                     publisher.send(data,timing)
                 except Exception as exc:data.fill(0);self.fault='Output callback: '+str(exc)
-                if status:self.stats['callback_warnings'].append('output:'+str(status))
+                if status:warning('output',status)
             def capture(data,n,timing,status):
                 self.last_capture=time.monotonic()
                 stamp=self.last_capture+float(timing.inputBufferAdcTime)-float(timing.currentTime)
                 self.stats['captured_frames']+=1
-                if status:self.stats['callback_warnings'].append('input:'+str(status))
+                if status:warning('input',status)
                 try:self.capture.put_nowait((stamp,data[:,c['channel']].copy()))
                 except queue.Full:self.fault='Microphone processing backlog exceeded500ms'
             # Streams close before publisher/UDP/DSP. No serial or camera modules are imported.
@@ -124,17 +134,18 @@ class AudioIO:
                 channels=min(2,devices[output_device]['max_output_channels']),dtype='float32',blocksize=960,latency='low',callback=output))
             self.stack.enter_context(sd.InputStream(device=input_device,samplerate=48000,channels=c['channels'],
                 dtype='float32',blocksize=960,latency='low',callback=capture))
-            self.thread=threading.Thread(target=self.process,args=(udp,echo),daemon=True);self.thread.start()
+            self.thread=threading.Thread(target=self.process,args=(udp,front),daemon=True);self.thread.start()
             return dict(microphone=devices[input_device]['name'],speaker=devices[output_device]['name'])
         except BaseException:self.close();raise
 
-    def process(self, udp, echo):
-        c=self.speech['aec'];reference=ReferenceBuffer();coeff=firwin(63,1/3-.015)
-        near_zi=np.zeros(62);far_zi=np.zeros(62);previous=None
+    def process(self, udp, front):
+        c=self.speech['aec'];reference=ReferenceBuffer();previous=None
         try:
             while not self.stop.is_set():
                 try:stamp,near=self.capture.get(timeout=.2)
                 except queue.Empty:continue
+                began=time.monotonic()
+                self.stats['capture_age_max_ms']=max(self.stats['capture_age_max_ms'],(began-stamp)*1000)
                 if time.monotonic()-stamp>.5:raise RuntimeError('Stale microphone frames exceeded500ms')
                 if previous is not None and stamp-previous>.035:raise RuntimeError('Gap in microphone capture clock')
                 previous=stamp
@@ -143,18 +154,22 @@ class AudioIO:
                     except BlockingIOError:break
                     if source[0]=='127.0.0.1':reference.accept(data,time.monotonic())
                 far,coverage=reference.sample(stamp-c['reference_delay_ms']/1000,960,48000)
-                near,near_zi=lfilter(coeff,1,near,zi=near_zi);far,far_zi=lfilter(coeff,1,far,zi=far_zi)
-                near=near[::3].astype(np.float32);far=far[::3].astype(np.float32)
-                cleaned=echo.process(near,far) if echo else near
+                self.stats['raw_clipped_samples']+=int(np.count_nonzero(np.abs(near)>=.999))
+                near,far,cleaned=front.process48(near,far)
+                self.stats['uplink_clipped_samples']+=int(np.count_nonzero(np.abs(cleaned)>=.999))
                 pcm=lambda x:np.clip(x*32768,-32768,32767).astype('<i2').tobytes()
                 try:self.uplink.put_nowait((stamp,pcm(cleaned),pcm(near),pcm(far)))
                 except queue.Full:raise RuntimeError('Network uplink backlog exceeded500ms')
                 self.stats['processed_frames']+=1
                 if coverage>.95:self.stats['reference_covered_frames']+=1
+                else:self.stats['reference_missing_frames']+=1
+                elapsed=time.monotonic()-began;self.stats['processing_total_s']+=elapsed
+                self.stats['processing_max_ms']=max(self.stats['processing_max_ms'],elapsed*1000)
                 if self.stats['processed_frames']%50==0:
                     rms=lambda x:float(np.sqrt(np.mean(x*x)))
                     try:self.meters.put_nowait(dict(kind='audio_meter',raw_rms=rms(near),uplink_rms=rms(cleaned),
-                                                   reference_rms=rms(far),reference_coverage=coverage))
+                                                   reference_rms=rms(far),reference_coverage=coverage,
+                                                   processing_ms=elapsed*1000))
                     except queue.Full:pass
         except Exception as exc:self.fault=str(exc)
 

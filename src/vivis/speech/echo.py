@@ -75,6 +75,10 @@ class ReferenceBuffer:
                     # through a packet seam or accumulate nominal-rate drift.
                     period=(end-begin)/len(data);extension=after[0]
             limit=len(data) if extension is not None else len(data)-1
+            # Only overlapping blocks need a full per-sample index/mask. A3s
+            # history otherwise allocates ~150 unnecessary arrays every20ms.
+            if count and (times[-1]<begin-period*1e-7 or times[0]>begin+limit*period+period*1e-7):
+                continue
             index=(times-begin)/period;mask=(index>=-1e-7)&(index<limit-1e-7 if extension is not None else index<=limit+1e-7)
             if mask.any():
                 values=np.r_[data,extension] if extension is not None else data

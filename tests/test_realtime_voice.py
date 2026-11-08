@@ -148,6 +148,8 @@ class RealtimeVoiceTests(unittest.TestCase):
             audio.assert_not_called();network.assert_not_called()
 
     def test_region_is_explicit_and_handshake_diagnostic_never_dumps_headers_or_key(self):
+        cfg,_,_,_,_=configuration(arguments(output_gain=.5))
+        self.assertEqual(cfg['output_gain'],.5)
         _,_,_,url,_=configuration(arguments(region='singapore',workspace_id='example'))
         self.assertIn('example.ap-southeast-1.maas.aliyuncs.com',url)
         error=SimpleNamespace(response=SimpleNamespace(status_code=401,

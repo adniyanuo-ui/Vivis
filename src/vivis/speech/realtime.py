@@ -20,12 +20,16 @@ import wave
 
 from vivis.paths import ROOT
 from vivis.speech.realtime_audio import AudioIO,VoiceBuffer
+from vivis.speech.voice_frontend import validate_frontend
 
 
 def configuration(args):
     config=json.loads(args.config.read_text())
     if config.get('schema_version')!='vivis-realtime-voice-test-1.0':raise ValueError('Unsupported voice test config')
-    for name in ('voice','model','seconds'):
+    frontend=config.setdefault('frontend',{'backend':'speex'})
+    if getattr(args,'aec_backend',None):frontend['backend']=args.aec_backend
+    validate_frontend(frontend)
+    for name in ('voice','model','seconds','output_gain'):
         value=getattr(args,name,None)
         if value is not None:config[name]=value
     if args.region:
@@ -119,7 +123,15 @@ class VoiceSession:
             if 'first_audio_received' not in response:
                 response['first_audio_received']=now
                 self.log.write('first_audio_received',response_id=rid,bytes=len(pcm))
-            self.player.add(rid,pcm);return
+            previous=response.get('last_audio_received',now)
+            response['max_packet_gap_ms']=max(response.get('max_packet_gap_ms',0.),(now-previous)*1000)
+            response['last_audio_received']=now
+            response['audio_packets']=response.get('audio_packets',0)+1
+            response['received_audio_s']=response.get('received_audio_s',0.)+len(pcm)/48000
+            self.player.add(rid,pcm)
+            self.log.write('audio_packet',response_id=rid,bytes=len(pcm),buffered_s=self.player.count/48000,
+                           gap_ms=(now-previous)*1000)
+            return
         fields={k:event[k] for k in ('event_id','item_id','response_id','audio_start_ms','audio_end_ms','reason','transcript','text') if k in event}
         if kind=='response.created':
             rid=event['response']['id'];self.generating=rid
@@ -151,7 +163,10 @@ class VoiceSession:
     def poll_playback(self):
         while not self.player.notices.empty():
             event=self.player.notices.get_nowait();rid=event['response_id']
-            if event['kind']=='playback_started':self.responses.setdefault(rid,{}).setdefault('first_dac_monotonic',event['dac_monotonic'])
+            if event['kind']=='playback_started':
+                response=self.responses.setdefault(rid,{})
+                response.setdefault('first_dac_monotonic',event['dac_monotonic'])
+                response['playback_starts']=response.get('playback_starts',0)+1
             self.log.write(**event)
 
 
@@ -187,7 +202,8 @@ async def conversation(args,config,speech,speaker,url,session,key,folder,log,sum
             print('连接、模型权限、音色及语义轮次配置已确认；未打开麦克风或音箱。',flush=True)
             return dict(probe=True,audio_opened=False)
         player=VoiceBuffer(config['output_gain'],config['fade_ms'],config['max_playback_buffer_s'])
-        state=VoiceSession(player,log);audio=AudioIO(speech,speaker,player,args.aec=='on');keys=queue.SimpleQueue()
+        state=VoiceSession(player,log)
+        audio=AudioIO(speech,speaker,player,args.aec=='on',frontend=config.get('frontend'));keys=queue.SimpleQueue()
         def read_keys():
             for line in sys.stdin:keys.put(line.strip())
         threading.Thread(target=read_keys,daemon=True).start()
@@ -267,6 +283,8 @@ def main(argv=None):
     parser.add_argument('--workspace-id');parser.add_argument('--model',choices=('qwen-audio-3.1-realtime-plus','qwen-audio-3.1-realtime-flash'))
     parser.add_argument('--region',choices=('beijing','singapore'),help='必须与API Key创建地域一致；不自动跨地域重试')
     parser.add_argument('--seconds',type=int);parser.add_argument('--aec',choices=('on','off'),default='on')
+    parser.add_argument('--output-gain',type=float,help='仅本次播放数字幅度；0.5约为-6dB，不改系统音量')
+    parser.add_argument('--aec-backend',choices=('speex','aec3'),help='仅本次纯语音测试的前端，不修改P1配置')
     parser.add_argument('--check',action='store_true');parser.add_argument('--probe',action='store_true')
     parser.add_argument('--ask-key',action='store_true',help='在终端安全输入本次密钥，不依赖环境变量，也不保存')
     parser.add_argument('--list-devices',action='store_true');parser.add_argument('--record-audio',action='store_true')
@@ -274,6 +292,7 @@ def main(argv=None):
     args=parser.parse_args(argv);config,speech,speaker,url,session=configuration(args)
     if args.check:
         print(json.dumps(dict(config_valid=True,model=config['model'],voice=config['voice'],speaker=speaker,
+            frontend=config['frontend'],output_gain=config['output_gain'],
             endpoint=config['endpoint'],
             api_key_status=key_status(os.environ.get(config['api_key_env'],'')),
             microphone=speech['capture']['device'],websockets_installed=importlib.util.find_spec('websockets') is not None,

@@ -9,5 +9,6 @@
 - [pyloudnorm](https://github.com/csteinmetz1/pyloudnorm)：MIT许可，固定0.1.1，在独立语音环境中测量BS.1770综合响度。系统[SoX](https://sox.sourceforge.net/sox.html)仅在离线准备提示音时按需做动态压缩；不复制其二进制，不调用音箱。当前归一化方案不依赖Jetson精简版FFmpeg的音频滤镜。
 - [webrtcvad-wheels](https://github.com/daanzu/py-webrtcvad-wheels)：固定2.0.14，流式20ms语音分段；发行包保留Python封装及WebRTC代码的许可。
 - [SpeexDSP](https://www.speex.org/docs/manual/speex-manual/node7.html)：通过系统`libspeexdsp1`动态链接，仓库不复制其二进制或源码。按DAC／ADC时间戳对齐参考并处理采样时钟偏差，效果仍需实际音箱与麦克风双讲验证。
+- [pywebrtc-audio](https://github.com/strands-labs/pywebrtc-audio)：纯语音试验环境固定0.2.0，提供WebRTC AEC3及NS的Python接口；AGC关闭。封装声明Apache-2.0，WebRTC及其第三方组件保留各自上游许可。通过pip安装，不将wheel或源码复制进交付仓库；当前ARM64/Python3.12 wheel来源与摘要见`realtime_frontend_sources.json`。此候选只通过显式`--aec-backend aec3`选用，不改P1默认前端。
 
 本地运行不向这些站点上传音频；安装模型时需要下载。现场诊断录音和测试生成的WAV位于已忽略的`outputs/`，不进入Git提交。

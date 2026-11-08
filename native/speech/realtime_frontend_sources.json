@@ -1,0 +1,14 @@
+{
+  "package": "pywebrtc-audio",
+  "version": "0.2.0",
+  "repository": "https://github.com/strands-labs/pywebrtc-audio",
+  "inspected_source_commit": "1bc860a2051c2b9b3c10b8c778770794b9321d84",
+  "source_scope": "Reviewed implementation; this is not a claim that the wheel was reproducibly built from this commit",
+  "wheel": "pywebrtc_audio-0.2.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl",
+  "wheel_sha256": "b5ddbe2fb5533b5aff7315e5463dfabbeb4f9d89135f5a6076144de81334bf1b",
+  "distribution": "https://pypi.org/project/pywebrtc-audio/0.2.0/",
+  "wrapper_license": "Apache-2.0",
+  "vendored_source_notice": "https://github.com/strands-labs/pywebrtc-audio/blob/1bc860a2051c2b9b3c10b8c778770794b9321d84/vendor/webrtc_audio/MODIFICATIONS.md",
+  "redistributed_in_vivis": false,
+  "runtime": "Optional isolated speech environment only; no AGC, no microphone gating"
+}
