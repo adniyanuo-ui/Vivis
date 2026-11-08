@@ -28,6 +28,7 @@ def main():
     subprocess.run([str(python),'-m','pip','install','-r',str(ROOT/'tools/requirements/speech.txt')],check=True)
     sources=json.loads((ROOT/'native/speech/sources.json').read_text())
     for source in sources['sources']:
+        if source['kind']=='tts' and cfg['tts'].get('engine')=='qwen3':continue
         folder=ROOT/cfg[source['kind']]['directory'];folder.mkdir(parents=True,exist_ok=True)
         for entry in source['files']:
             rel=entry['rfilename'];path=folder/rel
@@ -44,7 +45,13 @@ def main():
                 except Exception as exc:last=exc
             if last is not None:raise last
     env={**os.environ,'PYTHONPATH':str(ROOT/'src')}
-    subprocess.run([str(python),'-m','vivis.speech.prompts','--prepare'],env=env,cwd=ROOT,check=True)
+    cached=subprocess.run([str(python),'-m','vivis.speech.prompts','--check-cache'],env=env,cwd=ROOT,
+                          stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
+    if cached:print('Verified prepared prompt cache; no TTS model installation needed.')
+    else:
+        if cfg['tts'].get('engine')=='qwen3':
+            subprocess.run([sys.executable,str(ROOT/'tools/setup_qwen_tts.py')],env=env,cwd=ROOT,check=True)
+        subprocess.run([str(python),'-m','vivis.speech.prompts','--prepare'],env=env,cwd=ROOT,check=True)
     print('P1 speech dependencies ready; no microphone, speaker, camera or servo opened.')
 
 

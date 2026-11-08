@@ -89,7 +89,8 @@ class SpeechGainTests(unittest.TestCase):
         self.assertFalse(cache_matches(speech,[]))
         metadata['tts']['speaker_id']=3;self.assertFalse(cache_matches(speech,metadata))
         metadata['tts']=speech['tts'];metadata['processing_version']='old';self.assertFalse(cache_matches(speech,metadata))
-        metadata['processing_version']=PROCESSING_VERSION;metadata['timing']=None
+        metadata['processing_version']=PROCESSING_VERSION
+        metadata['timing']=None if speech.get('prompt_timing') is not None else {'clause_pause_ms':180}
         self.assertFalse(cache_matches(speech,metadata))
 
 

@@ -20,21 +20,18 @@
     "hotwords_score": 1.5
   },
   "tts": {
-    "engine": "kokoro",
-    "directory": "outputs/speech/models/tts_kokoro_zh",
-    "model": "model.onnx",
-    "voices": "voices.bin",
-    "tokens": "tokens.txt",
-    "lexicon": "lexicon-zh.txt",
-    "speaker_id": 66,
-    "speaker_name": "zm_020",
-    "speed": 1.05,
-    "threads": 2,
-    "rule_fsts": [
-      "date-zh.fst",
-      "number-zh.fst",
-      "phone-zh.fst"
-    ]
+    "engine": "qwen3",
+    "python": "outputs/tts_qwen/venv/bin/python",
+    "directory": "outputs/tts_qwen/model",
+    "model": "model.safetensors",
+    "source_manifest": "native/speech/qwen3_tts_sources.json",
+    "speaker_id": 0,
+    "speaker_name": "Dylan",
+    "language": "Chinese",
+    "speed": 1.0,
+    "threads": 6,
+    "max_new_tokens": 1024,
+    "force_standard_chinese": true
   },
   "prompt_level": {
     "method": "r128",
@@ -44,11 +41,6 @@
     "compression_threshold_dbfs": -24.0,
     "compression_ratio": 4.0
   },
-  "prompt_timing": {
-    "clause_pause_ms": 180,
-    "sentence_pause_ms": 420,
-    "edge_fade_ms": 5
-  },
   "aec": {
     "enabled": true,
     "reference_port": 14788,
@@ -57,7 +49,7 @@
     "reference_delay_ms": 0,
     "noise_suppress_db": -15
   },
-  "prompts": "outputs/speech/prompts",
+  "prompts": "assets/speech/xiaoshuai_qwen3_mandarin",
   "asr_final": {
     "directory": "outputs/speech/models/sensevoice",
     "model": "model.int8.onnx",

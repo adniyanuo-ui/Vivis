@@ -6,12 +6,15 @@ import math
 import re
 import shutil
 import subprocess
+import os
+import sys
 from pathlib import Path
 import wave
 import numpy as np
 from vivis.paths import ROOT
 
 PROCESSING_VERSION='r128-compand-pauses-v2'
+RUNTIME_PROMPTS=('welcome','menu','clarify','standby','interaction','identity','fault')
 
 TEXTS={
     'welcome':'在呢，你说！',
@@ -30,10 +33,40 @@ TEXTS={
 }
 
 
+def tts_signature(tts):
+    if not isinstance(tts,dict) or tts.get('engine')!='qwen3':return tts
+    # Prepared WAVs are portable. Record the generation environment but do not
+    # force customers to recreate a GPU job just to play verified cached audio.
+    return {k:v for k,v in tts.items() if k not in ('python','threads','device','dtype')}
+
+
 def cache_matches(config,metadata):
-    return (isinstance(metadata,dict) and metadata.get('processing_version')==PROCESSING_VERSION and metadata.get('tts')==config['tts']
+    return (isinstance(metadata,dict) and metadata.get('processing_version')==PROCESSING_VERSION and tts_signature(metadata.get('tts'))==tts_signature(config['tts'])
         and metadata.get('timing')==config.get('prompt_timing')
-        and metadata.get('level',{}).get('config')==config.get('prompt_level') and metadata.get('texts')==TEXTS)
+        and metadata.get('level',{}).get('config')==config.get('prompt_level')
+        and isinstance(metadata.get('texts'),dict)
+        and all(metadata['texts'].get(name)==TEXTS[name] for name in RUNTIME_PROMPTS))
+
+
+def prompt_cache_ready(config):
+    """Verify small cached WAVs; runtime never needs to load the TTS model."""
+    directory=ROOT/config['prompts']
+    try:
+        metadata=json.loads((directory/'metadata.json').read_text())
+        if not cache_matches(config,metadata):return False
+        manifest=config['tts'].get('source_manifest')
+        if manifest and metadata.get('asset_sha256',{}).get('source_manifest')!=hashlib.sha256((ROOT/manifest).read_bytes()).hexdigest():
+            return False
+        for name in RUNTIME_PROMPTS:
+            path=directory/(name+'.wav')
+            if not path.is_file():return False
+            expected=metadata.get('prompt_sha256',{}).get(name)
+            if config['tts'].get('engine')=='qwen3' and not expected:return False
+            if expected and hashlib.sha256(path.read_bytes()).hexdigest()!=expected:return False
+            with wave.open(str(path)) as wav:
+                if wav.getsampwidth()!=2 or wav.getnchannels() not in (1,2) or wav.getnframes()<=0:return False
+        return True
+    except (OSError,ValueError,TypeError,wave.Error,EOFError):return False
 
 
 def synthesize_prompt(engine,text,sid,speed,timing=None):
@@ -122,6 +155,9 @@ def normalize_prompt(path,reference_lufs,settings):
 
 
 def create_engine(config):
+    if config['tts'].get('engine')=='qwen3':
+        from vivis.speech.qwen import QwenEngine
+        return QwenEngine(config)
     import sherpa_onnx
     t=config['tts'];folder=ROOT/t['directory']
     common=dict(model=str(folder/t['model']),tokens=str(folder/t['tokens']),lexicon=str(folder/t['lexicon']))
@@ -136,10 +172,24 @@ def create_engine(config):
     return engine
 
 
-def prepare(config):
+def prepare(config,include_diagnostics=False):
     t=config['tts'];folder=ROOT/t['directory'];destination=ROOT/config['prompts'];destination.mkdir(parents=True,exist_ok=True)
-    metadata=dict(processing_version=PROCESSING_VERSION,tts=t,texts=TEXTS,timing=config.get('prompt_timing'),asset_sha256={k:hashlib.sha256((folder/t[k]).read_bytes()).hexdigest()
+    if t.get('engine')=='qwen3' and Path(sys.prefix).resolve()!=(ROOT/t['python']).parent.parent.resolve():
+        job=destination/'prepare_config.json';job.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n')
+        command=[str(ROOT/t['python']),'-m','vivis.speech.prompts','--prepare','--config',str(job)]
+        if include_diagnostics:command+=['--diagnostics']
+        subprocess.run(command,
+            cwd=ROOT,env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'PYTHONNOUSERSITE':'1','HF_HUB_OFFLINE':'1'},check=True)
+        return
+    selected=TEXTS if t.get('engine')!='qwen3' or include_diagnostics else {name:TEXTS[name] for name in RUNTIME_PROMPTS}
+    def file_hash(path):
+        h=hashlib.sha256()
+        with path.open('rb') as src:
+            for chunk in iter(lambda:src.read(1024*1024),b''):h.update(chunk)
+        return h.hexdigest()
+    metadata=dict(processing_version=PROCESSING_VERSION,tts=t,texts=selected,timing=config.get('prompt_timing'),asset_sha256={k:file_hash(folder/t[k])
         for k in ('model','tokens','voices','lexicon') if k in t})
+    if 'source_manifest' in t:metadata['asset_sha256']['source_manifest']=file_hash(ROOT/t['source_manifest'])
     level=config.get('prompt_level');reference_channels=1
     if level:
         reference=ROOT/level['reference_audio'];data,rate=read_pcm16(reference)
@@ -152,15 +202,18 @@ def prepare(config):
     except (OSError,ValueError):cached={}
     if not isinstance(cached,dict):cached={}
     engine=create_engine(config)
+    if hasattr(engine,'execution_info'):metadata['generation_execution']=engine.execution_info
     sid=t.get('speaker_id',0);speed=t.get('speed',1.)
     if type(sid) is not int or not 0<=sid<engine.num_speakers or not .5<=speed<=2:raise ValueError('Invalid prompt speaker or speed')
-    reports={};timing_reports={}
-    for name,text in TEXTS.items():
+    reports={};timing_reports={};metadata['prompt_sha256']={}
+    for name,text in selected.items():
         path=destination/(name+'.wav')
-        if (path.is_file() and all(cached.get(k)==v for k,v in metadata.items() if k!='texts')
-                and cached.get('texts',{}).get(name)==text):
+        expected=cached.get('prompt_sha256',{}).get(name)
+        if (path.is_file() and all(cached.get(k)==v for k,v in metadata.items() if k not in ('texts','prompt_sha256'))
+                and cached.get('texts',{}).get(name)==text and (not expected or file_hash(path)==expected)):
             reports[name]=cached.get('level_reports',{}).get(name,{})
             timing_reports[name]=cached.get('timing_reports',{}).get(name,{})
+            metadata['prompt_sha256'][name]=file_hash(path)
             continue
         samples,sample_rate,timing_reports[name]=synthesize_prompt(engine,text,sid,speed,config.get('prompt_timing'))
         if reference_channels>1:samples=np.repeat(samples[:,None],reference_channels,axis=1)
@@ -174,8 +227,9 @@ def prepare(config):
                 wav.setnchannels(reference_channels);wav.setsampwidth(2);wav.setframerate(sample_rate)
                 wav.writeframes(np.clip(samples*32767,-32768,32767).astype('<i2').tobytes())
         temporary.replace(path)
+        metadata['prompt_sha256'][name]=file_hash(path)
         print('Prepared prompt: '+name,flush=True)
-    (destination/'texts.json').write_text(json.dumps(TEXTS,ensure_ascii=False,indent=2)+'\n')
+    (destination/'texts.json').write_text(json.dumps(selected,ensure_ascii=False,indent=2)+'\n')
     metadata['level_reports']=reports
     metadata['timing_reports']=timing_reports
     temporary=destination/'metadata.tmp';temporary.write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+'\n');temporary.replace(destination/'metadata.json')
@@ -183,5 +237,11 @@ def prepare(config):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--prepare',action='store_true')
+    parser.add_argument('--config',type=Path,default=ROOT/'configs/perception/speech.json')
+    parser.add_argument('--diagnostics',action='store_true',help='Also generate optional ASR test phrases with Qwen')
+    parser.add_argument('--check-cache',action='store_true',help='Verify prepared prompts only; no models/devices')
     args=parser.parse_args()
-    if args.prepare:prepare(json.loads((ROOT/'configs/perception/speech.json').read_text()))
+    if args.prepare:prepare(json.loads(args.config.read_text()),args.diagnostics)
+    if args.check_cache:
+        if not prompt_cache_ready(json.loads(args.config.read_text())):raise SystemExit('Prompt cache missing, changed or incompatible')
+        print('Prompt cache verified; no TTS model or device opened.')

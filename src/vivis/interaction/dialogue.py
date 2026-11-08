@@ -35,16 +35,16 @@ def dependencies(config,listener_only=False):
         catalog=read_json(ROOT/config['programs'])
         if any(p['kind']=='runtime_a2f' for p in catalog['programs']):
             required.extend([ROOT/'outputs/a2f/build/a2f_chunk_probe',ROOT/'outputs/a2f/model_bundle/model.json'])
-        for name in ('welcome','menu','clarify','standby','interaction','identity','fault'):required.append(ROOT/speech['prompts']/(name+'.wav'))
+        from vivis.speech.prompts import RUNTIME_PROMPTS
+        for name in RUNTIME_PROMPTS:required.append(ROOT/speech['prompts']/(name+'.wav'))
         perception=read_json(ROOT/'configs/perception/face_landmarker.json')
         required.extend(ROOT/perception[k] for k in ('python','model'))
     for path in required:
         if not path.is_file():missing.append(str(path))
     if not listener_only:
         try:
-            from vivis.speech.prompts import cache_matches
-            metadata=read_json(ROOT/speech['prompts']/'metadata.json')
-            valid=cache_matches(speech,metadata)
+            from vivis.speech.prompts import prompt_cache_ready
+            valid=prompt_cache_ready(speech)
         except (OSError,ValueError):valid=False
         if not valid:missing.append('Prompt cache voice/level differs; run python3 tools/setup_p1.py')
     return speech,missing
@@ -239,7 +239,7 @@ def main(argv=None):
             lock.close();raise RuntimeError('已有节目占用控制权，请先停止它，再启动P1语音管理器')
     events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_thread=None;active_target=None;active_program=None
     quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;preparation={};log=(output/'events.jsonl').open('w')
-    ready=False;warm_ready=False
+    ready=False;warm_ready=False;reported_fault=None
     def request_shutdown(*_):
         nonlocal quitting
         quitting=True
@@ -344,6 +344,9 @@ def main(argv=None):
                     if worker and (session.desired!=active_target or restart):
                         worker.cancel();phase='stopping'
                         record('cancel_requested',program=active_program,reason=event['text'])
+            if fault and fault.startswith(('Speech process ended','Speech input unavailable')) and fault!=reported_fault:
+                print('语音或设备故障，正在停止任务并保持扭矩：'+fault+'；日志：'+str(output/'asr.log'),flush=True)
+                reported_fault=fault
             if prompt:prompt.poll()
             if worker is not None:
                 code=worker.process.poll()

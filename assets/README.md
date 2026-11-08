@@ -52,3 +52,7 @@ A2F权重不属于预制回放的运行依赖。客户接入自己的素材时�
 ```bash
 .venv/bin/python tools/check_assets.py --robot configs/robots/xiaoshuai/robot.json
 ```
+
+## P1普通话系统播报
+
+`assets/speech/xiaoshuai_qwen3_mandarin/`包含七条Qwen3-TTS生成的普通话播报及哈希元数据，正常播放无需TTS模型或4090。安装P1时先验证随包缓存，成功后跳过TTS大模型安装。需要改音色时再用独立准备工具，参见[播报缓存说明](speech/xiaoshuai_qwen3_mandarin/README.md)。原作品音频、表情源及舵机目标未改。

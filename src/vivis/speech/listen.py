@@ -184,7 +184,12 @@ def main(argv=None):
     parser.add_argument('--transcribe',type=Path);parser.add_argument('--seconds',type=float)
     args=parser.parse_args(argv);config=json.loads(args.config.read_text())
     def emit(event):print(json.dumps(event,ensure_ascii=False,allow_nan=False),flush=True)
-    result=transcribe(args.transcribe,config,emit) if args.transcribe else live(config,emit,args.seconds)
+    try:
+        result=transcribe(args.transcribe,config,emit) if args.transcribe else live(config,emit,args.seconds)
+    except Exception as exc:
+        emit(dict(kind='asr_error',error=str(exc),source='file' if args.transcribe else 'microphone',
+                  device=config.get('capture',{}).get('device')))
+        raise
     emit(dict(kind='summary',**result))
 
 

@@ -1,0 +1,134 @@
+{
+  "processing_version": "r128-compand-pauses-v2",
+  "tts": {
+    "engine": "qwen3",
+    "python": "outputs/tts_qwen/venv/bin/python",
+    "directory": "outputs/tts_qwen/model",
+    "model": "model.safetensors",
+    "source_manifest": "native/speech/qwen3_tts_sources.json",
+    "speaker_id": 0,
+    "speaker_name": "Dylan",
+    "language": "Chinese",
+    "speed": 1.0,
+    "threads": 6,
+    "max_new_tokens": 1024,
+    "force_standard_chinese": true,
+    "device": "cuda:0",
+    "dtype": "float32"
+  },
+  "texts": {
+    "welcome": "在呢，你说！",
+    "menu": "我能唱白骨夫人、演魏总剧本，还能学你的表情。你点节目，我来演！",
+    "clarify": "你可以说，播放白骨夫人，播放魏总剧本，或者开始表情跟随。",
+    "standby": "好嘞，我歇会儿。有事喊小帅！",
+    "interaction": "好，咱们接着聊。",
+    "identity": "我是小帅，二十岁，北京男孩。唱歌、演戏、学表情，随你挑！",
+    "fault": "刚才出了点问题，我先停下来。请检查设备，再重新启动。"
+  },
+  "timing": null,
+  "asset_sha256": {
+    "model": "bc3c7e785eb961179c25450d1acff03f839e0002f2f3a5aeb67b5735c0fa2adb",
+    "source_manifest": "5758704a480ffd2568b665230f10d3a5995c81d048078603c188e86d5d6cc8ce"
+  },
+  "level": {
+    "config": {
+      "method": "r128",
+      "reference_audio": "assets/works/0001/audio.wav",
+      "relative_loudness_lu": -3.0,
+      "true_peak_dbfs": -1.0,
+      "compression_threshold_dbfs": -24.0,
+      "compression_ratio": 4.0
+    },
+    "reference_sha256": "cbd18a1080ce5c1830df8c4e1cbc3cacbcbee37f5075e18ab344549e0a36e3a6",
+    "reference_lufs": -11.613109418078627,
+    "reference_channels": 1
+  },
+  "generation_execution": {
+    "device": "cuda:0",
+    "dtype": "float32",
+    "threads": 6
+  },
+  "prompt_sha256": {
+    "welcome": "b67f4d31eb2151e01dd74f7ffa31db385a7bd91cf5a6e96e4d6c2ec1d43ae941",
+    "menu": "b6bf770f653720c92f316de772d3d7ac214df9ca9775c1f49341485c1f3a8eb8",
+    "clarify": "bbd3b35bcefd52f6ec0db1e186f09a4c35327e85963869f6827208ee545654fb",
+    "standby": "6c3f03fe850731539086538ea1f51d2b58c573216311195c5da4f08e5b3144c0",
+    "interaction": "7bf99eca80261d788f8eb154a976e10ca5f8da52e1c7b9b1424f52af051ff006",
+    "identity": "2d5b7aabefcb5f9454ef36bd228a08281ec76840c5fd0670ce0255816feca313",
+    "fault": "a9609ffd79e56278c549c0d5de9dc6090b3d8cd17a8a018616160ba23e84d5c2"
+  },
+  "level_reports": {
+    "welcome": {
+      "raw_lufs": -24.325794959180705,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -15.835570986838905,
+      "relative_lu": -4.222461568760277,
+      "true_peak_dbfs": -1.0000000000000007,
+      "gain": 8.060777003536698,
+      "compressed": true
+    },
+    "menu": {
+      "raw_lufs": -30.916641637665563,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -16.30467405711011,
+      "relative_lu": -4.691564639031482,
+      "true_peak_dbfs": -0.9999999999999987,
+      "gain": 9.338121519720195,
+      "compressed": true
+    },
+    "clarify": {
+      "raw_lufs": -28.672217111211072,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -16.474948555760857,
+      "relative_lu": -4.86183913768223,
+      "true_peak_dbfs": -1.0000000000000007,
+      "gain": 8.681121949840906,
+      "compressed": true
+    },
+    "standby": {
+      "raw_lufs": -25.094817833900237,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -15.941189310065882,
+      "relative_lu": -4.3280798919872545,
+      "true_peak_dbfs": -0.9999999999999997,
+      "gain": 8.161614092663626,
+      "compressed": true
+    },
+    "interaction": {
+      "raw_lufs": -28.447045683070908,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -16.216654063437105,
+      "relative_lu": -4.603544645358477,
+      "true_peak_dbfs": -0.9999999999999997,
+      "gain": 8.85341460492184,
+      "compressed": true
+    },
+    "identity": {
+      "raw_lufs": -26.789734169378296,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -15.488410341685842,
+      "relative_lu": -3.875300923607215,
+      "true_peak_dbfs": -0.9999999999999976,
+      "gain": 8.318528711781612,
+      "compressed": true
+    },
+    "fault": {
+      "raw_lufs": -29.78553491606738,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -16.583838263955627,
+      "relative_lu": -4.970728845877,
+      "true_peak_dbfs": -1.0000000000000007,
+      "gain": 8.721761055874476,
+      "compressed": true
+    }
+  },
+  "timing_reports": {
+    "welcome": {},
+    "menu": {},
+    "clarify": {},
+    "standby": {},
+    "interaction": {},
+    "identity": {},
+    "fault": {}
+  }
+}
