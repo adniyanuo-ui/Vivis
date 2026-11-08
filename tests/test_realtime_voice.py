@@ -6,6 +6,8 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import time
+import queue
 from types import SimpleNamespace,ModuleType
 import unittest
 from unittest.mock import Mock,patch
@@ -13,7 +15,7 @@ from unittest.mock import Mock,patch
 import numpy as np
 
 from vivis.paths import ROOT
-from vivis.speech.realtime import VoiceSession,Journal,connect_session,configuration,handshake_diagnostic,key_status,conversation,main
+from vivis.speech.realtime import VoiceSession,Journal,connect_session,configuration,handshake_diagnostic,key_status,conversation,check_audio_callbacks,main
 from vivis.speech.realtime_audio import VoiceBuffer
 
 
@@ -23,6 +25,67 @@ def arguments(**extra):
 
 
 class RealtimeVoiceTests(unittest.TestCase):
+    def test_callback_watchdog_still_detects_failed_start_and_loss_during_running(self):
+        audio=SimpleNamespace(last_capture=None,last_output=100.8)
+        check_audio_callbacks(audio,100.,100.99)
+        with self.assertRaisesRegex(RuntimeError,'Microphone callback watchdog'):
+            check_audio_callbacks(audio,100.,101.01)
+        audio.last_capture=100.4;audio.last_output=101.3
+        with self.assertRaisesRegex(RuntimeError,'Microphone callback watchdog'):
+            check_audio_callbacks(audio,100.,101.41)
+        audio.last_capture=101.5;audio.last_output=100.1
+        with self.assertRaisesRegex(RuntimeError,'Output callback watchdog'):
+            check_audio_callbacks(audio,100.,101.5)
+
+    def test_slow_device_open_does_not_consume_callback_watchdog_or_chat_duration(self):
+        cfg,speech,speaker,url,session=configuration(arguments());cfg['seconds']=1.3
+        monotonic=time.monotonic;offset=[0.]
+        class Audio:
+            def __init__(self):
+                self.last_capture=None;self.last_output=None;self.fault=None
+                self.uplink=queue.Queue();self.meters=queue.Queue()
+                self.stats=dict(captured_frames=0,processed_frames=0,callback_warnings=[],reference_covered_frames=0)
+                self.closed=False
+            def open(self):
+                offset[0]+=1.2  # Device initialization exceeds the one-second running watchdog.
+                return dict(microphone='fake',speaker='fake')
+            def close(self):self.closed=True
+        audio=Audio()
+        class Connection:
+            async def __aenter__(self):return self
+            async def __aexit__(self,*_):pass
+            async def send(self,data):pass
+            async def recv(self):return json.dumps(dict(type='session.updated',session=session))
+            def __aiter__(self):
+                async def events():
+                    await asyncio.sleep(0)  # Callbacks can only start AFTER open returns.
+                    audio.last_capture=audio.last_output=time.monotonic()
+                    audio.stats.update(captured_frames=1,processed_frames=1)
+                    audio.uplink.put((time.monotonic(),b'\0'*640,b'\0'*640,b'\0'*640))
+                    yield json.dumps(dict(type='rate_limits.updated'))
+                    while True:
+                        await asyncio.sleep(.02)
+                        audio.last_capture=audio.last_output=time.monotonic()
+                        audio.stats['captured_frames']+=1;audio.stats['processed_frames']+=1
+                        audio.uplink.put((time.monotonic(),b'\0'*640,b'\0'*640,b'\0'*640))
+                return events()
+        client=ModuleType('websockets.asyncio.client');client.connect=Mock(return_value=Connection())
+        log=Mock();summary={}
+        with patch.dict('sys.modules',{'websockets':ModuleType('websockets'),
+                'websockets.asyncio':ModuleType('websockets.asyncio'),'websockets.asyncio.client':client}), \
+             patch('vivis.speech.realtime.AudioIO',return_value=audio), \
+             patch('vivis.speech.realtime.threading.Thread'), \
+             patch('vivis.speech.realtime.time.monotonic',side_effect=lambda:monotonic()+offset[0]), \
+             redirect_stdout(io.StringIO()):
+            result=asyncio.run(conversation(SimpleNamespace(probe=False,aec='on',record_audio=False),cfg,
+                speech,speaker,url,session,'unit-test-placeholder',Path('/unused'),log,summary))
+        self.assertTrue(audio.closed)
+        self.assertGreaterEqual(result['audio_preparation_s'],1.2)
+        self.assertLess(result['elapsed_s'],1.6)
+        self.assertGreater(result['input_packets_sent'],1)
+        kinds=[c.args[0] for c in log.write.call_args_list if c.args]
+        self.assertLess(kinds.index('audio_opened'),kinds.index('audio_ready'))
+
     def test_resampling_is_continuous_across_network_packet_seams(self):
         pcm=(np.sin(np.arange(2400)*.13)*10000).astype('<i2')
         a=VoiceBuffer();b=VoiceBuffer();a.add('a',pcm.tobytes())

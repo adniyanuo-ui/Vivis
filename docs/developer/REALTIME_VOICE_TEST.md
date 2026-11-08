@@ -101,6 +101,10 @@ AEC复用原有SpeexDSP，系统需已有`libspeexdsp1`。安装脚本不打开�
 
 当前按官方示例在`speech_started`时清除旧播放队列并淡出，拒绝该response_id的迟到包；语义轮次也可能出现`turn_invalid`。因此现场“嗯”导致停声时，要同时看服务端是否真正cancelled，区分模型轮次判断与客户端即时停声策略。服务端自动打断时不再额外发送response.cancel，避免取消新响应；Enter显式取消单独记录。推理完成事件不会丢弃仍待实际播放的音频。
 
-2026-11-08本地静音检查：5.01秒，约250帧处理，无回调告警，无音频保存／上传；仅证明本地I/O处理链路可运行。云端探测曾返回401 InvalidApiKey，认证、音色和真实双讲仍待验证，不能据离线测试宣称已成功。
+2026-11-08本地静音检查：5.01秒，约250帧处理，无回调告警，无音频保存／上传；仅证明本地I/O处理链路可运行。初次云端探测返回401 InvalidApiKey；随后20261108_144319_668700探测成功，服务端确认qwen-audio-3.1-realtime-plus、longanyang_v3.1、smart_turn_v2，未打开麦克风或音箱。认证及会话配置已通过，男声听感与真实双讲仍待现场验证。
+
+2026-11-08启动时序修复：`20261108_144600_854053`中设备准备约1.05秒，旧看门狗却从准备前计时，打开后不到0.1秒就误判无回调；三份WAV只有文件头，不能用于听感或回声结论。现将准备与运行时钟分开，从设备打开后监测首次回调，运行中仍按最近回调保持原1秒断流保护。“已就绪”需输入／输出回调及首帧发送均成立。新增准备耗时、实际运行耗时和发送帧数记录。
+
+回归在旧实现复现同一watchdog错误，修复后通过；另以真实DOV／USB音箱、模拟云连接做两次静音运行，每次故意增加1.2秒准备，实际准备约2.277／1.248秒、各发送99帧，均无回调告警。没有云请求、录音或机器头动作；真实云端聊天仍需重试验收。
 
 官方参考：[实时语音指南](https://help.aliyun.com/zh/model-studio/qwen-audio-realtime-user-guides)、[客户端事件](https://help.aliyun.com/zh/model-studio/fun-audiochat-client-events)、[服务端事件](https://help.aliyun.com/zh/model-studio/qwen-audio-realtime-server-events)、[音色表](https://help.aliyun.com/zh/model-studio/qwen-audio-tts-voice-list)。

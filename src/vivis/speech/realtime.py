@@ -170,6 +170,14 @@ async def connect_session(ws,session,log):
     raise RuntimeError('Qwen did not acknowledge session configuration')
 
 
+def check_audio_callbacks(audio,opened_at,now):
+    """Opening devices is preparation, not a gap in an already running stream."""
+    for name,observed in [('Microphone',audio.last_capture),('Output',audio.last_output)]:
+        baseline=opened_at if observed is None else observed
+        if now-baseline>1.:
+            raise RuntimeError(f'{name} callback watchdog: no callback for {now-baseline:.3f}s after device open')
+
+
 async def conversation(args,config,speech,speaker,url,session,key,folder,log,summary):
     from websockets.asyncio.client import connect
     async with connect(url,additional_headers={'Authorization':'Bearer '+key},compression=None,
@@ -183,7 +191,7 @@ async def conversation(args,config,speech,speaker,url,session,key,folder,log,sum
         def read_keys():
             for line in sys.stdin:keys.put(line.strip())
         threading.Thread(target=read_keys,daemon=True).start()
-        started=time.monotonic();tasks=[];stats={}
+        preparation_started=time.monotonic();started=None;tasks=[];stats={};input_packets_sent=0;ready=False
         try:
             with ExitStack() as stack:
                 writers={}
@@ -191,10 +199,11 @@ async def conversation(args,config,speech,speaker,url,session,key,folder,log,sum
                     for name in ('uplink','microphone','reference'):
                         wav=stack.enter_context(wave.open(str(folder/(name+'_16k.wav')),'wb'))
                         wav.setparams((1,2,16000,0,'NONE','not compressed'));writers[name]=wav
-                devices=audio.open();log.write('audio_ready',devices=devices,aec=args.aec)
-                print('纯语音聊天已就绪，直接说话，无需唤醒。机器头／相机／A2F均未启用。',flush=True)
-                print('Enter本地停声；/mark echo_only等可标记阶段；/quit或Ctrl+C结束。',flush=True)
+                devices=audio.open();started=time.monotonic()
+                log.write('audio_opened',devices=devices,aec=args.aec,preparation_s=started-preparation_started)
+                print('音频设备已打开，等待首帧收发……',flush=True)
                 async def send_audio():
+                    nonlocal input_packets_sent
                     last=time.monotonic()
                     while True:
                         if audio.fault:raise RuntimeError(audio.fault)
@@ -207,6 +216,7 @@ async def conversation(args,config,speech,speaker,url,session,key,folder,log,sum
                         await asyncio.wait_for(ws.send(json.dumps(dict(type='input_audio_buffer.append',
                                                  audio=base64.b64encode(pcm).decode()))),timeout=.5)
                         last=time.monotonic()
+                        input_packets_sent+=1
                         for name,data in [('uplink',pcm),('microphone',raw),('reference',far)]:
                             if name in writers:writers[name].writeframesraw(data)
                 async def receive():
@@ -218,11 +228,13 @@ async def conversation(args,config,speech,speaker,url,session,key,folder,log,sum
                         if task.done():task.result()
                     state.poll_playback()
                     if audio.fault:raise RuntimeError(audio.fault)
-                    if time.monotonic()-started>1.:
-                        if audio.last_capture is None or time.monotonic()-audio.last_capture>1.:
-                            raise RuntimeError('Microphone callback watchdog')
-                        if audio.last_output is None or time.monotonic()-audio.last_output>1.:
-                            raise RuntimeError('Output callback watchdog')
+                    check_audio_callbacks(audio,started,time.monotonic())
+                    if not ready and input_packets_sent and audio.last_capture is not None and audio.last_output is not None:
+                        ready=True
+                        log.write('audio_ready',devices=devices,aec=args.aec,input_packets_sent=input_packets_sent,
+                                  startup_s=time.monotonic()-started)
+                        print('纯语音聊天已就绪，直接说话，无需唤醒。机器头／相机／A2F均未启用。',flush=True)
+                        print('Enter本地停声；/mark echo_only等可标记阶段；/quit或Ctrl+C结束。',flush=True)
                     while not audio.meters.empty():log.write(**audio.meters.get_nowait())
                     if not keys.empty():
                         command=keys.get_nowait()
@@ -236,7 +248,10 @@ async def conversation(args,config,speech,speaker,url,session,key,folder,log,sum
             for task in tasks:task.cancel()
             if tasks:await asyncio.gather(*tasks,return_exceptions=True)
             audio.close();state.poll_playback()
-            stats=dict(audio.stats);stats.update(elapsed_s=time.monotonic()-started,responses=state.responses,
+            closed_at=time.monotonic()
+            stats=dict(audio.stats);stats.update(elapsed_s=closed_at-(started if started is not None else preparation_started),
+                audio_preparation_s=(started if started is not None else closed_at)-preparation_started,
+                audio_ready=ready,input_packets_sent=input_packets_sent,responses=state.responses,
                 local_cancel_operations=state.cancel_operations,cancelled_response_count=len(state.blocked),
                 server_cancelled_response_count=len(state.server_cancelled),server_speech_started_events=state.server_starts,
                 invalid_turns=state.invalid_turns,rejected_late_packets=state.late_packets,usage=state.usage,clipped_samples=player.clipped)
