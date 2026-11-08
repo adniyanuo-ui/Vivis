@@ -23,7 +23,7 @@ STAGES=(('quiet',3),('near_only',10),('quiet',3),('far_only',30),('quiet',3),('d
 INSTRUCTIONS={
     'quiet':'安静，等待下一阶段。',
     'near_only':'现在请读两遍：'+PHRASE+'（音箱不播放）',
-    'far_only':'现在仅音箱播放，请保持安静30秒。',
+    'far_only':'现在仅音箱播放，请保持安静{duration}秒。',
     'double_talk':'现在音箱播放中，请立即重复读，不必等音箱说完：'+PHRASE,
 }
 
@@ -70,7 +70,7 @@ def run(speech,speaker,frontend,folder,stages=STAGES,gain=1.):
                 epoch+=1;rid='check-'+str(epoch);stage_start=time.monotonic()
                 stage=dict(name=name,start_monotonic=stage_start,duration_s=duration)
                 report['stages'].append(stage);log.write('stage',**stage)
-                print(INSTRUCTIONS[name],flush=True)
+                print(INSTRUCTIONS[name].format(duration=duration),flush=True)
                 source=sources.get(name,b'');offset=0
                 while time.monotonic()-stage_start<duration:
                     now=time.monotonic();check_audio_callbacks(audio,started,now)

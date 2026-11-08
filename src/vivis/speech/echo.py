@@ -19,8 +19,10 @@ class ReferencePublisher:
         self.socket=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);self.socket.setblocking(False)
         self.dropped=0
 
-    def send(self,pcm,timing):
-        stamp=time.monotonic()+float(timing.outputBufferDacTime)-float(timing.currentTime)
+    def send(self,pcm,timing,*,timestamp=None):
+        stamp=(time.monotonic()+float(timing.outputBufferDacTime)-float(timing.currentTime)
+               if timestamp is None else float(timestamp))
+        if not math.isfinite(stamp):raise ValueError('Nonfinite DAC reference timestamp')
         mono=np.asarray(pcm,dtype=np.float32).mean(axis=1).astype('<f4')
         for start in range(0,len(mono),4096):
             part=mono[start:start+4096]

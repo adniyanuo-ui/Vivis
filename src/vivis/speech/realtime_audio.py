@@ -11,6 +11,7 @@ from scipy.signal import firwin,lfilter
 
 from vivis.speech.echo import ReferencePublisher,ReferenceBuffer
 from vivis.speech.voice_frontend import VoiceFrontEnd
+from vivis.speech.audio_clock import AudioStreamClock
 
 
 class VoiceBuffer:
@@ -86,7 +87,8 @@ class AudioIO:
         self.stats=dict(captured_frames=0,processed_frames=0,callback_warnings=[],reference_covered_frames=0,
                         processing_total_s=0.,processing_max_ms=0.,capture_age_max_ms=0.,
                         raw_clipped_samples=0,uplink_clipped_samples=0,reference_missing_frames=0,
-                        callback_warning_count=0,callback_warning_events=[])
+                        callback_warning_count=0,callback_warning_events=[],output_frames=0,
+                        clock_samples=[])
         self.last_capture=None;self.last_output=None
         self.meters=queue.Queue(maxsize=2)
 
@@ -109,6 +111,13 @@ class AudioIO:
             self.stack.callback(publisher.close)
             front=VoiceFrontEnd(self.speech,self.frontend,self.aec)
             self.stack.callback(front.close);self.stats['aec_backend']=front.backend
+            clocks={}
+            def observe_clock(stream,timing,entry,stamp,index):
+                if (index<=16 or index%50==0) and len(self.stats['clock_samples'])<2048:
+                    self.stats['clock_samples'].append(dict(stream=stream,frame=index,monotonic_entry=entry,
+                        current_time=float(timing.currentTime),stream_buffer_time=float(
+                            timing.outputBufferDacTime if stream=='output' else timing.inputBufferAdcTime),
+                        buffer_monotonic=stamp))
             def warning(stream,status):
                 self.stats['callback_warning_count']+=1
                 if len(self.stats['callback_warnings'])<128:
@@ -117,23 +126,35 @@ class AudioIO:
             def output(data,n,timing,status):
                 self.last_output=time.monotonic()
                 try:
-                    stamp=self.last_output+float(timing.outputBufferDacTime)-float(timing.currentTime)
+                    stamp=clocks['output'].convert(timing.outputBufferDacTime)
+                    self.stats['output_frames']+=1
+                    observe_clock('output',timing,self.last_output,stamp,self.stats['output_frames'])
                     data[:]=self.player.render(n,stamp)[:,None]
-                    publisher.send(data,timing)
+                    publisher.send(data,timing,timestamp=stamp)
                 except Exception as exc:data.fill(0);self.fault='Output callback: '+str(exc)
                 if status:warning('output',status)
             def capture(data,n,timing,status):
                 self.last_capture=time.monotonic()
-                stamp=self.last_capture+float(timing.inputBufferAdcTime)-float(timing.currentTime)
-                self.stats['captured_frames']+=1
-                if status:warning('input',status)
-                try:self.capture.put_nowait((stamp,data[:,c['channel']].copy()))
+                try:
+                    stamp=clocks['input'].convert(timing.inputBufferAdcTime)
+                    self.stats['captured_frames']+=1
+                    observe_clock('input',timing,self.last_capture,stamp,self.stats['captured_frames'])
+                    if status:warning('input',status)
+                    self.capture.put_nowait((stamp,data[:,c['channel']].copy()))
                 except queue.Full:self.fault='Microphone processing backlog exceeded500ms'
-            # Streams close before publisher/UDP/DSP. No serial or camera modules are imported.
-            self.stack.enter_context(sd.OutputStream(device=output_device,samplerate=48000,
-                channels=min(2,devices[output_device]['max_output_channels']),dtype='float32',blocksize=960,latency='low',callback=output))
-            self.stack.enter_context(sd.InputStream(device=input_device,samplerate=48000,channels=c['channels'],
-                dtype='float32',blocksize=960,latency='low',callback=capture))
+                except Exception as exc:self.fault='Input callback: '+str(exc)
+            # Open BOTH devices, map their clocks, then start. Callback execution
+            # time is a watchdog observation; it must not time-warp the PCM.
+            out=sd.OutputStream(device=output_device,samplerate=48000,
+                channels=min(2,devices[output_device]['max_output_channels']),dtype='float32',blocksize=960,latency='low',callback=output)
+            self.stack.callback(out.close)
+            inp=sd.InputStream(device=input_device,samplerate=48000,channels=c['channels'],
+                dtype='float32',blocksize=960,latency='low',callback=capture)
+            self.stack.callback(inp.close)
+            clocks.update(output=AudioStreamClock.calibrate(out),input=AudioStreamClock.calibrate(inp))
+            self.stats['clock_alignment']={key:clock.metadata() for key,clock in clocks.items()}
+            out.start();self.stack.callback(out.stop)
+            inp.start();self.stack.callback(inp.stop)
             self.thread=threading.Thread(target=self.process,args=(udp,front),daemon=True);self.thread.start()
             return dict(microphone=devices[input_device]['name'],speaker=devices[output_device]['name'])
         except BaseException:self.close();raise
