@@ -1,0 +1,28 @@
+{
+  "schema_version": "vivis-control-kws-assets-1.0",
+  "documentation": "https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html",
+  "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01.tar.bz2",
+  "sha256": "b2f7c89690dc8ce4c6ed6afeab7cd800c36ad1421fb6b6302b4a4b194cf7f35f",
+  "files": [
+    {
+      "name": "encoder-epoch-99-avg-1-chunk-16-left-64.int8.onnx",
+      "size": 4777666,
+      "sha256": "dd784973fc9d2fabb3b800d6dcd20fc3b0ca84f8e2415afe54b032878e447f4d"
+    },
+    {
+      "name": "decoder-epoch-99-avg-1-chunk-16-left-64.onnx",
+      "size": 675349,
+      "sha256": "fb581d6734511676e246e0dff2fea01b31b0913176cb3ca64576dbab0a177774"
+    },
+    {
+      "name": "joiner-epoch-99-avg-1-chunk-16-left-64.int8.onnx",
+      "size": 65242,
+      "sha256": "f79760052b87239e325f0567c752ad3130b30d92effb847d4307743c20c59a24"
+    },
+    {
+      "name": "tokens.txt",
+      "size": 1627,
+      "sha256": "72316508d9119696145abc6f1f8cdc46287535c34e5ce7e595f845cb1499cf2e"
+    }
+  ]
+}

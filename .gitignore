@@ -9,6 +9,7 @@ __pycache__/
 htmlcov/
 outputs/
 /incoming/
+/private/
 build/
 dist/
 .env

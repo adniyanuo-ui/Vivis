@@ -1,0 +1,13 @@
+{
+  "schema_version": "vivis-person-memory-1.0",
+  "enabled": true,
+  "database": "private/memory/conversations.sqlite3",
+  "working_token_budget": 524288,
+  "compression_ratio": 0.8,
+  "token_estimator": "utf8_bytes_upper_bound",
+  "cloud_injection_max_chars": 12000,
+  "recent_messages": 12,
+  "compression_batch_max_chars": 16000,
+  "compression_timeout_s": 45,
+  "raw_archive_retained": true
+}

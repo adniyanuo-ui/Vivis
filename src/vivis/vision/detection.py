@@ -10,10 +10,10 @@ import numpy as np
 from vivis.vision.policy import VERSION
 
 
-def select_largest(faces, width, height, min_area_ratio=.002, score_threshold=.8):
+def select_largest(faces, width, height, min_area_ratio=.002, score_threshold=.8,include_index=False):
     """Rank visible (clipped) bounding-box area. Aim at landmark eye midpoint."""
     candidates = []
-    for row in ([] if faces is None else faces):
+    for index,row in enumerate([] if faces is None else faces):
         if len(row) < 15 or not all(math.isfinite(float(v)) for v in row):
             continue
         x, y, w, h = map(float, row[:4])
@@ -40,6 +40,7 @@ def select_largest(faces, width, height, min_area_ratio=.002, score_threshold=.8
                            'area_ratio': area / (width * height), 'score': score,
                            'eye_line_roll_rad':eye_line_roll,'eye_span_px':eye_span if math.isfinite(eye_span) else None,
                            'point': [cx, cy], 'x': 2 * cx / width - 1, 'y': 2 * cy / height - 1})
+        if include_index:candidates[-1]['_row_index']=index
     return (max(candidates, key=lambda face: face['area_ratio']) if candidates else None), candidates
 
 
@@ -162,7 +163,9 @@ class FaceVision:
             faces[:,[1,3,5,7,9,11,13]]*=height/ih
         selected, candidates = select_largest(
             faces, width, height, self.config['detector']['min_face_area_ratio'],
-            self.config['detector']['score_threshold'])
+            self.config['detector']['score_threshold'],include_index=True)
+        self.selected_face_row=(None if selected is None else np.asarray(faces[selected['_row_index']],dtype=np.float32).copy())
+        for candidate in candidates:candidate.pop('_row_index',None)
         packet = {'schema_version': VERSION, 'sequence': sequence,
                   'timestamp_monotonic': stamp, 'target': selected,
                   'camera_transform': {k: self.config['camera'][k] for k in ('rotation_deg', 'mirror_x')}}

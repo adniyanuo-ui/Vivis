@@ -1,0 +1,8 @@
+{
+  "schema_version": "vivis-reception-1.0",
+  "enabled": true,
+  "arrival_hold_s": 2.0,
+  "departure_hold_s": 3.0,
+  "greeting_cooldown_s": 120,
+  "return_to_standby_after_s": 60
+}

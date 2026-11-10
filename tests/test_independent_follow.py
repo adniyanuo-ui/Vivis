@@ -63,7 +63,7 @@ def controller(narrow=False):
 class IndependentTrackingTests(unittest.TestCase):
     def test_all_neck_reference_and_command_bounds_use_device_limits(self):
         robot,c,p,ids,data,receiver,g,last=controller();motors={m['id']:m for m in p['motors']}
-        for sid,bounds,speed in ((32,(1650,2450),600),(33,(1600,2300),400),(34,(1762,2300),300)):
+        for sid,bounds,speed in ((32,(1650,2450),600),(33,(1500,2347),400),(34,(1800,2300),300)):
             m=motors[sid];self.assertEqual((m['safe_min'],m['safe_max']),bounds)
             self.assertEqual(m['max_speed_counts_s'],speed)
             self.assertNotIn('tracking_min',robot.axes[sid]);self.assertNotIn('tracking_max',robot.axes[sid])
@@ -210,7 +210,10 @@ class IndependentTrackingTests(unittest.TestCase):
             self.assertEqual((m['feedback_min'],m['feedback_max']),(m['device_min'],m['device_max']))
             state=dict(position=m['feedback_max'],temperature_c=30,load_raw=0,voltage_raw=235 if sid>=32 else 60,status_register=0)
             check_feedback(sid,state,m)
-            for outside in (m['feedback_min']-1,m['feedback_max']+1):
+            tolerance=m.get('position_feedback_tolerance_counts',0)
+            for edge in (m['feedback_min']-tolerance,m['feedback_max']+tolerance):
+                check_feedback(sid,{**state,'position':edge},m)
+            for outside in (m['feedback_min']-tolerance-1,m['feedback_max']+tolerance+1):
                 with self.assertRaisesRegex(RuntimeError,'outside safe range'):check_feedback(sid,{**state,'position':outside},m)
         self.assertEqual((motors[33]['safe_min'],motors[33]['safe_max']),(1987,2107))
         self.assertNotIn('feedback_min',motors[31])
@@ -225,7 +228,15 @@ class IndependentTrackingTests(unittest.TestCase):
         self.assertTrue(all(1987<=e['goals'][33]<=2107 for e in result['events']))
 
     def test_sample_beyond_device_range_still_stops_the_player(self):
-        with self.assertRaisesRegex(RuntimeError,'outside safe range'):self.run_timed_player(feedback33=2301)
+        m=Robot(ROOT/'configs/robots/xiaoshuai/robot.json').axes[33]
+        outside=m['device_max']+m['position_feedback_tolerance_counts']+1
+        with self.assertRaisesRegex(RuntimeError,'outside safe range'):self.run_timed_player(feedback33=outside)
+
+    def test_single_count_encoder_overshoot_uses_saved_tolerance_without_widening_goals(self):
+        m=Robot(ROOT/'configs/robots/xiaoshuai/robot.json').axes[33]
+        result=self.run_timed_player(feedback33=m['device_max']+1)
+        self.assertTrue(result['completed'])
+        self.assertTrue(all(m['safe_min']<=e['goals'][33]<=m['safe_max'] for e in result['events']))
 
     def run_timed_player(self,feedback33=None,narrow=False):
         import test_runtime

@@ -45,7 +45,24 @@ class SelectionTests(unittest.TestCase):
             np.testing.assert_allclose(target['bbox'],[10*width/320,20*height/small_height,100*width/320,80*height/small_height])
             np.testing.assert_allclose(target['point'],[60*width/320,48*height/small_height])
             self.assertAlmostEqual(target['x'],2*60/320-1);self.assertAlmostEqual(target['y'],2*48/small_height-1)
+            np.testing.assert_allclose(vision.selected_face_row[:4],target['bbox'])
+            self.assertNotIn('_row_index',target)
             self.assertFalse(image.any())
+
+    def test_identity_uses_same_largest_face_without_adding_fields_to_gaze_packet(self):
+        import cv2
+        from vivis.vision.detection import FaceVision
+        c=Robot(ROOT/'configs/robots/xiaoshuai/robot.json').tracking()
+        c['detector']['max_width']=640
+        rows=np.array([face(20,20,60,60),face(120,80,180,180)],dtype=np.float32)
+        detector=Mock();detector.detect.return_value=(2,rows)
+        factory=Mock();factory.create.return_value=detector
+        with patch('cv2.FaceDetectorYN',factory):
+            vision=FaceVision(c,ROOT);packet,_,_=vision.detect((1,time.monotonic(),np.zeros((480,640,3),np.uint8)))
+        np.testing.assert_allclose(vision.selected_face_row,rows[1])
+        self.assertEqual(packet['target']['bbox'],[120.,80.,180.,180.])
+        self.assertNotIn('_row_index',packet['target'])
+        self.assertNotIn('identity',packet)
 
     def test_eye_line_roll_measures_tilt_without_changing_existing_face_target(self):
         for degrees in (-25.,0.,25.):

@@ -352,6 +352,46 @@ class AudioClockTests(unittest.TestCase):
 
 
 class PlaybackTests(unittest.TestCase):
+    def test_continuous_live_control_passes_virtual_clip_end_and_remains_cancellable(self):
+        from unittest.mock import Mock,patch
+        from vivis.runtime.playback import play
+        from vivis.interaction.follow import MonotonicClock
+        profile,bus=self.continuous_fixture()
+        source=Mock();source.sample.return_value=np.array([2047.])
+        with tempfile.TemporaryDirectory() as directory,patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus):
+            result=play(profile,[2],np.full((1,1),2047.),60,None,Path(directory)/'log.json',Path(directory)/'STOP',
+                        max_seconds=.08,frame_source=source,clock_factory=lambda:MonotonicClock(None))
+        self.assertTrue(result['continuous_control']);self.assertTrue(result['completed'])
+        self.assertGreaterEqual(source.sample.call_count,2)
+        self.assertGreater(max(c.args[0] for c in source.sample.call_args_list),1/60)
+        bus.close.assert_called_once()
+
+
+    def continuous_fixture(self):
+        profile,bus,_=self.fixture()
+        profile.update(scheduled_feedback=True,schema_version='vivis-feetech-playback-1.0',developer_mode='face',
+                       serial_backend='feetech_python',feedback_mode='short_registers',feedback_max_age_s=1.)
+        registers={56:255,57:7,60:0,61:0,62:120,63:25,65:0}
+        bus.read.side_effect=lambda sid,address,count:bytes(registers.get(address+i,0) for i in range(count))
+        return profile,bus
+
+    def test_continuous_live_control_still_honors_operator_stop(self):
+        from unittest.mock import Mock,patch
+        from vivis.runtime.playback import play
+        from vivis.interaction.follow import MonotonicClock
+        profile,bus=self.continuous_fixture();source=Mock();count=[0]
+        with tempfile.TemporaryDirectory() as directory,patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus):
+            stop=Path(directory)/'STOP'
+            def sample(*_):
+                count[0]+=1
+                if count[0]==3:stop.touch()
+                return np.array([2047.])
+            source.sample.side_effect=sample
+            with self.assertRaisesRegex(RuntimeError,'Operator stop'):
+                play(profile,[2],np.full((1,1),2047.),60,None,Path(directory)/'log.json',stop,
+                     frame_source=source,clock_factory=lambda:MonotonicClock(None))
+        bus.close.assert_called_once();self.assertEqual(count[0],3)
+
     def test_playback_rechecks_isolated_high_temperature_and_continues(self):
         from unittest.mock import patch
         from vivis.runtime.playback import play
@@ -578,9 +618,21 @@ class PlaybackTests(unittest.TestCase):
         for fault in [dict(temperature_c=55),dict(load_raw=900),dict(status_register=2)]:
             with self.assertRaises(RuntimeError):check_feedback(2,{**state,'position':2048,**fault},motor)
         self.assertEqual((motor['safe_min'],motor['safe_max']),(2000,2047))
-        for value in [6,-1,True,1.5]:
+        for value in [51,-1,True,1.5]:
             motor['position_feedback_tolerance_counts']=value
             with self.assertRaises(ValueError):live_preflight(profile,[2])
+
+    def test_tracking_feedback_envelope_retains_robot_encoder_tolerance(self):
+        from vivis.runtime.playback import check_feedback
+        motor=dict(safe_min=1762,safe_max=2300,feedback_min=1762,feedback_max=2300,
+            device_min=1762,device_max=2300,position_feedback_tolerance_counts=5,
+            max_load_raw=350,max_temperature_c=80)
+        state=dict(position=2301,temperature_c=35,load_raw=0,status_register=0)
+        check_feedback(34,state,motor)
+        for position in (2306,1756,-1,4096):
+            with self.assertRaises(RuntimeError):check_feedback(34,{**state,'position':position},motor)
+        with self.assertRaises(RuntimeError):check_feedback(34,{**state,'status_register':1},motor)
+        self.assertEqual((motor['safe_min'],motor['safe_max']),(1762,2300))
 
     def test_device_temperature_limit_replaces_trial_limit_without_disabling_guard(self):
         from vivis.runtime.playback import check_feedback

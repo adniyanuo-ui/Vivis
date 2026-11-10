@@ -85,7 +85,7 @@ class SpeechModelSwitchTests(unittest.TestCase):
         from vivis.speech.prompts import cache_matches,PROCESSING_VERSION,RUNTIME_PROMPTS,TEXTS
         c=json.loads((ROOT/'configs/perception/speech.json').read_text())
         metadata=dict(processing_version=PROCESSING_VERSION,tts=c['tts'],timing=c.get('prompt_timing'),
-            level={'config':c['prompt_level']},texts={name:TEXTS[name] for name in RUNTIME_PROMPTS})
+                      level={'config':c['prompt_level']},texts={name:c.get('prompt_text_overrides',{}).get(name,TEXTS[name]) for name in RUNTIME_PROMPTS})
         self.assertTrue(cache_matches(c,metadata))
         del metadata['texts']['fault'];self.assertFalse(cache_matches(c,metadata))
 

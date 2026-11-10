@@ -86,6 +86,14 @@ def main(argv=None):
             except BlockingIOError:
                 raise RuntimeError('A person-tracking service is already running')
             vision = FaceVision(config, ROOT)
+            from vivis.interaction.cloud_control import PresencePublisher
+            presence=PresencePublisher(json.loads((ROOT/'configs/perception/speech_presence.json').read_text()),ROOT)
+            resources.callback(presence.close)
+            familiar=None
+            if config.get('familiar_faces',{}).get('enabled'):
+                from vivis.vision.familiar import FamiliarFaces
+                familiar=FamiliarFaces(config['familiar_faces'],ROOT)
+                resources.callback(familiar.close)
             social=landmarker=None
             if social_config.get('enabled') or expression_config.get('enabled'):
                 from vivis.vision.landmarks import FaceLandmarkerDetector
@@ -130,6 +138,12 @@ def main(argv=None):
                     continue
                 cycle_begin = now
                 packet, jpeg, metrics = vision.detect(sample)
+                if familiar is not None:
+                    recognized=familiar.step(sample,vision.selected_face_row)
+                    familiar.publish(recognized)
+                    metrics['familiar_recognition_available']=familiar.available
+                    metrics['familiar_identity']={k:recognized[k] for k in ('state','person_id','similarity','observed_monotonic')}
+                    if familiar.error:metrics['familiar_recognition_error']=familiar.error
                 if landmarker is not None:
                     # Expression-follow uses the SAME selected largest-face ROI.
                     # Standby follows and responds to this SAME selected ROI.
@@ -142,6 +156,11 @@ def main(argv=None):
                         weights=observation['weights']
                         packet['social_smile']=social.step(weights.get('mouthSmileLeft',0.),weights.get('mouthSmileRight',0.),
                             observation['timestamp_monotonic'],observation['valid'] and social_selected)
+                expression=None
+                if landmarker is not None and observation['valid'] and metrics['faces']==1:
+                    expression=dict(bilateral_smile=round(min(observation['weights'].get('mouthSmileLeft',0.),
+                        observation['weights'].get('mouthSmileRight',0.)),1),observation_only=True)
+                presence.publish(metrics['faces'],sample[1],expression=expression)
                 now = time.monotonic()
                 last_sequence = sample[0]
                 age = now - sample[1]

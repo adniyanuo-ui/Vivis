@@ -1,0 +1,24 @@
+[Unit]
+Description=Vivis Xiaoshuai voice interaction
+Wants=network-online.target
+After=network-online.target sound.target dms.service ies.service
+Conflicts=dms.service ies.service
+
+[Service]
+Type=simple
+User=@USER@
+SupplementaryGroups=dialout audio video render
+WorkingDirectory=@ROOT@
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=@ROOT@/src
+LoadCredential=dashscope_api_key:@HOME@/.config/vivis/dashscope_api_key
+ExecStartPre=@ROOT@/.venv/bin/python @ROOT@/tools/wait_p1_devices.py --robot @ROBOT@ --timeout 120
+ExecStart=@ROOT@/.venv/bin/python -u -m vivis.interaction.programs dialogue --robot @ROBOT@
+Restart=no
+KillMode=mixed
+TimeoutStartSec=150
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

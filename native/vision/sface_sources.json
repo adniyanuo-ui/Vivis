@@ -1,0 +1,20 @@
+{
+  "schema_version": "vivis-sface-assets-1.0",
+  "repository": "https://github.com/opencv/opencv_zoo",
+  "revision": "48b10fa505aeb51fbd127fc60a5c660040e823b7",
+  "documentation": "https://docs.opencv.org/4.x/d0/dd4/tutorial_dnn_face.html",
+  "files": [
+    {
+      "name": "face_recognition_sface_2021dec.onnx",
+      "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+      "size": 38696353,
+      "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+    },
+    {
+      "name": "LICENSE",
+      "url": "https://raw.githubusercontent.com/opencv/opencv_zoo/48b10fa505aeb51fbd127fc60a5c660040e823b7/models/face_recognition_sface/LICENSE",
+      "size": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    }
+  ]
+}

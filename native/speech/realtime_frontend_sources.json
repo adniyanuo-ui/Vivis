@@ -10,5 +10,13 @@
   "wrapper_license": "Apache-2.0",
   "vendored_source_notice": "https://github.com/strands-labs/pywebrtc-audio/blob/1bc860a2051c2b9b3c10b8c778770794b9321d84/vendor/webrtc_audio/MODIFICATIONS.md",
   "redistributed_in_vivis": false,
-  "runtime": "Optional isolated speech environment only; no AGC, no microphone gating"
+  "runtime": "Optional isolated speech environment only; no AGC, no microphone gating",
+  "optional_profile_extension": {
+    "module": "_vivis_aec3",
+    "sources": "voice_preserve/sources.json",
+    "instructions": "voice_preserve/README.md",
+    "selection": "--aec-profile voice-preserve",
+    "binary_redistributed": false,
+    "original_wheel_replaced": false
+  }
 }

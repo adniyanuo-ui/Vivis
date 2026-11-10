@@ -20,6 +20,7 @@ from vivis.runtime.robot import Robot
 from vivis.runtime.developer import check_competitors,preview_state
 from vivis.interaction.intents import IntentRouter,normalize
 from vivis.interaction.session import SessionPolicy,STANDBY,INTERACTION
+from vivis.interaction.voice_bridge import VoiceBridge
 from vivis.motion.mapping import read_json
 from vivis.hardware.feetech.sdk import check_serial_access
 from vivis.hardware.feetech.protocol import ProtocolError
@@ -28,19 +29,28 @@ from vivis.hardware.feetech.protocol import ProtocolError
 def dependencies(config,listener_only=False):
     speech=read_json(ROOT/config['speech']);missing=[]
     required=[ROOT/speech['python']]
-    keys=('encoder','decoder','tokens') if speech['asr'].get('backend')=='paraformer' else ('encoder','decoder','joiner','tokens')
+    qwen_only=not listener_only and config.get('realtime_voice',{}).get('enabled') and config['realtime_voice'].get('control_backend')=='qwen_realtime'
+    keys=() if qwen_only else (('encoder','decoder','tokens') if speech['asr'].get('backend')=='paraformer' else ('encoder','decoder','joiner','tokens'))
     for k in keys:required.append(ROOT/speech['asr']['directory']/speech['asr'][k])
+    control=speech.get('control_keywords',{})
+    if not qwen_only and control.get('enabled',False):
+        required.extend(ROOT/control['directory']/control[k] for k in ('encoder','decoder','joiner','tokens'))
+        required.append(ROOT/control['keywords_file'])
     if not listener_only:
+        lip=config.get('realtime_voice',{}).get('lip_sync',{})
+        if config.get('realtime_voice',{}).get('enabled') and lip.get('enabled'):
+            required.extend(ROOT/lip[k] for k in ('binary','model'))
         catalog=read_json(ROOT/config['programs'])
         if any(p['kind']=='runtime_a2f' for p in catalog['programs']):
             required.extend([ROOT/'outputs/a2f/build/a2f_chunk_probe',ROOT/'outputs/a2f/model_bundle/model.json'])
         from vivis.speech.prompts import RUNTIME_PROMPTS
-        for name in RUNTIME_PROMPTS:required.append(ROOT/speech['prompts']/(name+'.wav'))
+        if not qwen_only:
+            for name in RUNTIME_PROMPTS:required.append(ROOT/speech['prompts']/(name+'.wav'))
         perception=read_json(ROOT/'configs/perception/face_landmarker.json')
         required.extend(ROOT/perception[k] for k in ('python','model'))
     for path in required:
         if not path.is_file():missing.append(str(path))
-    if not listener_only:
+    if not listener_only and not qwen_only:
         try:
             from vivis.speech.prompts import prompt_cache_ready
             valid=prompt_cache_ready(speech)
@@ -56,8 +66,19 @@ def program_command(program,robot,folder,speech,settings):
         common+=['--home-speed',str(settings['_home_speed_counts_s'])]
     if program is None or program['kind']=='interaction':
         mode=INTERACTION if program else STANDBY
-        return base+['vivis.interaction.standby',*common,'--seconds',str(settings[mode+'_seconds']),
-                     '--config',str(ROOT/settings[mode])]+(['--overlap-warmup'] if settings.get('overlap_warmup',False) else [])
+        idle_config=ROOT/settings[mode]
+        voice_options=settings.get('realtime_voice',{})
+        if mode==STANDBY and voice_options.get('enabled') and voice_options.get('control_backend')=='qwen_realtime':
+            reception=read_json(ROOT/voice_options['reception_config'])
+            if reception['enabled']:
+                effective=read_json(idle_config);effective['presence_only']=True
+                idle_config=folder.with_suffix('.standby.json')
+                idle_config.write_text(json.dumps(effective,ensure_ascii=False,indent=2)+'\n')
+        continuous=['--continuous'] if voice_options.get('enabled') and voice_options.get('control_backend')=='qwen_realtime' else []
+        return base+['vivis.interaction.standby',*common,'--seconds',str(settings[mode+'_seconds']),*continuous,
+                     *(['--speech-animation',settings['_speech_animation_path']] if mode==INTERACTION and settings.get('_speech_animation_path') else []),
+                     *(['--expression-intent',settings['_expression_intent_path']] if mode==INTERACTION and settings.get('_expression_intent_path') else []),
+                     '--config',str(idle_config)]+(['--overlap-warmup'] if settings.get('overlap_warmup',False) else [])
     if not settings.get('diagnostics',False):common+=['--compact-logs']
     if settings.get('overlap_warmup',False):common+=['--overlap-warmup']
     if program['kind']=='prerecorded':
@@ -161,13 +182,17 @@ class PromptPlayer:
 
 
 class EventGate:
-    def __init__(self,max_age):self.max_age=max_age;self.last=0
+    def __init__(self,max_age):self.max_age=max_age;self.last=0;self.last_control=0
     def accept(self,event,now):
-        if event.get('kind')!='asr_final':return False
-        sequence=event.get('utterance_id');stamp=event.get('captured_end_monotonic')
-        if (type(sequence) is not int or sequence<=self.last or type(stamp) not in (int,float)
+        control=event.get('kind')=='asr_control'
+        if event.get('kind') not in ('asr_final','asr_control'):return False
+        sequence=event.get('control_sequence') if control else event.get('utterance_id');stamp=event.get('captured_end_monotonic')
+        previous=self.last_control if control else self.last
+        if (type(sequence) is not int or sequence<=previous or type(stamp) not in (int,float)
                 or not math.isfinite(stamp) or not 0<=now-stamp<=self.max_age):return False
-        self.last=sequence;return True
+        if control:self.last_control=sequence
+        else:self.last=sequence
+        return True
 
 
 def main(argv=None):
@@ -181,6 +206,9 @@ def main(argv=None):
     parser.add_argument('--diagnostics',choices=('on','off'),help='按需保留节目完整控制记录与串口追踪')
     parser.add_argument('--semantic',choices=('on','off'),help='交互态的可选LLM语义旁路；本地停止/退出始终优先')
     parser.add_argument('--cloud-chat',choices=('on','off'),help='交互态在线闲聊；无任务或硬件控制权')
+    parser.add_argument('--realtime-voice',choices=('on','off'),help='交互态Qwen实时语音；off恢复原本地语音流程')
+    parser.add_argument('--ask-key',action='store_true',help='安全输入本次实时语音API Key，不保存')
+    parser.add_argument('--record-audio',action='store_true',help='显式保存常驻语音服务的原始／参考／处理后本地录音')
     args=parser.parse_args(argv);settings=read_json(args.config)
     warm_speed=settings.get('warm_home_speed_counts_s',60)
     if type(warm_speed) is not int or not 1<=warm_speed<=32767:parser.error('Invalid warm homing speed')
@@ -198,11 +226,27 @@ def main(argv=None):
     if args.cloud_chat is not None:
         if conversation_config is None:parser.error('No conversation provider configuration')
         conversation_config['enabled']=args.cloud_chat=='on'
+    voice_options=copy.deepcopy(settings.get('realtime_voice',dict(enabled=False)))
+    if type(voice_options.get('enabled',False)) is not bool:parser.error('Invalid realtime voice enabled switch')
+    if args.realtime_voice is not None:voice_options['enabled']=args.realtime_voice=='on'
+    voice_options['record_audio']=args.record_audio
+    voice_enabled=voice_options.get('enabled',False) and not(args.listen_only or args.text_input or args.simulate_text is not None)
+    settings['realtime_voice']={**voice_options,'enabled':voice_enabled}
+    qwen_only=voice_enabled and voice_options.get('control_backend')=='qwen_realtime'
+    reception_enabled=bool(qwen_only and read_json(ROOT/voice_options['reception_config'])['enabled'])
+    if args.record_audio and not voice_enabled and not args.check:
+        parser.error('--record-audio需要启用实时语音')
+    if voice_enabled and (semantic_config and semantic_config.get('enabled') or conversation_config and conversation_config.get('enabled')):
+        parser.error('实时语音与旧文本聊天／语义旁路不能同时启用；用--realtime-voice off选择旧流程')
     robot=Robot(args.robot or ROOT/settings['robot']);speech,missing=dependencies(settings,listener_only=args.listen_only)
     wake_words=settings.get('wake_words') or robot.definition.get('identity',{}).get('wake_words')
     if wake_words is None:wake_words=[robot.definition.get('identity',{}).get('display_name',robot.definition['name'])]
     router=IntentRouter(catalog,wake_words=wake_words)
     session=SessionPolicy(p['id'] for p in catalog['programs'])
+    last_program=None
+    if voice_enabled:
+        from vivis.speech.managed import voice_configuration
+        voice_configuration(dict(speech,managed_voice=voice_options,programs=str(ROOT/settings['programs'])),robot.path)
     if args.simulate_text is not None:
         for text in args.simulate_text:
             before=session.mode
@@ -220,8 +264,13 @@ def main(argv=None):
         standby_plan(robot,read_json(ROOT/settings['interaction']),1.)
         for p in catalog['programs']:
             if p['kind'] in ('runtime_a2f','prerecorded'):robot.work(p['work'])
-        print(json.dumps(dict(offline_valid=True,programs=[p['title'] for p in catalog['programs']],
+        from vivis.interaction.knowledge import Knowledge
+        knowledge=Knowledge(robot.path)
+        print(json.dumps(dict(offline_valid=True,knowledge_enabled=knowledge.config is not None,
+            familiar_profiles=len(knowledge.people),familiar_faces_configured=knowledge.recognition is not None,
+            programs=[p['title'] for p in catalog['programs']],
             modes=[STANDBY,INTERACTION,'task'],wake_words=wake_words,initial_mode=STANDBY,
+            realtime_voice=voice_enabled,voice_control_backend=voice_options.get('control_backend','local'),reception_enabled=reception_enabled,realtime_lip_sync=bool(voice_enabled and voice_options.get('lip_sync',{}).get('enabled')),
             missing_dependencies=missing,hardware_opened=False,requires_onsite=['wake ASR at intended distance','speaker double-talk/AEC','smooth mode transitions']),ensure_ascii=False));return 0
     if missing:parser.error('Missing optional P1 assets; run python3 tools/setup_p1.py and setup_p0.py: '+str(missing))
     if not args.listen_only:
@@ -230,9 +279,27 @@ def main(argv=None):
             raise RuntimeError('已有独立视觉服务；请先关闭，再启动P1以保证真正待机时释放相机')
         try:check_serial_access(robot.motion_profile()['port'])
         except ProtocolError as exc:parser.error(str(exc))
+    voice_secret=None;voice_key_env=None
+    if voice_enabled:
+        trial=read_json(ROOT/voice_options['config']);voice_key_env=trial['api_key_env']
+        if args.ask_key:
+            if not sys.stdin.isatty():parser.error('--ask-key需要交互终端')
+            import getpass
+            voice_secret=getpass.getpass('百炼API Key（不回显、不保存）: ')
+        else:
+            from vivis.speech.credentials import load_key
+            try:voice_secret=load_key(voice_key_env)
+            except ValueError as exc:parser.error(str(exc))
+        if not voice_secret or any(c.isspace() for c in voice_secret):
+            parser.error('请运行.venv/bin/python tools/configure_api_key.py保存本机Key，或加--ask-key临时输入；环境变量为'+voice_key_env+'；用--realtime-voice off可运行原本地流程')
     output=(args.output or ROOT/'outputs/p1'/datetime.now().strftime('%Y%m%d_%H%M%S_%f')).resolve();output.mkdir(parents=True,exist_ok=False)
     speech_effective=copy.deepcopy(speech)
     speech_effective.update(wake_words=wake_words,programs=str((ROOT/settings['programs']).resolve()))
+    if voice_enabled:speech_effective['managed_voice']=voice_options
+    if voice_enabled and voice_options.get('lip_sync',{}).get('enabled',False):
+        settings['_speech_animation_path']=str(output/'voice/mouth.json')
+    if qwen_only:
+        settings['_expression_intent_path']=str(output/'voice/expression_intent.json')
     speech_path=output/'speech_effective.json';speech_path.write_text(json.dumps(speech_effective,ensure_ascii=False,indent=2)+'\n')
     (output/'effective.json').write_text(json.dumps(dict(config=settings,robot=str(robot.path),speech=speech),ensure_ascii=False,indent=2)+'\n')
     lock_path=ROOT/'outputs/runtime/p1.lock';lock_path.parent.mkdir(parents=True,exist_ok=True)
@@ -248,7 +315,7 @@ def main(argv=None):
             lock.close();raise RuntimeError('已有节目占用控制权，请先停止它，再启动P1语音管理器')
     events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_trace=asr_thread=None;active_target=None;active_program=None
     quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;preparation={};log=(output/'events.jsonl').open('w')
-    ready=False;warm_ready=False;reported_fault=None;semantic=cloud=None
+    ready=False;warm_ready=False;reported_fault=None;semantic=cloud=voice=None
     def request_shutdown(*_):
         nonlocal quitting
         quitting=True
@@ -267,6 +334,7 @@ def main(argv=None):
             microphone_active=ready and asr is not None and asr.poll() is None,
             microphone_pid=getattr(asr,'pid',None),
             wake_words=wake_words,error=fault,output=str(output),self_check=preparation)
+        if voice:state['realtime_voice']=dict(status=voice.status,speaker_owned=voice.owned,epoch=voice.epoch)
         path=ROOT/'outputs/runtime/program_status.json';temp=path.with_suffix('.tmp');temp.write_text(json.dumps(state,ensure_ascii=False)+'\n');temp.replace(path)
     def start_worker(target):
         nonlocal turn,active_target,active_program,phase,preparation
@@ -294,21 +362,33 @@ def main(argv=None):
         if conversation_config and conversation_config.get('enabled',False):
             from vivis.interaction.conversation import ConversationRouter
             from vivis.interaction.semantic import SemanticWorker
-            cloud=SemanticWorker(ConversationRouter(conversation_config,catalog,identity),optional_event,event_kind='cloud_result')
+            from vivis.interaction.knowledge import Knowledge
+            cloud=SemanticWorker(ConversationRouter(conversation_config,catalog,identity,Knowledge(robot.path)),optional_event,event_kind='cloud_result')
             record('conversation_config',config=conversation_config,identity=identity,spoken_chat=False)
         if not args.text_input:
             asr_log=(output/'asr.log').open('w')
             asr_trace=(output/'asr_events.jsonl').open('w')
-            asr=subprocess.Popen([str(ROOT/speech['python']),'-m','vivis.speech.listen','--config',str(speech_path)],
-                cwd=ROOT,env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'PYTHONNOUSERSITE':'1'},stdout=subprocess.PIPE,
+            command=[str(ROOT/speech['python']),'-m','vivis.speech.managed' if voice_enabled else 'vivis.speech.listen',
+                     '--config',str(speech_path)]
+            child_env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'PYTHONNOUSERSITE':'1'}
+            if voice_enabled:
+                command+=['--robot',str(robot.path),'--output',str(output/'voice')]
+                child_env[voice_key_env]=voice_secret
+            asr=subprocess.Popen(command,
+                cwd=ROOT,env=child_env,stdout=subprocess.PIPE,stdin=subprocess.PIPE if voice_enabled else None,
                 stderr=asr_log,text=True,start_new_session=True)
+            if voice_enabled:voice=VoiceBridge(asr.stdin)
             def read_asr():
                 for line in asr.stdout:
                     try:event=json.loads(line)
                     except ValueError:continue
                     asr_trace.write(json.dumps(event,ensure_ascii=False)+'\n');asr_trace.flush()
                     # Partials/review are diagnostics. They cannot evict a stop, capture fault or ready event.
-                    if event.get('kind') not in ('asr_final','asr_error','ready'):continue
+                    if event.get('kind')=='cloud_transcript' and event.get('role')!='user':
+                        try:events.put_nowait(event)
+                        except queue.Full:pass
+                        continue
+                    if event.get('kind') not in ('asr_final','asr_control','asr_error','ready','voice_state','voice_warning','cloud_error','cloud_transcript','cloud_action','mouth_error'):continue
                     while not quitting:
                         try:events.put(event,timeout=.05);break
                         except queue.Full:
@@ -320,7 +400,7 @@ def main(argv=None):
                     events.put(dict(kind='asr_final',utterance_id=number,text=line.strip(),captured_end_monotonic=time.monotonic()))
                 events.put(dict(kind='shutdown'))
             threading.Thread(target=read_text,daemon=True).start()
-        prompt=None if args.listen_only else PromptPlayer(robot,speech)
+        prompt=None if args.listen_only or qwen_only else PromptPlayer(robot,speech)
         ready=args.text_input
         print('P1三级状态：待机→唤醒交互→任务。停止／退出回交互；待机／自己玩去吧回待机。Ctrl+C退出管理器。',flush=True)
         print('唤醒词：'+'、'.join(wake_words)+'；管理器运行期间持续监听。',flush=True)
@@ -333,6 +413,9 @@ def main(argv=None):
                 try:event=events.get_nowait()
                 except queue.Empty:break
                 if event.get('kind')=='shutdown':quitting=True;continue
+                if event.get('kind')=='mouth_error':
+                    record('mouth_error',detail=event)
+                    print('语音口型暂不可用，语音及本地控制继续：'+event['error'],flush=True);continue
                 if event.get('kind')=='asr_error':
                     fault='Speech input unavailable: '+str(event);quitting=True
                     if worker:worker.cancel()
@@ -341,17 +424,58 @@ def main(argv=None):
                     record('speech_diagnostic',detail=event);continue
                 if event.get('kind')=='ready':
                     ready=True;record('speech_ready',detail=event)
-                    print('麦克风已就绪，请说唤醒词。'+('本次只识别，不驱动机器人。' if args.listen_only else '当前为真正待机，摄像头关闭。'),flush=True)
+                    print('麦克风已就绪，请说唤醒词。'+('本次只识别，不驱动机器人。' if args.listen_only else ('当前为前台接待待机，相机观察来人。' if reception_enabled else '当前为真正待机，摄像头关闭。')),flush=True)
                     continue
                 if event.get('kind')=='worker_ready' and worker and worker.cancelled_at is None and event['pid']==worker.process.pid:
                     warm_ready=True
                     phase=session.mode_of(active_target);record('worker_ready',program=active_program,mode=phase)
-                    print('状态：'+{STANDBY:'①待机（摄像头关闭，等待唤醒）',INTERACTION:'②交互态','task':'③任务执行'}[phase],flush=True)
+                    print('状态：'+{STANDBY:('①接待待机（相机观察来人）' if reception_enabled else '①待机（摄像头关闭，等待唤醒）'),INTERACTION:'②交互态','task':'③任务执行'}[phase],flush=True)
                     continue
                 if event.get('kind')=='worker_preparation' and worker and event['pid']==worker.process.pid:
                     if event['state'] is not None:preparation['state']=event['state']
                     preparation['last_message']=event['message']
                     record('preparation',program=active_program,**preparation);continue
+                if event.get('kind')=='cloud_action':
+                    if not qwen_only or not voice or event.get('revision')!=voice.context_revision or quitting or fault:
+                        record('cloud_action_stale',detail=event);continue
+                    from vivis.interaction.cloud_control import controller_intent
+                    try:requested=controller_intent(event.get('arguments'),session.programs,session.mode)
+                    except ValueError as exc:
+                        record('cloud_action_rejected',reason=str(exc));continue
+                    event=dict(kind='asr_final',text=event.get('text','Qwen command'),source='qwen_tool',
+                        controller_intent=requested,captured_end_monotonic=time.monotonic())
+                if event.get('kind') in ('voice_state','voice_warning','cloud_error','cloud_transcript'):
+                    if not voice or not voice.accept(event):
+                        record('voice_stale',detail=event);continue
+                    record(event['kind'],detail=event)
+                    if event['kind']=='voice_warning':
+                        print('语音提示：'+event['message'],flush=True);continue
+                    if event['kind']=='voice_state' and event['status']=='ready':
+                        print('实时语音已就绪：'+('唤醒、聊天和节目控制均由Qwen理解；无脸默认静默。' if qwen_only else '可直接聊天、插话；停止／待机／节目切换仍由本地识别执行。'),flush=True)
+                    elif event['kind']=='cloud_error':
+                        if qwen_only:
+                            fault='Qwen语音不可用：'+event['error'];quitting=True
+                            if worker:worker.cancel()
+                            print(fault+'；停止任务，不启用本地模型替代。',flush=True)
+                        else:print('实时聊天暂不可用，本地控制继续。可待机后重新唤醒：'+event['error'],flush=True)
+                    elif event['kind']=='cloud_transcript' and event.get('role')=='assistant':
+                        print(identity['display_name']+'：'+event.get('text',''),flush=True)
+                    elif event['kind']=='cloud_transcript' and event.get('role')=='user' and event.get('text','').strip():
+                        print('用户（识别）：'+event['text'],flush=True)
+                    if qwen_only:continue  # Cloud tools alone decide actions; transcripts are diagnostics.
+                    # A completed USER transcription is a second recognizer,
+                    # not an LLM action/tool. Only the same explicit control
+                    # whitelist may pass; assistant replies never enter it.
+                    candidate=router.parse(event.get('text',''),session.mode=='task',
+                        current_program=session.desired if session.mode=='task' else None,state=session.mode,allow_title_correction=True,
+                        previous_program=last_program['id'] if last_program else None)
+                    if (event['kind']=='cloud_transcript' and event.get('role')=='user'
+                            and session.mode==INTERACTION and voice.target
+                            and candidate['kind'] in ('standby','interaction','select')):
+                        stamp=time.monotonic()
+                        event=dict(kind='asr_final',text=event['text'],captured_end_monotonic=stamp,
+                            speech_end_monotonic=stamp,source='cloud_user_transcription')
+                    else:continue
                 if event.get('kind')=='cloud_result':
                     if not cloud or not cloud.accepts(event,session.mode) or quitting or fault:
                         record('cloud_stale',detail=event);continue
@@ -388,19 +512,33 @@ def main(argv=None):
                             worker.cancel();phase='stopping'
                             record('cancel_requested',program=active_program,reason=event['text'],source='semantic')
                     continue
-                if not gate.accept(event,time.monotonic()):continue
-                intent=router.parse(event.get('text',''),session.mode=='task',
-                    current_program=session.desired if session.mode=='task' else None,state=session.mode)
+                if qwen_only and event.get('source')!='qwen_tool':continue
+                if event.get('source') not in ('cloud_user_transcription','qwen_tool') and not gate.accept(event,time.monotonic()):continue
+                if event.get('kind')=='asr_control' and (session.mode!='task' or event.get('text') not in ('停止','退出','结束','待机')):
+                    record('control_keyword_ignored',detail=event);continue
+                intent=event['controller_intent'] if qwen_only else router.parse(event.get('text',''),session.mode=='task',
+                    current_program=session.desired if session.mode=='task' else None,state=session.mode,allow_title_correction=True,
+                    previous_program=last_program['id'] if last_program else None)
                 stamp=event.get('speech_end_monotonic') or event['captured_end_monotonic']
-                if prompt and prompt.contains(stamp) and intent['kind'] not in ('standby','interaction'):
+                prompt_controls=('standby','interaction','select','wake') if voice else ('standby','interaction')
+                if prompt and prompt.contains(stamp) and intent['kind'] not in prompt_controls:
                     record('prompt_turn_ignored',text=event['text']);continue
                 if intent['kind']=='ignore' and normalize(event.get('text','')) in ('','嗯','呃','啊','哦','噢','对','是'):
                     record('filler_ignored',text=event.get('text',''));continue
+                if voice and not qwen_only and session.mode==INTERACTION:
+                    if intent['kind']=='interaction':voice.interrupt()
+                    if intent['kind']=='prompt' and intent.get('name')=='welcome' and voice.failed:
+                        voice.enable(False);voice.enable(True)
+                        record('voice_retry',text=event['text']);continue
+                    if intent['kind'] in ('ignore','prompt') and not voice.failed:
+                        record('voice_chat_input',text=event['text'],cloud_status=voice.status)
+                        continue  # Same cleaned audio already reaches Qwen; no cached TTS duplicate.
                 if semantic:semantic.invalidate()
                 if cloud:
                     cloud.invalidate()
                     if intent['kind']=='standby':cloud.router.clear()
-                record('intent',text=event['text'],intent=intent,metrics=event.get('metrics',{}))
+                record('intent',text=event['text'],intent=intent,metrics=event.get('metrics',{}),
+                    source=event.get('source','local_asr'))
                 use_semantic=semantic and session.mode==INTERACTION and intent['kind']=='ignore'
                 use_cloud=cloud and not semantic and session.mode==INTERACTION and intent['kind']=='ignore'
                 label={'standby':'真正待机','interaction':'回到交互','wake':'唤醒交互','ignore':'未匹配','prompt':'交互问答'}.get(intent['kind'],intent['kind'])
@@ -425,6 +563,7 @@ def main(argv=None):
                 if args.listen_only:
                     session.pending_prompt=None;phase=session.mode;continue
                 if intent['kind'] in ('wake','select','standby','interaction','prompt'):
+                    if voice and session.desired!=INTERACTION:voice.enable(False)
                     if prompt:prompt.stop()
                     if worker and (session.desired!=active_target or restart):
                         worker.cancel();phase='stopping'
@@ -439,6 +578,11 @@ def main(argv=None):
                     cancelled=worker.cancelled_at is not None
                     worker.kill_owned_group();worker.finish();preparation.update(worker.preparation)
                     record('worker_exit',program=active_program,code=code,cancelled=cancelled,self_check=preparation)
+                    if active_program is not None and worker.ready and code in (0,130):
+                        program=next(p for p in catalog['programs'] if p['id']==active_program)
+                        last_program=dict(id=active_program,title=program['title'],outcome='interrupted' if cancelled or code==130 else 'completed')
+                        if voice:voice.last_program=dict(last_program)
+                        record('program_result',**last_program)
                     failed_log=worker.folder.with_suffix('.log') if code not in (0,130) else None
                     session.completed(active_target,cancelled)
                     worker=None;active_target=None;active_program=None
@@ -446,7 +590,7 @@ def main(argv=None):
                         fault='Program failed; see '+str(failed_log);phase='fault';session.pending_prompt=None
                         print('节目故障，已停止；管理器将退出，处理后请重新启动。日志：'+str(failed_log),flush=True)
                         publish(True)
-                        if prompt and not quitting:
+                        if prompt and not quitting and (voice is None or voice.released):
                             try:
                                 # play() first cancels the unfinished welcome/menu.
                                 prompt.play('fault');prompt.finish(lambda:quitting)
@@ -455,12 +599,24 @@ def main(argv=None):
                 elif worker.cancelled_at is not None and now-worker.cancelled_at>settings['cancel_timeout_s']:
                     worker.kill_owned_group();worker.process.wait(timeout=2);worker.finish();worker=None
                     fault='Worker cancellation timed out; hold position, no automatic recovery';phase='fault';quitting=True
+            if voice:
+                if qwen_only:
+                    session.pending_prompt=None
+                    voice.context(session.mode,session.desired,bool(worker and worker.ready and worker.cancelled_at is None and active_target==session.desired and not quitting and fault is None))
+                desired_voice=(not quitting and not fault and session.desired==INTERACTION and active_target==INTERACTION
+                    and worker is not None and worker.ready and worker.cancelled_at is None
+                    and session.pending_prompt is None and (prompt is None or prompt.clock is None)
+                    and (prompt is None or not prompt.contains(time.monotonic())))
+                voice.enable(desired_voice)
+                if (not voice.target and not voice.released and voice.release_requested_at is not None
+                        and now-voice.release_requested_at>settings['cancel_timeout_s']):
+                    fault='Speech speaker release timed out; no new audio owner started';quitting=True
             if quitting:
                 if prompt:prompt.stop()
                 if worker:worker.cancel()
                 else:break
-            elif not args.listen_only and ready and worker is None and fault is None:worker=start_worker(session.desired)
-            if not quitting and worker is not None and prompt:
+            elif not args.listen_only and ready and worker is None and fault is None and (voice is None or voice.released):worker=start_worker(session.desired)
+            if not quitting and worker is not None and prompt and (voice is None or voice.released):
                 spoken=session.take_prompt(active_target,getattr(worker,'ready',False) and worker.cancelled_at is None)
                 if spoken:prompt.play(spoken)
             publish();time.sleep(.02)
@@ -485,11 +641,12 @@ def main(argv=None):
         if asr is not None:
             def stop_asr():
                 asr.terminate()
-                try:asr.wait(timeout=3)
+                try:asr.wait(timeout=settings['cancel_timeout_s'] if voice else 3)
                 except subprocess.TimeoutExpired:asr.kill();asr.wait(timeout=2)
             cleanup(stop_asr)
             if asr_thread:cleanup(lambda:asr_thread.join(timeout=2))
             if asr.stdout:cleanup(asr.stdout.close)
+            if asr.stdin:cleanup(asr.stdin.close)
         if asr_log:cleanup(asr_log.close)
         if asr_trace:cleanup(asr_trace.close)
         if cleanup_errors:fault=fault or 'Resource cleanup failed: '+'; '.join(cleanup_errors)

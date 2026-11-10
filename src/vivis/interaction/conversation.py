@@ -8,9 +8,9 @@ from urllib.parse import urlsplit
 
 
 class ConversationRouter:
-    def __init__(self, config, catalog, identity):
+    def __init__(self, config, catalog, identity, knowledge=None):
         if config.get('schema_version')!='vivis-cloud-chat-1.0':raise ValueError('Unsupported cloud chat config')
-        self.config=config;self.catalog=catalog;self.identity=identity;self.history=[]
+        self.config=config;self.catalog=catalog;self.identity=identity;self.history=[];self.knowledge=knowledge
         self.provider=config['provider'];self.service=config['providers'][self.provider]
         endpoint=urlsplit(self.service['endpoint']);host=endpoint.hostname or ''
         if (endpoint.scheme!='https' or endpoint.username or endpoint.password
@@ -32,6 +32,8 @@ class ConversationRouter:
             '不能声称已开始/停止节目、移动身体或修改设置；若用户想执行节目，请让他直接说播放节目名。'
             '停止/退出回交互，待机/休息回关闭摄像头的待机，由本地控制器处理。'
             '不虚构联网搜索结果或记忆。回答保持简短，最多'+str(self.config['max_reply_chars'])+'字。')
+        if self.knowledge is not None:
+            system+=self.knowledge.base_instructions()+self.knowledge.person_instructions()
         body=dict(model=self.service['model'],messages=[dict(role='system',content=system),*list(self.history),dict(role='user',content=text)],
                   max_tokens=256,temperature=.7,stream=False)
         if self.provider=='deepseek':body['thinking']=dict(type='disabled')
@@ -71,7 +73,8 @@ def main(argv=None):
     group=parser.add_mutually_exclusive_group(required=True);group.add_argument('--text');group.add_argument('--check',action='store_true')
     args=parser.parse_args(argv);config=json.loads(args.config.read_text())
     catalog=json.loads((ROOT/'configs/interaction/programs.json').read_text());robot=json.loads(args.robot.read_text())
-    router=ConversationRouter(config,catalog,robot.get('identity',dict(display_name=robot['name'])))
+    from vivis.interaction.knowledge import Knowledge
+    router=ConversationRouter(config,catalog,robot.get('identity',dict(display_name=robot['name'])),Knowledge(args.robot))
     if args.check:
         print(json.dumps(dict(config_valid=True,provider=router.provider,model=router.service['model'],
                              enabled=config['enabled'],hardware_opened=False,network_called=False)));return 0

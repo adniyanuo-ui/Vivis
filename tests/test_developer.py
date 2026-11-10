@@ -256,10 +256,12 @@ class DeveloperResourcesTests(unittest.TestCase):
         config=Robot().tracking();states=[]
         camera=Mock();camera.actual={};camera.get.side_effect=lambda:(1,time.monotonic(),None)
         detector=Mock();detector.detect.side_effect=lambda sample:(dict(schema_version=VERSION,
-            sequence=1,timestamp_monotonic=sample[1],target=None),b'jpeg',dict(processing_ms=1.))
+            sequence=1,timestamp_monotonic=sample[1],target=None),b'jpeg',dict(processing_ms=1.,faces=0))
         preview=Mock();preview.update.side_effect=lambda state,jpeg=None:states.append({**state,'service_age_s':0.})
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);path=root/'config.json';path.write_text(json.dumps(config))
+            presence=root/'configs/perception/speech_presence.json';presence.parent.mkdir(parents=True)
+            presence.write_text((ROOT/'configs/perception/speech_presence.json').read_text())
             with patch.object(service,'ROOT',root),patch.object(service,'LatestCamera',return_value=camera),\
                     patch.object(service,'FaceVision',return_value=detector),patch.object(service,'Preview',return_value=preview),\
                     patch.object(service.socket,'socket'),redirect_stdout(io.StringIO()):

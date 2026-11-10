@@ -1,0 +1,162 @@
+{
+  "processing_version": "r128-compand-pauses-v2",
+  "tts": {
+    "engine": "dashscope",
+    "model": "qwen3-tts-flash",
+    "voice": "Ethan",
+    "language": "Chinese",
+    "speed": 1.0,
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "endpoint": "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    "timeout_s": 60,
+    "source_manifest": "native/speech/cloud_tts_sources.json"
+  },
+  "texts": {
+    "welcome": "在呢，你说！",
+    "menu": "我会唱歌、演剧本，还能学你的表情。你想听歌，还是看我演一段？",
+    "clarify": "你可以说，唱歌、演剧本，或者学我的表情。",
+    "standby": "好嘞，我歇会儿。有事喊小帅！",
+    "interaction": "好，咱们接着聊。",
+    "identity": "我是小帅，二十岁，北京男孩。我会唱歌、演剧本，还能学你的表情。",
+    "fault": "刚才出了点问题，我先停下来。请检查设备，再重新启动。"
+  },
+  "timing": null,
+  "asset_sha256": {
+    "source_manifest": "52aababaa8dc5f52b02e4263a930d66f0a859f1201a9b935c0ca49ff76e88ab7"
+  },
+  "level": {
+    "config": {
+      "method": "r128",
+      "reference_audio": "assets/works/0001/audio.wav",
+      "relative_loudness_lu": -3.0,
+      "true_peak_dbfs": -1.0,
+      "compression_threshold_dbfs": -24.0,
+      "compression_ratio": 4.0
+    },
+    "reference_sha256": "cbd18a1080ce5c1830df8c4e1cbc3cacbcbee37f5075e18ab344549e0a36e3a6",
+    "reference_lufs": -11.613109418078627,
+    "reference_channels": 1
+  },
+  "generation_execution": {
+    "provider": "DashScope HTTP",
+    "model": "qwen3-tts-flash",
+    "voice": "Ethan",
+    "request_ids": [
+      "c41e4f95-3f4f-951b-8406-2d4935610bce",
+      "55356414-2a59-97ba-8675-73b26be13784",
+      "819f6a27-f397-9c94-8dc7-6d7813db7232"
+    ],
+    "audio_formats": [
+      {
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "dtype": "int16",
+        "frames": 122880,
+        "header_warnings": [
+          "Reached EOF prematurely; finished at 245805 bytes, expected 2147483591 bytes from header."
+        ]
+      },
+      {
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "dtype": "int16",
+        "frames": 80640,
+        "header_warnings": [
+          "Reached EOF prematurely; finished at 161325 bytes, expected 2147483591 bytes from header."
+        ]
+      },
+      {
+        "sample_rate_hz": 24000,
+        "channels": 1,
+        "dtype": "int16",
+        "frames": 145920,
+        "header_warnings": [
+          "Reached EOF prematurely; finished at 291885 bytes, expected 2147483591 bytes from header."
+        ]
+      }
+    ]
+  },
+  "prompt_sha256": {
+    "welcome": "9237d7fd712b88bf65d20516020b6cd34ff9a3abce24f5906a125debca43da25",
+    "menu": "34dc8f544746ec38194497cd3147bedc46754ca2dc55349ef58497f95bf4622a",
+    "clarify": "66f95ba2440d7516a0879559dec389ecd7ab3d016aecbf5906503862ab7d43b3",
+    "standby": "540d4f1680c982f76e6dc5e7e3f0070763f593ae2b4fd2a5993416529c1a3c99",
+    "interaction": "eb5d35cdf55c6d0c9b254cb090cbdc031defcf293e7dde88e843a2aa4251382a",
+    "identity": "be04873f96383927a6c7d3e6a2f214cb858e607e372192b4f7868161f4679df4",
+    "fault": "be278524e75eb30920b233d2880fa6bb52752778aed5810f4151c35f1873a1c0"
+  },
+  "level_reports": {
+    "welcome": {
+      "raw_lufs": -22.538354988957916,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -15.06361208033517,
+      "relative_lu": -3.450502662256543,
+      "true_peak_dbfs": -1.0000000000000007,
+      "gain": 7.762215956214131,
+      "compressed": true
+    },
+    "menu": {
+      "raw_lufs": -27.81984754648897,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -14.613109418078624,
+      "relative_lu": -2.9999999999999964,
+      "true_peak_dbfs": -1.146025506658128,
+      "gain": 8.736488648890626,
+      "compressed": true
+    },
+    "clarify": {
+      "raw_lufs": -23.471546974963935,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -14.613109418078631,
+      "relative_lu": -3.0000000000000036,
+      "true_peak_dbfs": -2.0304397822363858,
+      "gain": 7.41372074918612,
+      "compressed": true
+    },
+    "standby": {
+      "raw_lufs": -28.008766276425156,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -14.666625712648438,
+      "relative_lu": -3.0535162945698104,
+      "true_peak_dbfs": -1.0000000000000029,
+      "gain": 9.082161211335436,
+      "compressed": true
+    },
+    "interaction": {
+      "raw_lufs": -24.37135156132707,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -15.305986765073454,
+      "relative_lu": -3.692877346994827,
+      "true_peak_dbfs": -0.9999999999999987,
+      "gain": 7.825712919713447,
+      "compressed": true
+    },
+    "identity": {
+      "raw_lufs": -25.551603061162947,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -14.613109418078631,
+      "relative_lu": -3.0000000000000036,
+      "true_peak_dbfs": -1.2242360639564518,
+      "gain": 8.255863708688599,
+      "compressed": true
+    },
+    "fault": {
+      "raw_lufs": -28.029025708984644,
+      "target_lufs": -14.613109418078627,
+      "measured_lufs": -14.613109418078624,
+      "relative_lu": -2.9999999999999964,
+      "true_peak_dbfs": -1.6880090743729523,
+      "gain": 8.5993002832179,
+      "compressed": true
+    }
+  },
+  "timing_reports": {
+    "welcome": {},
+    "menu": {},
+    "clarify": {},
+    "standby": {},
+    "interaction": {},
+    "identity": {},
+    "fault": {}
+  }
+}

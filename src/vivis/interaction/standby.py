@@ -37,10 +37,14 @@ class IdleFrames:
         self.mapper,self.c=mapper,settings;self.rng=random.Random(seed)
         self.behavior=settings.get('behavior','standby')
         self.tracking,self.perception=tracking,perception
+        self.presence_only=settings.get('presence_only',False)
         self.receiver=self.publisher=None;self.smile=0.;self.last_time=None;self.last_publish=-math.inf
         self.attention=AttentionRhythm(settings.get('attention',{'enabled':False}),seed=seed)
         self.missing_since=None;self.missing_origin=0.
         self.smile_ticks=0;self.smile_peak=0.;self.social_delta_by_id={}
+        self.mouth=None
+        self.speech_owned_ids=sorted(set(mapper.ids)&{sid for name,axes in mapper.shapes.items()
+            if name.startswith(('Mouth','Jaw','Tongue')) for sid in axes})
         self.response=settings.get('social_response',{'enabled':False})
         self.tracking_enabled=settings.get('tracking_enabled',False)
         if type(self.tracking_enabled) is not bool or type(self.response.get('enabled')) is not bool:
@@ -102,8 +106,21 @@ class IdleFrames:
             u=max(0.,min(1.,(now-self.missing_since-self.missing_hold)/self.missing_release))
             desired=self.missing_origin*(1-self.smooth(u))
         dt=1/60 if self.last_time is None else max(0.,min(.1,now-self.last_time));self.last_time=now
+        if getattr(self,'expression_intent',None) is not None:
+            desired=self.expression_intent.step(desired,now)
         self.smile+=(desired-self.smile)*(-math.expm1(-dt/self.response_tau))
+        speech=self.mouth.sample(now) if self.mouth else None
+        if speech is not None:
+            for i,name in enumerate(self.mapper.order[:52]):
+                if name.startswith(('Mouth','Jaw','Tongue')):weights[i]=speech[i]
+        self.mapper.speech_owned_ids=self.speech_owned_ids if speech is not None else []
         target=self.mapper.map_weights(weights,self.smile)
+        envelope=getattr(self,'expression_intent',None)
+        if envelope is not None:
+            target=self.mapper.apply_expression(target,weights,envelope.channel_weights,envelope.channel_blend,envelope.channel_source)
+            if envelope.active and envelope.active['weights']:self.mapper.prepare_expression_mapping()
+            blocked=(set(self.mapper.speech_owned_ids)|set(self.mapper.profile.get('gaze_owner_ids',[]))) if envelope.channel_source=='social' else set()
+            envelope.acknowledge(self.mapper.expression_axes,blocked)
         self.smile_ticks+=int(self.smile>.01);self.smile_peak=max(self.smile_peak,self.smile)
         for sid,delta in zip(self.mapper.ids,self.mapper.last_social_delta):
             self.social_delta_by_id[sid]=max(self.social_delta_by_id.get(sid,0.),abs(float(delta)))
@@ -177,6 +194,12 @@ class StandbyGaze(MojiaPlaybackGaze):
         # Only the already bounded horizontal idle intents differ from neutral.
         result[self.columns]+=(np.asarray(base)[self.columns]-self.neutral[self.columns])*self.glance_blend
         result[self.columns]=np.clip(result[self.columns],self.low[self.columns],self.high[self.columns])
+        envelope=getattr(self.source,'expression_intent',None)
+        if envelope is not None:
+            for sid in self.source.mapper.last_expression_eye_ids:
+                col=self.ids.index(sid)
+                result[col]+=(base[col]-result[col])*envelope.channel_blend
+            d['expression_eye_override_ids']=self.source.mapper.last_expression_eye_ids
         d.update(standby_glance_blend=self.glance_blend,tracking_active=d['state'] in ('tracking','holding'))
         self.source.publish(now,result,d)
         return result
@@ -196,7 +219,9 @@ def plan(robot,settings,seconds):
     response=settings.get('social_response',{'enabled':False})
     if (type(tracking_enabled) is not bool or not isinstance(response,dict)
             or type(response.get('enabled')) is not bool):raise ValueError('Invalid standby vision switch')
-    needs_camera=tracking_enabled or response.get('enabled',False)
+    presence_only=settings.get('presence_only',False)
+    if type(presence_only) is not bool:raise ValueError('Invalid presence-only setting')
+    needs_camera=tracking_enabled or response.get('enabled',False) or presence_only
     config=robot.tracking(device=None if needs_camera else 'unused') if needs_camera else None
     perception=None
     if config is not None:
@@ -205,6 +230,10 @@ def plan(robot,settings,seconds):
             config['control'].update(vertical_enabled=False,held_eye_ids=sorted(held))
             config['control']['axes']=[a for a in config['control']['axes'] if a['id'] not in held]
         config['social_smile']={'enabled':False};config['face_expression']={'enabled':False}
+        if behavior=='interaction' or presence_only:
+            from vivis.interaction.knowledge import Knowledge
+            knowledge=Knowledge(robot.path)
+            if knowledge.recognition:config['familiar_faces']=knowledge.recognition
         if response.get('enabled'):
             perception=read_json(ROOT/response['perception'])
             config['social_smile']=dict(enabled=True,gate=copy.deepcopy(response['gate']),face_selection=response.get('face_selection','single'),
@@ -249,6 +278,9 @@ def main(argv=None,default_config=None):
     parser.add_argument('--overlap-warmup',action='store_true',help=argparse.SUPPRESS)
     parser.add_argument('--home-speed',type=int,help='Single-session homing cap in counts/s; saved parameters unchanged')
     parser.add_argument('--output',type=Path);parser.add_argument('--check',action='store_true')
+    parser.add_argument('--continuous',action='store_true',help='持续接待/交互，不定时重启相机或重新回中')
+    parser.add_argument('--speech-animation',type=Path,help=argparse.SUPPRESS)
+    parser.add_argument('--expression-intent',type=Path,help=argparse.SUPPRESS)
     args=parser.parse_args(argv);robot=Robot(args.robot);settings=read_json(args.config)
     if args.home_speed is not None:
         if not 1<=args.home_speed<=32767:parser.error('Invalid home speed')
@@ -258,14 +290,23 @@ def main(argv=None,default_config=None):
     if args.tracking is not None:settings['tracking_enabled']=args.tracking=='on'
     if args.smile is not None:settings.setdefault('social_response',{})['enabled']=args.smile=='on'
     if args.smile_strength is not None:settings.setdefault('social_response',{})['strength']=args.smile_strength
-    profile,ids,home,mapper,source,neutral=plan(robot,settings,args.seconds)
+    profile,ids,home,mapper,source,neutral=plan(robot,settings,1. if args.continuous else args.seconds)
     behavior=source.behavior
-    needs_camera=source.tracking_enabled or source.response['enabled']
+    if args.speech_animation is not None:
+        if behavior!='interaction':parser.error('Speech animation is only owned by interaction')
+        from vivis.speech.mouth import MouthReceiver
+        source.mouth=MouthReceiver(args.speech_animation,mapper.order)
+    if args.expression_intent is not None:
+        if behavior!='interaction':parser.error('Expression intents are only owned by interaction')
+        from vivis.interaction.expression_intent import IntentEnvelope,configuration
+        source.expression_intent=IntentEnvelope(args.expression_intent,configuration())
+        mapper.prepare_expression_mapping()
+    needs_camera=source.tracking_enabled or source.response['enabled'] or source.presence_only
     required=[ROOT/source.perception[k] for k in ('python','model')] if source.perception else []
     if args.session_stop_file is not None:profile['session_stop_file']=str(args.session_stop_file.resolve())
     if args.check:
         print(json.dumps(dict(offline_valid=True,program=behavior,ids=ids,camera_opened=False,hardware_opened=False,
-            tracking_enabled=source.tracking_enabled,smile_enabled=source.response['enabled'],
+            continuous=args.continuous,tracking_enabled=source.tracking_enabled,smile_enabled=source.response['enabled'],
             smile_channel_gain=mapper.smile_strength,a2f_used=False,audio_opened=False,
             missing_dependencies=[str(x) for x in required if not x.is_file()]),ensure_ascii=False));return 0
     for path in required:
@@ -312,9 +353,9 @@ def main(argv=None,default_config=None):
                         receiver.wait_ready();guard()
                     gaze=StandbyGaze(source.tracking,profile,ids,receiver,source) if source.tracking_enabled else None
                     guard();print(f'{behavior.upper()} START: tracking={source.tracking_enabled}, smile={source.response["enabled"]}, gain={mapper.smile_strength:g}',flush=True)
-                    print('交互态：人脸跟随与持续微笑回应。' if behavior=='interaction' else '真正待机：摄像头关闭，低频眨眼；由管理器保持唤醒监听。',flush=True)
+                    print('交互态：人脸跟随与持续微笑回应。' if behavior=='interaction' else ('前台接待待机：相机观察来人，低频眨眼，不执行眼颈跟随。' if source.presence_only else '真正待机：摄像头关闭，低频眨眼；由管理器保持唤醒监听。'),flush=True)
                     playback=play(profile,ids,neutral,60,None,output/'playback_log.json',stop_file,
-                        frame_source=source,gaze_override=gaze,clock_factory=lambda:MonotonicClock(args.seconds))
+                        frame_source=source,gaze_override=gaze,clock_factory=lambda:MonotonicClock(None if args.continuous else args.seconds))
                     result['completed']=playback['completed']
             finally:
                 if receiver is not None:receiver.close()
@@ -328,6 +369,8 @@ def main(argv=None,default_config=None):
     finally:
         for sig,h in handlers.items():signal.signal(sig,h)
         result.update(source.summary())
+        result['speech_mouth_active_ticks']=source.mouth.active_ticks if source.mouth else 0
+        result['a2f_used']=result['speech_mouth_active_ticks']>0
         (output/'summary.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
         (output/'preparation.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
     return 0

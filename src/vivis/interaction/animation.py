@@ -83,6 +83,43 @@ class FrameMapper:
         self.last_fused=None
         self.protected_ids=[]
         self.last_social_delta=np.zeros(len(ids))
+        self.expression_mapping=None;self.expression_axes={};self.last_expression_ids=[];self.last_expression_eye_ids=[]
+
+    def prepare_expression_mapping(self):
+        if self.expression_mapping is not None:return
+        available={m['id'] for m in self.profile['motors']}
+        shapes={name:{sid:position for sid,position in axes.items() if sid in available} for name,axes in self.shapes.items()}
+        self.expression_mapping=CompiledFaceMapping(self.order,shapes,self.profile,scope='face_eyes',eye_input='blendshapes')
+        probe=np.zeros((53,61));probe[1:,:52]=np.eye(52)
+        mapped,_=self.expression_mapping.map(probe)
+        self.expression_axes={name:{sid for j,sid in enumerate(self.expression_mapping.active)
+            if sid in self.ids and abs(mapped[i+1,j]-mapped[0,j])>1e-8} for i,name in enumerate(self.order[:52])}
+
+    def apply_expression(self,result,base_weights,weights,blend,source):
+        """Map explicit52-channel poses through the same compiled calibration."""
+        self.last_expression_ids=[];self.last_expression_eye_ids=[]
+        if not weights or blend<1e-5:return result
+        self.prepare_expression_mapping()
+        affected=set().union(*(self.expression_axes[name] for name in weights))
+        eyes={axis['id'] for axis in self.profile.get('gaze_axes',[])}
+        # Profiles expose gaze ownership as IDs; neck axes are not in expression mapping.
+        eyes|=set(self.profile.get('gaze_owner_ids',[]))&set(self.expression_mapping.active)
+        if source=='social':affected-=set(self.speech_owned_ids)|eyes
+        value=np.zeros((1,61));value[0,:52]=np.clip(np.asarray(base_weights)*self.gains,0,1)
+        if source=='command':
+            # Clear competing contributions only in this candidate. Untouched
+            # actuators keep the existing speech/blink/tracking result.
+            for i,name in enumerate(self.order[:52]):
+                if self.expression_axes[name]&affected:value[0,i]=0.
+        for name,weight in weights.items():value[0,self.order.index(name)]=weight
+        mapped,_=self.expression_mapping.map(value)
+        result=np.array(result,copy=True)
+        for j,sid in enumerate(self.expression_mapping.active):
+            if sid in affected:
+                col=self.ids.index(sid);result[col]+=(mapped[0,j]-result[col])*blend
+        self.last_expression_ids=sorted(affected)
+        if source=='command':self.last_expression_eye_ids=sorted(eyes&affected)
+        return result
 
     def map_weights(self, weights, smile=0.):
         if (len(weights)!=52 or not all(type(v) in (int,float) and math.isfinite(v) and 0<=v<=1 for v in weights)

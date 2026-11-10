@@ -15,5 +15,21 @@
   "interaction_seconds": 600,
   "warm_home_speed_counts_s": 120,
   "semantic": "configs/interaction/semantic.json",
-  "conversation": "configs/interaction/conversation.json"
+  "conversation": "configs/interaction/conversation.json",
+  "realtime_voice": {
+    "enabled": true,
+    "config": "configs/perception/realtime_voice.json",
+    "region": "beijing",
+    "profile": "voice-preserve",
+    "lip_sync": {
+      "enabled": true,
+      "binary": "outputs/a2f/build/a2f_chunk_probe",
+      "model": "outputs/a2f/model_bundle/model.json"
+    },
+    "control_backend": "qwen_realtime",
+    "control_poll_interval_s": 0.05,
+    "reception_config": "configs/interaction/reception.json",
+    "memory_config": "configs/interaction/memory.json",
+    "tasks_config": "configs/interaction/tasks.json"
+  }
 }

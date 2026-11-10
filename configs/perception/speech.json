@@ -19,18 +19,15 @@
     "threads": 2
   },
   "tts": {
-    "engine": "qwen3",
-    "python": "outputs/tts_qwen/venv/bin/python",
-    "directory": "outputs/tts_qwen/model",
-    "model": "model.safetensors",
-    "source_manifest": "native/speech/qwen3_tts_sources.json",
-    "speaker_id": 0,
-    "speaker_name": "Dylan",
+    "engine": "dashscope",
+    "model": "qwen3-tts-flash",
+    "voice": "Ethan",
     "language": "Chinese",
     "speed": 1.0,
-    "threads": 6,
-    "max_new_tokens": 1024,
-    "force_standard_chinese": true
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "endpoint": "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    "timeout_s": 60,
+    "source_manifest": "native/speech/cloud_tts_sources.json"
   },
   "prompt_level": {
     "method": "r128",
@@ -48,7 +45,7 @@
     "reference_delay_ms": 0,
     "noise_suppress_db": -15
   },
-  "prompts": "assets/speech/xiaoshuai_qwen3_mandarin",
+  "prompts": "assets/speech/xiaoshuai_ethan",
   "asr_final": {
     "directory": "outputs/speech/models/sensevoice",
     "model": "model.int8.onnx",
@@ -63,5 +60,25 @@
     "min_speech_frames": 3,
     "silence_frames": 15,
     "max_frames": 600
+  },
+  "control_keywords": {
+    "enabled": true,
+    "directory": "outputs/speech/models/control_kws_zh",
+    "encoder": "encoder-epoch-99-avg-1-chunk-16-left-64.int8.onnx",
+    "decoder": "decoder-epoch-99-avg-1-chunk-16-left-64.onnx",
+    "joiner": "joiner-epoch-99-avg-1-chunk-16-left-64.int8.onnx",
+    "tokens": "tokens.txt",
+    "keywords_file": "configs/perception/control_keywords.txt",
+    "threads": 1,
+    "keywords_score": 2.0,
+    "keywords_threshold": 0.1,
+    "confirmation_s": 0.25,
+    "reference_guard_s": 0.75,
+    "refractory_s": 1.5
+  },
+  "prompt_text_overrides": {
+    "menu": "我会唱歌、演剧本，还能学你的表情。你想听歌，还是看我演一段？",
+    "identity": "我是小帅，二十岁，北京男孩。我会唱歌、演剧本，还能学你的表情。",
+    "clarify": "你可以说，唱歌、演剧本，或者学我的表情。"
   }
 }

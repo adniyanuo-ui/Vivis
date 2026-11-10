@@ -33,18 +33,19 @@ struct Capture {
 };
 
 int main(int argc, char** argv) { try {
-  if(argc != 5 && argc != 7) throw std::runtime_error("Usage: a2f_chunk_probe MODEL_JSON WAV NEW_OUTPUT_DIR SECONDS [--stream PLAYBACK_ID]");
-  const bool streaming = argc==7 && std::string(argv[5])=="--stream";
+  const bool live = argc==4 && std::string(argv[2])=="--live";
+  if(!live && argc != 5 && argc != 7) throw std::runtime_error("Usage: a2f_chunk_probe MODEL_JSON WAV NEW_OUTPUT_DIR SECONDS [--stream PLAYBACK_ID] OR MODEL_JSON --live NEW_OUTPUT_DIR");
+  const bool streaming = live || (argc==7 && std::string(argv[5])=="--stream");
   if(argc==7 && !streaming) throw std::runtime_error("Unknown option");
   const std::filesystem::path out(argv[3]);
   if(std::filesystem::exists(out)) throw std::runtime_error("Output directory already exists");
-  const double seconds = std::stod(argv[4]);
+  const double seconds = live ? 3600 : std::stod(argv[4]);
   if(!std::isfinite(seconds) || seconds <= 0 || seconds > 3600) throw std::runtime_error("Invalid duration");
   AudioFile<float> wav;
-  if(!wav.load(argv[2]) || wav.getSampleRate()!=16000 || wav.getNumChannels()!=1)
+  if(!live && (!wav.load(argv[2]) || wav.getSampleRate()!=16000 || wav.getNumChannels()!=1))
     throw std::runtime_error("Need 16kHz mono WAV");
-  const size_t samples = std::min(wav.samples[0].size(), static_cast<size_t>(std::llround(seconds*16000)));
-  if(!samples) throw std::runtime_error("Empty audio");
+  const size_t samples = live ? 0 : std::min(wav.samples[0].size(), static_cast<size_t>(std::llround(seconds*16000)));
+  if(!live && !samples) throw std::runtime_error("Empty audio");
   cuda_check(cudaSetDevice(0));
   auto load = Clock::now();
   Owner<nva2f::IBlendshapeExecutorBundle> bundle(nva2f::ReadDiffusionBlendshapeSolveExecutorBundle(
@@ -68,7 +69,7 @@ int main(int argc, char** argv) { try {
   Capture capture;
   capture.streaming=streaming;
   if(streaming) {
-    capture.playback_id=argv[6];
+    capture.playback_id=live ? "warming" : argv[6];
     std::cout << json({{"schema_version","vivis-a2f-bindings-1.0"},
                       {"playback_id",capture.playback_id},{"names",report["names"]}}).dump() << '\n' << std::flush;
   } else {
@@ -103,6 +104,40 @@ int main(int argc, char** argv) { try {
   }, &capture));
   auto& emotion = bundle->GetEmotionAccumulator(0);
   std::vector<float> neutral(emotion.GetEmotionSize(),0.f);
+  if(live) {
+    bool active=false;
+    auto execute=[&]() {
+      while(nva2x::GetNbReadyTracks(executor)) check(executor.Execute(nullptr));
+      cuda_check(cudaDeviceSynchronize());
+    };
+    auto finish=[&]() {
+      if(!active) return;
+      check(bundle->GetAudioAccumulator(0).Close()); execute();check(executor.Wait(0));
+      cuda_check(cudaDeviceSynchronize());active=false;
+      std::cout << json({{"kind","finished"},{"playback_id",capture.playback_id}}).dump() << '\n' << std::flush;
+    };
+    std::string line;
+    while(std::getline(std::cin,line)) {
+      if(line.size()>262144) throw std::runtime_error("Oversize live audio record");
+      auto packet=json::parse(line);const auto kind=packet.at("kind").get<std::string>();
+      if(kind=="start") {
+        finish();check(executor.Reset(0));check(bundle->GetAudioAccumulator(0).Reset());check(emotion.Reset());
+        capture.playback_id=packet.at("playback_id").get<std::string>();
+        capture.count=0;capture.last_sample=-1;capture.start=Clock::now();active=true;
+        check(emotion.Accumulate(0,nva2x::HostTensorFloatConstView{neutral.data(),neutral.size()},bundle->GetCudaStream().Data()));
+        check(emotion.Close());
+        std::cout << json({{"schema_version","vivis-a2f-bindings-1.0"},{"playback_id",capture.playback_id},{"names",report["names"]}}).dump() << '\n' << std::flush;
+      } else if(kind=="audio") {
+        if(!active || packet.at("playback_id")!=capture.playback_id) throw std::runtime_error("Live audio owner mismatch");
+        auto values=packet.at("samples").get<std::vector<float>>();
+        if(values.empty() || values.size()>4000) throw std::runtime_error("Invalid live chunk size");
+        for(float value:values) if(!std::isfinite(value) || std::abs(value)>1) throw std::runtime_error("Invalid live PCM");
+        check(bundle->GetAudioAccumulator(0).Accumulate(nva2x::HostTensorFloatConstView{values.data(),values.size()},bundle->GetCudaStream().Data()));execute();
+      } else if(kind=="finish") finish();
+      else throw std::runtime_error("Unknown live audio command");
+    }
+    finish();return 0;
+  }
   check(emotion.Accumulate(0,nva2x::HostTensorFloatConstView{neutral.data(),neutral.size()},bundle->GetCudaStream().Data()));
   check(emotion.Close());
   cuda_check(cudaDeviceSynchronize());

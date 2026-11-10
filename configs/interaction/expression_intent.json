@@ -1,0 +1,9 @@
+{
+  "schema_version": "vivis-expression-intent-1.0",
+  "enabled": true,
+  "default_duration_s": 8.0,
+  "max_duration_s": 30.0,
+  "attack_s": 0.4,
+  "release_s": 1.0,
+  "ack_timeout_s": 3.0
+}

@@ -54,5 +54,6 @@
   "calibration_source": "小帅无色测试版6.22（16.24）.json",
   "compatibility": {
     "verified_transport": "Read-only33-axis1Mbps; face playback observed;2026-11-05 independent neck direction probes passed; integrated tracking pending onsite acceptance."
-  }
+  },
+  "knowledge": "../../knowledge/xiaoshuai.json"
 }

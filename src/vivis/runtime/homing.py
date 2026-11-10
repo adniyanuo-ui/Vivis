@@ -59,13 +59,18 @@ def recovery_policy(policy):
     return policy
 
 
-def home_check(state,snapshot,neutral=None,tolerance=0,telemetry_policy=None,position_recovery=None,defer_sensor_faults=False):
+def home_check(state,snapshot,neutral=None,tolerance=0,telemetry_policy=None,position_recovery=None,defer_sensor_faults=False,
+               feedback_tolerance_counts=0):
     sid=snapshot['id']
     position=state['position']
+    if type(feedback_tolerance_counts) is not int or not 0<=feedback_tolerance_counts<=50:
+        raise ValueError('Invalid position feedback tolerance')
+    inside_feedback=(snapshot['configured_min']-feedback_tolerance_counts<=position
+                     <=snapshot['configured_max']+feedback_tolerance_counts)
     near_home=neutral is not None and abs(position-neutral)<=tolerance
     recovering=(position_recovery is not None and
                 position_recovery['feedback_min']<=position<=position_recovery['feedback_max'])
-    if not 0<=position<=4095 or (not snapshot['configured_min']<=position<=snapshot['configured_max'] and not near_home and not recovering):
+    if not 0<=position<=4095 or (not inside_feedback and not near_home and not recovering):
         raise RuntimeError(f'ID{sid}: home position outside device limits; position={position} '
                            f'limits=[{snapshot["configured_min"]},{snapshot["configured_max"]}] '
                            f'initial_torque={snapshot["torque_enable"]}')
@@ -87,9 +92,10 @@ def homing_feedback_motor(motor,snapshot,position_recovery=None):
     position domain; the playback/following command and feedback limits stay intact.
     """
     tolerance=motor.get('initial_settle_tolerance_counts',20);neutral=motor['neutral']
+    feedback_tolerance=motor.get('position_feedback_tolerance_counts',0)
     result={**motor,'safe_min':snapshot['configured_min'],'safe_max':snapshot['configured_max'],
-            'feedback_min':max(0,min(snapshot['configured_min'],neutral-tolerance)),
-            'feedback_max':min(4095,max(snapshot['configured_max'],neutral+tolerance))}
+            'feedback_min':max(0,min(snapshot['configured_min']-feedback_tolerance,neutral-tolerance)),
+            'feedback_max':min(4095,max(snapshot['configured_max']+feedback_tolerance,neutral+tolerance))}
     if position_recovery is not None:
         result['feedback_min']=min(result['feedback_min'],position_recovery['feedback_min'])
         result['feedback_max']=max(result['feedback_max'],position_recovery['feedback_max'])
@@ -227,7 +233,8 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
                     raise RuntimeError(f'ID{sid}: startup recovery did not reenter device limits or settle at neutral; '
                         f'position={sample["position"]} neutral={neutral[sid]} tolerance={tolerance}')
             warnings=home_check(sample,states[sid],neutral[sid],tolerance,telemetry_policy,plan,
-                                defer_sensor_faults=monitor is not None)
+                                defer_sensor_faults=monitor is not None,
+                                feedback_tolerance_counts=task_motors.get(sid,{}).get('position_feedback_tolerance_counts',0))
             if sid in task_motors:warnings=check_feedback(sid,sample,homing_feedback_motor(task_motors[sid],states[sid],plan),
                                                          defer_sensor_faults=monitor is not None)
             return warnings

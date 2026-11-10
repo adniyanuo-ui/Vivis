@@ -1,0 +1,23 @@
+{
+  "schema_version": "vivis-knowledge-1.0",
+  "enabled": true,
+  "persona_document": "docs/knowledge/characters/xiaoshuai.md",
+  "persona_sections": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "people_directory": "private/people",
+  "allow_cloud_professional_context": true,
+  "authorization_source": "2026-11-09 user chose cloud conversation and prioritized quality; use selected professional background, exclude private topics",
+  "recognition": "configs/perception/familiar_faces.json",
+  "business_documents": [
+    {
+      "path": "docs/knowledge/people/weiyufei.md",
+      "sections": [
+        1
+      ]
+    }
+  ]
+}

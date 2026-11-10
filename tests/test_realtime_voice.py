@@ -25,6 +25,15 @@ def arguments(**extra):
 
 
 class RealtimeVoiceTests(unittest.TestCase):
+    def test_candidate_profile_is_recorded_without_changing_default_configuration(self):
+        path=ROOT/'configs/perception/realtime_voice.json';before=path.read_bytes()
+        cfg,*_=configuration(arguments(aec_profile='voice-preserve'))
+        self.assertEqual(cfg['frontend']['backend'],'aec3')
+        self.assertEqual(cfg['frontend']['aec3']['profile'],'voice-preserve')
+        baseline,*_=configuration(arguments())
+        self.assertEqual(baseline['frontend']['backend'],'speex')
+        self.assertNotIn('profile',baseline['frontend']['aec3']);self.assertEqual(before,path.read_bytes())
+
     def test_callback_watchdog_still_detects_failed_start_and_loss_during_running(self):
         audio=SimpleNamespace(last_capture=None,last_output=100.8)
         check_audio_callbacks(audio,100.,100.99)
@@ -122,6 +131,7 @@ class RealtimeVoiceTests(unittest.TestCase):
             encoded=base64.b64encode(b'\x10\x11'*2400).decode()
             state.event(dict(type='response.audio.delta',response_id='one',delta=encoded))
             state.event(dict(type='input_audio_buffer.speech_started',item_id='user'))
+            state.event(dict(type='input_audio_buffer.speech_stopped',item_id='user'))
             state.event(dict(type='response.audio.delta',response_id='one',delta=encoded))
             self.assertEqual(state.late_packets,1);self.assertLessEqual(player.count,1920)
             log.write('test',message='test-key-not-real');log.close();text=path.read_text()

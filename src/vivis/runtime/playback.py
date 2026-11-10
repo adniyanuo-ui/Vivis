@@ -35,14 +35,19 @@ class AudioClock:
         common=math.gcd(self.rate,original_rate)
         self.data=resample_poly(data,self.rate//common,original_rate//common,axis=0).astype(np.float32)*gain
         self.duration=len(data)/original_rate
-        self.reference=None
+        self.reference=None;self.reference_clock=None;self.reference_clock_metadata=None
         if reference is not None:
             from vivis.speech.echo import ReferencePublisher
             self.reference=ReferencePublisher(reference,self.rate)
         try:
             self.stream=sd.OutputStream(device=device,samplerate=self.rate,channels=self.data.shape[1],
                 dtype='float32',blocksize=0,latency=latency,callback=self.callback)
+            if self.reference is not None:
+                from vivis.speech.audio_clock import AudioStreamClock
+                self.reference_clock=AudioStreamClock.calibrate(self.stream)
+                self.reference_clock_metadata=self.reference_clock.metadata()
         except BaseException:
+            if hasattr(self,'stream'):self.stream.close()
             if self.reference is not None:self.reference.close()
             raise
     def callback(self,outdata,n,timing,status):
@@ -55,7 +60,8 @@ class AudioClock:
         if fading is not None:
             envelope=np.clip((fading-np.arange(n))/self.fade_total,0.,1.)
             outdata*=envelope[:,None];self.fade_remaining=max(0,fading-n)
-        if getattr(self,'reference',None) is not None:self.reference.send(outdata,timing)
+        if getattr(self,'reference',None) is not None:
+            self.reference.send(outdata,timing,timestamp=self.reference_clock.convert(timing.outputBufferDacTime))
         if fading is not None and self.fade_remaining==0:raise self.sd.CallbackStop
         if take<n:raise self.sd.CallbackStop
     def start(self):self.stream.start()
@@ -80,7 +86,10 @@ def check_feedback(sid,state,motor,defer_sensor_faults=False):
     if not low<=state['position']<=high:
         message=f'{sid}: measured position {state["position"]} outside safe range'
         delta=max(low-state['position'],state['position']-high)
-        tolerance=0 if 'feedback_min' in motor else motor.get('position_feedback_tolerance_counts',0)
+        # Tracking changes the feedback envelope to the EEPROM range; it must
+        # not silently erase the robot's explicit encoder tolerance.
+        device_envelope=(motor.get('feedback_min'),motor.get('feedback_max'))==(motor.get('device_min'),motor.get('device_max'))
+        tolerance=motor.get('position_feedback_tolerance_counts',0) if 'feedback_min' not in motor or device_envelope else 0
         # An opt-in one-count edge sample may trigger hold-and-recheck, never
         # count as healthy feedback or enlarge the allowed command range.
         margin=motor.get('confirm_position_edge_counts',0)
@@ -263,6 +272,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         'face_update_hz':face_hz,'feedback_polls_per_frame':polls_per_frame,
         'feedback_policy':feedback_policy,'feedback_notifications':[]}
     result['acceleration_control']='servo_register_41'
+    active_feedback_record=None
     result.update(mouth_command_mode=mouth_command_mode,direct_position_ids=direct_ids)
     warning_recorder=WarningRecorder(result.setdefault('telemetry_warnings',[]))
     fault_monitor=None
@@ -325,7 +335,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
     def feedback_error(sid,exc):
         pending_sensor=any(r['id']==sid and not r['recovered'] for r in result['sensor_confirmations'])
         if feedback_age_limit is None or pending_sensor:raise exc
-        record=events[-1] if events else result.setdefault('preroll_telemetry',{})
+        record=active_feedback_record if active_feedback_record is not None else (events[-1] if events else result.setdefault('preroll_telemetry',{}))
         record['feedback_error']={'id':sid,'error':str(exc)}
         if polls_per_frame>1 or scheduled_feedback:
             record.setdefault('feedback_errors',[]).append(record['feedback_error'])
@@ -336,7 +346,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         checked=feedback_checked(sid,state,observed_at)
         if checked is not None:
             sample={'id':sid,**checked,'sample_started_monotonic':observed_at}
-            record=events[-1] if events else result.setdefault('preroll_telemetry',{})
+            record=active_feedback_record if active_feedback_record is not None else (events[-1] if events else result.setdefault('preroll_telemetry',{}))
             record['feedback']=sample
             record.setdefault('feedback_samples',[]).append(sample)
 
@@ -352,13 +362,19 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         audio_options={'gain':profile['audio_gain']} if 'audio_gain' in profile else {}
         if 'audio_reference' in profile:audio_options['reference']=profile['audio_reference']
         clock=clock_factory() if clock_factory is not None else AudioClock(audio_path,profile['audio_device'],latency=audio_latency,**audio_options)
+        reference_clock=getattr(clock,'reference_clock_metadata',None)
+        if isinstance(reference_clock,dict):result['audio_reference_clock']=reference_clock
         result['timeline_clock']='monotonic' if clock_factory is not None else 'audio_dac'
         if clock_factory is None:
             result['audio_requested_latency']=audio_latency
             result['audio_requested_gain']=profile.get('audio_gain',1.)
-        if abs(len(trajectory)/fps-clock.duration)>1/fps:raise ValueError('Clip/timeline duration mismatch')
-        run_duration=min(clock.duration,max_seconds) if max_seconds is not None else clock.duration
-        result.update(requested_duration_seconds=run_duration,full_clip_requested=run_duration==clock.duration)
+        continuous=getattr(clock,'continuous',False) is True
+        if continuous and (clock_factory is None or frame_source is None or not scheduled_feedback):
+            raise ValueError('Continuous control requires a live frame source and scheduled feedback')
+        if not continuous and abs(len(trajectory)/fps-clock.duration)>1/fps:raise ValueError('Clip/timeline duration mismatch')
+        run_duration=max_seconds if continuous else (min(clock.duration,max_seconds) if max_seconds is not None else clock.duration)
+        result.update(requested_duration_seconds=run_duration,full_clip_requested=not continuous and run_duration==clock.duration,
+                      continuous_control=continuous)
         if profile.get('serial_backend')=='feetech_python':
             from vivis.hardware.feetech.sdk import OfficialSDKBus
             trace_path=Path(log_path).with_name('serial_trace.json') if profile.get('capture_serial_trace') else None
@@ -458,7 +474,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 budget_mode='remaining_control_period',command_guard_ms=1,max_requests_per_tick=feedback_requests,
                 priority_ids=list(priority_ids),priority_period_s=.08,inline_retry=False,
                 fair_attempt_scheduling=True,urgent_age_s=feedback_scheduler.urgent_age_s,
-                fair_urgent_attempts=True,continue_other_axes_after_read_error=True)
+                urgent_order='oldest_valid_feedback',failure_backoff_s=feedback_scheduler.failure_backoff_s,
+                continue_other_axes_after_read_error=True)
         next_command_at=None
         result['phase']='playing'
         if fault_monitor is not None and profile.get('serial_backend')=='feetech_python':
@@ -484,7 +501,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                     result['preroll_feedback_reads']=result.get('preroll_feedback_reads',0)+sample['reads']
                     result['preroll_feedback_samples']=result.get('preroll_feedback_samples',0)+sample['completed']
                 stop.wait(.001 if t is None else min(.002,-t));continue
-            if t>=run_duration:break
+            if run_duration is not None and t>=run_duration:break
             now=time.monotonic()
             if frame_source is not None and 'first_control_feedback_ages_s' not in result:
                 result['first_control_feedback_ages_s']={str(sid):now-stamp for sid,stamp in last_good_feedback.items()}
@@ -511,6 +528,25 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                             if feedback_scheduler is not None and sid in feedback_scheduler.last_attempt else None),
                         last_valid_state=result.get('last_feedback_by_id',{}).get(str(sid))) for sid in stale}
                     raise RuntimeError(f'Feedback watchdog: no recent valid feedback for IDs {stale}')
+            if feedback_scheduler is not None:
+                critical=feedback_scheduler.command_hold_ids(last_good_feedback,now,1/control_hz)
+                if critical:
+                    # Spend this tick on verified reads instead of another goal
+                    # broadcast. No goals/enable/EEPROM writes and no fake clock
+                    # refresh; a truly missing axis still hits the original limit.
+                    report=dict(started_monotonic=now,critical_ids=critical,command_sent=False,
+                        feedback_ages_s={str(sid):now-last_good_feedback[sid] for sid in critical})
+                    result['feedback_command_holds']=result.get('feedback_command_holds',0)+1
+                    history=result.setdefault('feedback_rescue_events',[]);history.append(report)
+                    if len(history)>100:history.pop(0)
+                    active_feedback_record=report
+                    try:
+                        deadline=min(next_command_at-.001,min(last_good_feedback[sid]+feedback_age_limit for sid in critical))
+                        report['feedback_schedule']=feedback_scheduler.step(deadline,last_good_feedback,
+                            scheduled_sample,feedback_error,should_stop,
+                            confirmation_ids=fault_monitor.pending_ids() if fault_monitor else (),critical_ids=critical)
+                    finally:active_feedback_record=None
+                    continue
             face_index=index
             if face_hz!=fps:
                 sample_time=max(0.,t+profile['actuator_latency_ms']/1000)

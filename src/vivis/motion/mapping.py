@@ -74,7 +74,8 @@ class CompiledFaceMapping:
     Explicit zero-delta membership, conditional normalization, authored eyelids
     and jaw ownership all remain represented in the prepared matrices.
     """
-    def __init__(self,order,shapes,profile,scope='face_eyes',draft=False):
+    def __init__(self,order,shapes,profile,scope='face_eyes',draft=False,eye_input='angles'):
+        if eye_input not in ('angles','blendshapes'):raise ValueError('Unknown eye input semantics')
         if profile['mixing'] not in ['sum_deltas','bounded_weighted_deltas'] or profile['jaw_owner'] not in ['JawOpen','all_calibrated']:
             raise ValueError('Unsupported composition rule')
         motors={m['id']:m for m in profile['motors']}
@@ -84,7 +85,7 @@ class CompiledFaceMapping:
         elif scope not in ['face_eyes','full']:raise ValueError('scope must be face, face_eyes or full')
         lookup={n:i for i,n in enumerate(order)}
         self.eye_rules=[]
-        if scope in ['face_eyes','full']:
+        if scope in ['face_eyes','full'] and eye_input=='angles':
             angles=profile['eye_angle_endpoints_rad']
             if angles is None:
                 if not draft:raise ValueError('Missing eye angle-to-endpoint calibration')
@@ -184,7 +185,7 @@ def live_preflight(profile,ids,audio_required=True):
     for sid in ids:
         m=motors[sid]
         tolerance=m.get('position_feedback_tolerance_counts',0)
-        if type(tolerance) is not int or not 0<=tolerance<=5:
+        if type(tolerance) is not int or not 0<=tolerance<=50:
             missing.append(f'{sid}:position_feedback_tolerance')
         settle_tolerance=m.get('initial_settle_tolerance_counts',20)
         if type(settle_tolerance) is not int or not 1<=settle_tolerance<=40:

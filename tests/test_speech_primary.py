@@ -25,6 +25,7 @@ from vivis.speech.listen import Decoder,recognizer
 class PrimarySpeechTests(unittest.TestCase):
     def fixture(self, finalizer):
         cfg=json.loads((ROOT/'configs/perception/speech.json').read_text())
+        cfg['control_keywords']={'enabled':False}
         engine=Mock();engine.is_ready.return_value=False;engine.get_result.return_value='停止'
         events=[];sdk=SimpleNamespace(OfflineRecognizer=SimpleNamespace(from_sense_voice=lambda **_:finalizer))
         with patch('vivis.speech.listen.recognizer',return_value=engine),patch('vivis.speech.segment.Segmenter'), \

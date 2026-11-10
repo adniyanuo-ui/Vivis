@@ -9,11 +9,18 @@
   "speech_rate": 1.0,
   "enable_speech_emotion": true,
   "turn_detection": "smart_turn_v2",
+  "vad_threshold": 0.65,
+  "interruption_hold_ms": 180,
   "max_history_turns": 10,
   "seconds": 600,
   "output_gain": 1.0,
   "fade_ms": 40,
-  "max_playback_buffer_s": 30,
+  "max_playback_buffer_s": 120,
+  "service_recovery": {
+    "max_reconnects": 3,
+    "window_s": 60,
+    "backoff_s": [0.5, 1.0, 2.0]
+  },
   "frontend": {
     "backend": "speex",
     "aec3": {
@@ -21,7 +28,7 @@
       "stream_delay_ms": 0
     }
   },
-  "instructions": "使用自然、清晰的标准普通话，不使用英语口音，不刻意模仿重北京方言。按本体身份交谈，阳光、开朗、有分寸的幽默。通常回复1到3句，用户明确要求长故事时可以适当延长。先认真理解和回应感受，不机械追问或强行逗笑。说话时若用户有效插话，应让出话轮；不要把自己音箱的声音当成用户。你正在做纯语音测试，没有相机、机器人动作或外部工具，不声称执行了动作。",
+  "instructions": "默认使用自然、清晰的标准普通话；用户明确选择方言且控制器确认后，以当前语音偏好为准，发音也要采用目标方言，而不只是替换几个词。不使用英语口音，不刻意加重默认北京口音。按本体身份交谈，阳光、开朗、有分寸的幽默。通常回复1到3句，用户明确要求长故事时可以适当延长。先认真理解和回应感受，不机械追问或强行逗笑。说话时若用户有效插话，应让出话轮；不要把自己音箱的声音当成用户。",
   "voice_candidates": {
     "longanyang_v3.1": "龙安洋：阳光大男孩，首个候选，待试听",
     "longshao_v3.1": "龙邵：积极、元气，第二候选",

@@ -19,16 +19,16 @@ from urllib.parse import urlencode,urlsplit,urlunsplit
 import wave
 
 from vivis.paths import ROOT
-from vivis.speech.realtime_audio import AudioIO,VoiceBuffer
-from vivis.speech.voice_frontend import validate_frontend
+from vivis.speech.realtime_audio import AudioIO,VoiceBuffer,PlaybackBufferFull
+from vivis.speech.service_recovery import ServiceRecovery,transient_error
+from vivis.speech.voice_frontend import select_frontend,AEC_PROFILES
 
 
 def configuration(args):
     config=json.loads(args.config.read_text())
     if config.get('schema_version')!='vivis-realtime-voice-test-1.0':raise ValueError('Unsupported voice test config')
-    frontend=config.setdefault('frontend',{'backend':'speex'})
-    if getattr(args,'aec_backend',None):frontend['backend']=args.aec_backend
-    validate_frontend(frontend)
+    config['frontend']=select_frontend(config.get('frontend',{'backend':'speex'}),
+        getattr(args,'aec_backend',None),getattr(args,'aec_profile',None))
     for name in ('voice','model','seconds','output_gain'):
         value=getattr(args,name,None)
         if value is not None:config[name]=value
@@ -37,6 +37,11 @@ def configuration(args):
         config['endpoint']='wss://'+host+'/api-ws/v1/realtime'
     if not 10<=config['seconds']<=900:raise ValueError('Voice test duration must be10..900 seconds')
     if not .5<=config['speech_rate']<=2.:raise ValueError('Invalid speech rate')
+    ServiceRecovery(config['service_recovery'])
+    for key,default,lo,hi in [('vad_threshold',.5,-1,1),('interruption_hold_ms',0,0,500)]:
+        value=config.get(key,default)
+        if type(value) not in (int,float) or not math.isfinite(value) or not lo<=value<=hi:raise ValueError('Invalid '+key)
+        config[key]=value
     for key,lo,hi in [('output_gain',.1,2.),('fade_ms',0,100),('max_playback_buffer_s',1,120)]:
         value=config[key]
         if type(value) not in (int,float) or not math.isfinite(value) or not lo<=value<=hi:raise ValueError('Invalid '+key)
@@ -59,8 +64,12 @@ def configuration(args):
                  enable_speech_emotion=config['enable_speech_emotion'],
                  instructions='本体身份：'+json.dumps(identity,ensure_ascii=False)+'。'+config['instructions'],
                  input_audio_format='pcm',output_audio_format='pcm',input_audio_transcription=dict(language='zh'),
-                 output_audio=dict(language='zh'),turn_detection=dict(type=config['turn_detection']),
+                 output_audio=dict(language='zh'),turn_detection=dict(type=config['turn_detection'],threshold=config['vad_threshold']),
                  max_history_turns=config['max_history_turns'],enable_search=False,tools=[])
+    from vivis.interaction.knowledge import Knowledge
+    session['instructions']+=Knowledge(robot_path).base_instructions()
+    if not getattr(args,'managed',False):
+        session['instructions']+=' 你正在做纯语音测试，没有相机、机器人动作或外部工具，不声称执行了动作。'
     return config,speech,speaker,url,session
 
 
@@ -98,10 +107,17 @@ class Journal:
 
 
 class VoiceSession:
-    def __init__(self,player,log):
+    def __init__(self,player,log,on_transcript=None,interruption_hold_ms=0):
         self.player=player;self.log=log;self.generating=None;self.blocked=set();self.responses={}
         self.speech_stopped_at=None;self.cancel_operations=0;self.late_packets=0;self.usage=[]
         self.server_starts=0;self.server_cancelled=set();self.invalid_turns=0
+        self.pending_interruption=None;self.provisional_pauses=0;self.invalid_turn_resumes=0
+        self.on_transcript=on_transcript
+        self.current_user_turn=None;self.latency_reported=set()
+        self.interruption_hold_s=interruption_hold_ms/1000;self.playback_overflows=0
+
+    def mark_proactive(self):
+        self.current_user_turn=None
 
     def interrupt(self,response_id=None,source='keyboard'):
         result=self.player.cancel(response_id)
@@ -109,8 +125,18 @@ class VoiceSession:
         if response_id:ids.add(response_id)
         if response_id is None and self.generating:ids.add(self.generating)
         self.blocked.update(ids)
+        if response_id is None:self.pending_interruption=None
         if ids:self.cancel_operations+=1
         self.log.write('local_interrupt',source=source,**result,blocked_responses=sorted(ids))
+
+    def confirm_interruption(self,source):
+        pending=self.pending_interruption
+        if pending is None:return
+        self.pending_interruption=None
+        for rid in pending['responses']:
+            if rid not in self.blocked:self.interrupt(rid,source=source)
+        self.log.write('interruption_confirmed',item_id=pending['item_id'],source=source,
+                       response_ids=pending['responses'])
 
     def event(self,event):
         kind=event.get('type','unknown');rid=event.get('response_id');now=time.monotonic()
@@ -128,24 +154,59 @@ class VoiceSession:
             response['last_audio_received']=now
             response['audio_packets']=response.get('audio_packets',0)+1
             response['received_audio_s']=response.get('received_audio_s',0.)+len(pcm)/48000
-            self.player.add(rid,pcm)
+            try:self.player.add(rid,pcm)
+            except PlaybackBufferFull:
+                buffered=self.player.count/48000;self.playback_overflows+=1
+                self.interrupt(rid,source='response_buffer_overflow')
+                result=dict(response_id=rid,buffered_s=buffered,limit_s=self.player.maximum/48000,
+                    message='本句语音超出播放缓冲上限，已取消本句；麦克风及交互继续。')
+                self.log.write('playback_overflow_recovered',**result)
+                return result
             self.log.write('audio_packet',response_id=rid,bytes=len(pcm),buffered_s=self.player.count/48000,
                            gap_ms=(now-previous)*1000)
             return
         fields={k:event[k] for k in ('event_id','item_id','response_id','audio_start_ms','audio_end_ms','reason','transcript','text') if k in event}
         if kind=='response.created':
+            # A new answer supersedes retained old speech even if a preceding
+            # committed/stopped event is missing. Never revive it on a late invalid.
+            self.confirm_interruption('new_response')
             rid=event['response']['id'];self.generating=rid
-            self.responses[rid]=dict(created=now,speech_stopped_received=self.speech_stopped_at)
+            self.responses[rid]=dict(created=now,speech_stopped_received=self.speech_stopped_at,
+                user_turn=dict(self.current_user_turn) if self.current_user_turn else None)
             fields['response_id']=rid
         elif kind=='input_audio_buffer.speech_started':
             self.server_starts+=1
-            # Server VAD already cancels inference. Sending another cancel here could kill the NEW response.
-            self.interrupt(source='server_speech_started')
+            # smart_turn_v2 may later retract a short acknowledgement. Pause now
+            # for prompt barge-in; only confirmed turns may destroy the PCM.
+            if self.interruption_hold_s:
+                result=dict(responses=self.player.response_ids(self.generating),retained_samples=0)
+            else:result=self.player.pause(self.generating)
+            if self.pending_interruption:
+                result['responses']=sorted(set(result['responses'])|set(self.pending_interruption['responses']))
+            self.pending_interruption=dict(item_id=event.get('item_id'),responses=result['responses'],
+                pause_at=now+self.interruption_hold_s,paused=not self.interruption_hold_s)
+            if not self.interruption_hold_s:self.provisional_pauses+=1
+            self.log.write('interruption_candidate' if self.interruption_hold_s else 'provisional_interrupt',
+                item_id=event.get('item_id'),hold_ms=self.interruption_hold_s*1000,**result)
         elif kind=='input_audio_buffer.speech_stopped':
-            if event.get('reason')!='turn_invalid':self.speech_stopped_at=now
-            else:self.invalid_turns+=1
+            matches=self.pending_interruption is not None and self.pending_interruption['item_id']==event.get('item_id')
+            if event.get('reason')=='turn_invalid':
+                self.invalid_turns+=1
+                if matches:
+                    pending=self.pending_interruption;self.pending_interruption=None
+                    result=self.player.resume(set(pending['responses'])-self.blocked-self.server_cancelled)
+                    if result['responses']:self.invalid_turn_resumes+=1
+                    self.log.write('invalid_turn_resume',item_id=event.get('item_id'),**result)
+            else:
+                self.speech_stopped_at=now
+                self.current_user_turn=dict(item_id=event['item_id'],confirmed_end_monotonic=now) if isinstance(event.get('item_id'),str) else None
+                if matches:self.confirm_interruption('valid_speech_stopped')
+        elif kind=='input_audio_buffer.committed':
+            if self.pending_interruption is not None and self.pending_interruption['item_id']==event.get('item_id'):
+                self.confirm_interruption('input_committed')
         elif kind=='response.done':
             response=event['response'];rid=response['id'];fields.update(response_id=rid,status=response.get('status'))
+            self.responses.setdefault(rid,{})['status']=response.get('status')
             if response.get('status')=='cancelled':
                 self.server_cancelled.add(rid);self.interrupt(rid,source='server_cancelled')
             if rid==self.generating:self.generating=None
@@ -156,32 +217,68 @@ class VoiceSession:
             error=event.get('error',{});self.log.write('server_error',detail=error)
             if error.get('param')=='response.cancel' and error.get('type')=='invalid_request_error':return
             raise RuntimeError('Realtime service error: '+str(error.get('code'))+' '+str(error.get('message')))
-        elif kind=='conversation.item.input_audio_transcription.completed':print('你：'+event.get('transcript',''),flush=True)
-        elif kind=='response.audio_transcript.done':print('机器人：'+event.get('transcript',''),flush=True)
+        elif kind in ('conversation.item.input_audio_transcription.completed','response.audio_transcript.done'):
+            role='user' if kind.startswith('conversation.') else 'assistant'
+            text=event.get('transcript','')
+            if role=='assistant' and rid:self.responses.setdefault(rid,{})['transcript']=text
+            if self.on_transcript:self.on_transcript(role,text)
+            else:print(('你：' if role=='user' else '机器人：')+text,flush=True)
         self.log.write('server_event',type=kind,**fields)
 
     def poll_playback(self):
+        pending=self.pending_interruption
+        if pending and not pending['paused'] and time.monotonic()>=pending['pause_at']:
+            result=self.player.pause()
+            pending['responses']=sorted(set(pending['responses'])|set(result['responses']))
+            pending['paused']=True;self.provisional_pauses+=1
+            self.log.write('provisional_interrupt',item_id=pending['item_id'],**result)
         while not self.player.notices.empty():
             event=self.player.notices.get_nowait();rid=event['response_id']
+            if event['kind']=='playback_buffer_empty':
+                self.responses.setdefault(rid,{})['empty_dac']=event['dac_monotonic']
             if event['kind']=='playback_started':
                 response=self.responses.setdefault(rid,{})
                 response.setdefault('first_dac_monotonic',event['dac_monotonic'])
                 response['playback_starts']=response.get('playback_starts',0)+1
+                turn=response.get('user_turn')
+                if turn and turn['item_id'] not in self.latency_reported:
+                    if len(self.latency_reported)>=256:self.latency_reported.clear()
+                    self.latency_reported.add(turn['item_id'])
+                    packet=response.get('first_audio_received')
+                    self.log.write('reply_latency',response_id=rid,item_id=turn['item_id'],
+                        confirmed_end_to_first_dac_s=event['dac_monotonic']-turn['confirmed_end_monotonic'],
+                        confirmed_end_to_first_packet_s=None if packet is None else packet-turn['confirmed_end_monotonic'],
+                        first_packet_to_dac_s=None if packet is None else event['dac_monotonic']-packet,
+                        endpoint_definition='server_confirmed_speech_end_not_physical_voice_end')
             self.log.write(**event)
+
+
+async def receive_event(ws,state,event):
+    """An oversized reply is a response fault, not loss of microphone/cloud control."""
+    warning=state.event(event)
+    if warning and state.generating==warning['response_id']:
+        try:await asyncio.wait_for(ws.send(json.dumps(dict(type='response.cancel'))),timeout=.5)
+        except Exception as exc:state.log.write('overflow_cancel_network_error',error=type(exc).__name__)
+    return warning
 
 
 async def connect_session(ws,session,log):
     await ws.send(json.dumps(dict(type='session.update',session=session),ensure_ascii=False))
     for _ in range(20):
         event=json.loads(await asyncio.wait_for(ws.recv(),timeout=15.))
-        if event.get('type')=='error':raise RuntimeError('Qwen session configuration failed: '+str(event.get('error',{})))
+        if event.get('type')=='error':
+            retryable=transient_error(event)
+            if retryable:raise retryable
+            raise RuntimeError('Qwen session configuration failed: '+str(event.get('error',{})))
         if event.get('type')=='session.updated':
             accepted=event['session']
             if (accepted.get('voice')!=session['voice']
-                    or accepted.get('turn_detection',{}).get('type')!=session['turn_detection']['type']):
+                    or accepted.get('turn_detection',{}).get('type')!=session['turn_detection']['type']
+                    or ('threshold' in session['turn_detection'] and
+                        accepted.get('turn_detection',{}).get('threshold')!=session['turn_detection']['threshold'])):
                 raise RuntimeError('Server did not confirm requested voice/turn detection; do not silently fall back')
             log.write('session_ready',model=accepted.get('model'),voice=accepted.get('voice'),turn_detection=accepted.get('turn_detection'))
-            return
+            return accepted
     raise RuntimeError('Qwen did not acknowledge session configuration')
 
 
@@ -193,16 +290,20 @@ def check_audio_callbacks(audio,opened_at,now):
             raise RuntimeError(f'{name} callback watchdog: no callback for {now-baseline:.3f}s after device open')
 
 
-async def conversation(args,config,speech,speaker,url,session,key,folder,log,summary):
+def websocket_connection(url,key):
     from websockets.asyncio.client import connect
-    async with connect(url,additional_headers={'Authorization':'Bearer '+key},compression=None,
-                       open_timeout=15,close_timeout=3,ping_interval=20,ping_timeout=20,max_size=4*1024*1024,max_queue=16) as ws:
+    return connect(url,additional_headers={'Authorization':'Bearer '+key},compression=None,
+                   open_timeout=15,close_timeout=3,ping_interval=20,ping_timeout=20,max_size=4*1024*1024,max_queue=16)
+
+
+async def conversation(args,config,speech,speaker,url,session,key,folder,log,summary):
+    async with websocket_connection(url,key) as ws:
         await connect_session(ws,session,log)
         if args.probe:
             print('连接、模型权限、音色及语义轮次配置已确认；未打开麦克风或音箱。',flush=True)
             return dict(probe=True,audio_opened=False)
         player=VoiceBuffer(config['output_gain'],config['fade_ms'],config['max_playback_buffer_s'])
-        state=VoiceSession(player,log)
+        state=VoiceSession(player,log,interruption_hold_ms=config['interruption_hold_ms'])
         audio=AudioIO(speech,speaker,player,args.aec=='on',frontend=config.get('frontend'));keys=queue.SimpleQueue()
         def read_keys():
             for line in sys.stdin:keys.put(line.strip())
@@ -236,7 +337,9 @@ async def conversation(args,config,speech,speaker,url,session,key,folder,log,sum
                         for name,data in [('uplink',pcm),('microphone',raw),('reference',far)]:
                             if name in writers:writers[name].writeframesraw(data)
                 async def receive():
-                    async for message in ws:state.event(json.loads(message))
+                    async for message in ws:
+                        warning=await receive_event(ws,state,json.loads(message))
+                        if warning:print('语音提示：'+warning['message'],flush=True)
                     raise RuntimeError('Realtime service disconnected')
                 tasks=[asyncio.create_task(send_audio()),asyncio.create_task(receive())]
                 while time.monotonic()-started<config['seconds']:
@@ -271,6 +374,7 @@ async def conversation(args,config,speech,speaker,url,session,key,folder,log,sum
                 local_cancel_operations=state.cancel_operations,cancelled_response_count=len(state.blocked),
                 server_cancelled_response_count=len(state.server_cancelled),server_speech_started_events=state.server_starts,
                 invalid_turns=state.invalid_turns,rejected_late_packets=state.late_packets,usage=state.usage,clipped_samples=player.clipped)
+            stats.update(provisional_pauses=state.provisional_pauses,invalid_turn_resumes=state.invalid_turn_resumes)
             summary.update(probe=False,audio_opened=bool(audio.stats['captured_frames']),**stats)
             log.write('audio_closed',stats=stats)
         return dict(probe=False,audio_opened=True,**stats)
@@ -285,6 +389,7 @@ def main(argv=None):
     parser.add_argument('--seconds',type=int);parser.add_argument('--aec',choices=('on','off'),default='on')
     parser.add_argument('--output-gain',type=float,help='仅本次播放数字幅度；0.5约为-6dB，不改系统音量')
     parser.add_argument('--aec-backend',choices=('speex','aec3'),help='仅本次纯语音测试的前端，不修改P1配置')
+    parser.add_argument('--aec-profile',choices=AEC_PROFILES,help='voice-preserve显式选择已试听的人声保护候选；baseline为原版')
     parser.add_argument('--check',action='store_true');parser.add_argument('--probe',action='store_true')
     parser.add_argument('--ask-key',action='store_true',help='在终端安全输入本次密钥，不依赖环境变量，也不保存')
     parser.add_argument('--list-devices',action='store_true');parser.add_argument('--record-audio',action='store_true')

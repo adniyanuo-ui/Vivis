@@ -1,14 +1,32 @@
 """Optional realtime-trial front ends. Never gate the microphone on playback."""
+from copy import deepcopy
 import numpy as np
 from scipy.signal import firwin,lfilter
 
 from vivis.speech.echo import EchoCanceller
+
+AEC_PROFILES=('baseline','voice-preserve')
+
+
+def select_frontend(config,backend=None,profile=None):
+    """Run-only selection; never mutate the caller's canonical configuration."""
+    selected=deepcopy(config)
+    if backend is not None:selected['backend']=backend
+    if profile is not None:
+        selected.setdefault('aec3',{})['profile']=profile
+        if profile=='voice-preserve' and backend is None:selected['backend']='aec3'
+    validate_frontend(selected)
+    return selected
 
 
 def validate_frontend(config):
     backend=config.get('backend','speex')
     if backend not in ('speex','aec3'):raise ValueError('Unknown voice AEC backend: '+str(backend))
     options=config.get('aec3',{})
+    profile=options.get('profile','baseline')
+    if profile not in AEC_PROFILES:raise ValueError('Unknown AEC profile: '+str(profile))
+    if profile=='voice-preserve' and backend!='aec3':
+        raise ValueError('voice-preserve requires the aec3 backend')
     if type(options.get('ns_level',1)) is not int or not 0<=options.get('ns_level',1)<=3:
         raise ValueError('AEC3 ns_level must be0..3')
     delay=options.get('stream_delay_ms',0)
@@ -19,12 +37,24 @@ def validate_frontend(config):
 class Aec3:
     """One processor per DSP thread; exact20ms input becomes two10ms blocks."""
     def __init__(self,options):
-        try:from pywebrtc_audio import AudioProcessor
+        self.profile=options.get('profile','baseline')
+        validate_frontend(dict(backend='aec3',aec3=options))
+        extra={}
+        try:
+            if self.profile=='voice-preserve':
+                import _vivis_aec3
+                if getattr(_vivis_aec3,'vivis_profile_api_version',None)!=1:
+                    raise RuntimeError('Unexpected voice-preserve API; rebuild with ./tools/build_voice_preserve.sh')
+                AudioProcessor=_vivis_aec3.AudioProcessor
+                extra['nearend_threshold']=1.0
+            else:
+                from pywebrtc_audio import AudioProcessor
         except ImportError as exc:
-            raise RuntimeError('AEC3 dependency missing; run ./tools/setup_realtime_voice.sh') from exc
+            command='./tools/setup_realtime_voice.sh'+(' --voice-preserve' if self.profile=='voice-preserve' else '')
+            raise RuntimeError('AEC3 dependency missing; run '+command) from exc
         self.engine=AudioProcessor(sample_rate=16000,num_channels=1,echo_cancellation=True,
             noise_suppression=True,ns_level=options.get('ns_level',1),auto_gain_control=False,
-            stream_delay_ms=options.get('stream_delay_ms',0))
+            stream_delay_ms=options.get('stream_delay_ms',0),**extra)
 
     def process(self,near,far):
         if near.shape!=(320,) or far.shape!=(320,):raise ValueError('AEC3 needs complete20ms mono frames')

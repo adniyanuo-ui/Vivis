@@ -1,0 +1,19 @@
+{
+  "tts": {
+    "engine": "dashscope",
+    "model": "qwen3-tts-flash",
+    "voice": "Ethan",
+    "language": "Chinese",
+    "speed": 1.0,
+    "api_key_env": "DASHSCOPE_API_KEY",
+    "endpoint": "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    "timeout_s": 60,
+    "source_manifest": "native/speech/cloud_tts_sources.json"
+  },
+  "prompts": "assets/speech/xiaoshuai_ethan",
+  "prompt_text_overrides": {
+    "menu": "我会唱歌、演剧本，还能学你的表情。你想听歌，还是看我演一段？",
+    "identity": "我是小帅，二十岁，北京男孩。我会唱歌、演剧本，还能学你的表情。",
+    "clarify": "你可以说，唱歌、演剧本，或者学我的表情。"
+  }
+}

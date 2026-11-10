@@ -83,7 +83,7 @@ class SpeechGainTests(unittest.TestCase):
         from vivis.speech.prompts import PROCESSING_VERSION,TEXTS,cache_matches
         speech=config('configs/perception/speech.json')
         metadata=dict(processing_version=PROCESSING_VERSION,tts=copy.deepcopy(speech['tts']),
-                      level={'config':copy.deepcopy(speech['prompt_level'])},texts=TEXTS,
+                      level={'config':copy.deepcopy(speech['prompt_level'])},texts={**TEXTS,**speech.get('prompt_text_overrides',{})},
                       timing=copy.deepcopy(speech.get('prompt_timing')))
         self.assertTrue(cache_matches(speech,metadata))
         self.assertFalse(cache_matches(speech,[]))

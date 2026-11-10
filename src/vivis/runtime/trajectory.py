@@ -22,14 +22,14 @@ def startup_target(state,motor,neck=False,recover_disabled=False):
         if not motor['device_min']<=2047<=motor['device_max'] or not motor['safe_min']<=2047<=motor['safe_max']:
             raise ValueError(f'ID{sid}: recovery target is outside reviewed limits')
         return 2047
-    if not motor['device_min']<=position<=motor['device_max']:
+    tolerance=motor.get('position_feedback_tolerance_counts',0)
+    if not motor['device_min']-tolerance<=position<=motor['device_max']+tolerance:
         raise ValueError(f'ID{sid}: measured {position} outside device [{motor["device_min"]},{motor["device_max"]}]')
-    if neck:return position
+    if neck:return max(motor['safe_min'],min(motor['safe_max'],position))
     target=max(motor['safe_min'],min(motor['safe_max'],position))
     if state['torque_enable']==1 and 'feedback_min' in motor:
         return target  # No priming write on enabled axes; check_feedback enforces device limits.
-    tolerance=motor.get('position_feedback_tolerance_counts',0)
-    if abs(target-position)>10 or state['torque_enable']==1 and abs(target-position)>tolerance:
+    if abs(target-position)>max(10,tolerance) or state['torque_enable']==1 and abs(target-position)>tolerance:
         raise ValueError(f'ID{sid}: restart recovery exceeds bounded policy; measured {position}, allowed [{motor["safe_min"]},{motor["safe_max"]}]')
     return target
 

@@ -51,6 +51,11 @@ class Decoder:
         from vivis.speech.segment import Segmenter
         self.segmenter=Segmenter(config['segmentation'])
         self.last_changed=None;self.replay=replay
+        self.control=None
+        if config.get('control_keywords',{}).get('enabled',False):
+            from vivis.speech.control_keywords import KeywordControl
+            catalog=json.loads((ROOT/config.get('programs','configs/interaction/programs.json')).read_text())
+            self.control=KeywordControl(config['control_keywords'],emit,catalog=catalog,wake_words=config.get('wake_words'))
         self.finalizer=None;self.review=BestEffortJob('asr-review')
         self.review_counts=dict(submitted=0,skipped_busy=0,completed=0,errors=0)
         if config.get('asr_final',{}).get('enabled',True) and 'asr_final' in config:
@@ -84,7 +89,7 @@ class Decoder:
             if not self.review.closed.is_set():
                 self.emit(dict(kind='asr_refinement_error',utterance_id=event['utterance_id'],error=str(exc),fatal=False))
 
-    def feed(self,pcm,stamp,metrics=None):
+    def feed(self,pcm,stamp,metrics=None,reference=None):
         self.stream.accept_waveform(self.config['sample_rate_hz'],pcm)
         while self.engine.is_ready(self.stream):self.engine.decode_stream(self.stream)
         self.frames+=len(pcm)
@@ -93,6 +98,7 @@ class Decoder:
             self.last_changed=stamp+len(pcm)/self.config['sample_rate_hz'];self.last_text=text
             if text:self.emit(dict(kind='asr_partial',utterance_id=self.sequence+1,text=text,
                                    captured_end_monotonic=self.last_changed,emitted_monotonic=time.monotonic()))
+        if self.control is not None:self.control.feed(pcm,reference,stamp,text)
         segment=self.segmenter.feed(pcm,stamp,metrics)
         if segment is not None:
             self.stream.accept_waveform(self.config['sample_rate_hz'],np.zeros(8000,np.float32))
@@ -190,7 +196,7 @@ def live(config,emit,seconds=None):
                 cleaned=echo.process(near,far) if echo else near
                 rms=lambda a:float(np.sqrt(np.mean(a*a)))
                 metrics=dict(raw_rms=rms(near),clean_rms=rms(cleaned),reference_rms=rms(far),reference_coverage=coverage)
-                decoder.feed(cleaned,stamp,metrics)
+                decoder.feed(cleaned,stamp,metrics,reference=far)
     finally:
         decoder.close()
         for s,handler in previous.items():signal.signal(s,handler)

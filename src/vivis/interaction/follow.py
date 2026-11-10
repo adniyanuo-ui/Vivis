@@ -32,7 +32,7 @@ from vivis.interaction.expression import ExpressionFrames
 class MonotonicClock:
     """The existing control loop's clock contract, with no sound device opened."""
     def __init__(self,duration):
-        self.duration=duration;self.fault=None;self.started=None
+        self.duration=duration;self.continuous=duration is None;self.fault=None;self.started=None
     def start(self):self.started=time.monotonic()
     def time(self):return None if self.started is None else time.monotonic()-self.started
     def close(self):pass

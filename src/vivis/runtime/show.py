@@ -284,7 +284,8 @@ def _prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tel
                 # The explicitly requested all-axis home primes disabled axes
                 # at measured positions before enabling; playback still requires torque.
                 def validate(sample):
-                    home_check(sample,s,m['neutral'],m.get('initial_settle_tolerance_counts',20),telemetry_policy,position_plans.get(sid))
+                    home_check(sample,s,m['neutral'],m.get('initial_settle_tolerance_counts',20),telemetry_policy,position_plans.get(sid),
+                        feedback_tolerance_counts=m.get('position_feedback_tolerance_counts',0))
                     return check_feedback(sid,sample,homing_feedback_motor(m,s,position_plans.get(sid)))
                 fresh,alerts=verify_sample(bus.feedback,sid,confirmed.get(sid,feedback(s)),validate,telemetry_policy,
                     report.setdefault('sensor_confirmations',[]),should_stop=lambda:guard() or False)

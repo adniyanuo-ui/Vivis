@@ -128,7 +128,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -153,7 +153,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -178,7 +178,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -203,7 +203,7 @@
       "device_max_temperature_c": 60,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -228,7 +228,7 @@
       "device_max_temperature_c": 60,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -253,7 +253,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -278,7 +278,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -303,7 +303,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -328,7 +328,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -353,7 +353,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -378,7 +378,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -403,7 +403,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -428,7 +428,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -453,7 +453,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -478,7 +478,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -503,7 +503,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -528,7 +528,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -553,7 +553,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -578,7 +578,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -603,7 +603,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -628,7 +628,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -653,7 +653,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -678,7 +678,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true,
       "home_position": 2030,
       "home_position_basis": "User authorized nearest valid cheek home; preserve mapping reference2047 and EEPROM limit; ID24 command2030."
@@ -705,7 +705,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -730,7 +730,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -755,7 +755,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -780,7 +780,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -805,7 +805,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": false
     },
     {
@@ -830,7 +830,7 @@
       "device_max_temperature_c": 70,
       "min_voltage_raw": 40,
       "max_voltage_raw": 90,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -855,7 +855,7 @@
       "device_max_temperature_c": 80,
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -880,7 +880,7 @@
       "device_max_temperature_c": 80,
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -889,10 +889,10 @@
       "reported_model": "SM45BL",
       "neutral": 2047,
       "neutral_confirmed": true,
-      "safe_min": 1600,
-      "safe_max": 2300,
-      "device_min": 1600,
-      "device_max": 2300,
+      "safe_min": 1500,
+      "safe_max": 2347,
+      "device_min": 1500,
+      "device_max": 2347,
       "endpoint_envelope_not_safe_limits": [
         2047,
         2047
@@ -905,7 +905,7 @@
       "device_max_temperature_c": 80,
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     },
     {
@@ -914,9 +914,9 @@
       "reported_model": "SM45BL",
       "neutral": 2047,
       "neutral_confirmed": true,
-      "safe_min": 1762,
+      "safe_min": 1800,
       "safe_max": 2300,
-      "device_min": 1762,
+      "device_min": 1800,
       "device_max": 2300,
       "endpoint_envelope_not_safe_limits": [
         2047,
@@ -930,7 +930,7 @@
       "device_max_temperature_c": 60,
       "min_voltage_raw": 90,
       "max_voltage_raw": 254,
-      "position_feedback_tolerance_counts": 5,
+      "position_feedback_tolerance_counts": 50,
       "playback_enabled": true
     }
   ]

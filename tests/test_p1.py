@@ -22,6 +22,23 @@ def read(path):return json.loads((ROOT/path).read_text())
 
 
 class IntentTests(unittest.TestCase):
+    def test_whole_catalog_name_correction_is_opt_in_unique_and_not_a_question(self):
+        for phrase in ['排骨夫人','播放排骨夫人','唱一首白国夫人']:
+            self.assertEqual(self.router.parse(phrase,state='interaction',allow_title_correction=True)['program'],'baigufuren')
+        for phrase in ['排骨夫人是什么','不要播放排骨夫人','如果播放排骨夫人','他说播放排骨夫人']:
+            self.assertNotEqual(self.router.parse(phrase,state='interaction',allow_title_correction=True)['kind'],'select')
+        self.assertNotEqual(self.router.parse('排骨夫人',state='task',active=True,allow_title_correction=True)['kind'],'select')
+        self.assertEqual(self.router.parse('排骨夫人',state='interaction')['kind'],'ignore')
+    def test_onsite_natural_controls_and_cloud_user_phrases(self):
+        cases={'停止停止':'interaction','停止停止停止':'interaction','你自己玩会儿吧':'standby',
+               '自己玩会':'standby','唱首歌':'select','来一首歌吧':'select',
+               '好呀，你给我唱一首歌《白骨夫人》':'select','你播放白骨夫人吧':'select',
+               '播放魏总的剧本':'select','魏总的剧本':'select','表演个剧本吧':'select',
+               '表演一段剧本吧':'select'}
+        for text,kind in cases.items():
+            with self.subTest(text=text):self.assertEqual(self.router.parse(text,state='interaction')['kind'],kind)
+        for text in ('你在播放魏总的剧本吗','刚才不是说让你待机了吗','不要播放白骨夫人','停止是什么意思'):
+            with self.subTest(text=text):self.assertEqual(self.router.parse(text,state='interaction')['kind'],'ignore')
     def test_complete_hypothesis_arbitration_preserves_negation_and_ambiguity(self):
         from vivis.interaction.intents import resolve_candidates
         text,source=resolve_candidates(self.router,'播放白古夫人','播放白骨夫人')
@@ -96,7 +113,8 @@ class CancellationTests(unittest.TestCase):
         clock=AudioClock.__new__(AudioClock);clock.data=np.full((100,1),.2,np.float32)
         clock.cursor=0;clock.first_dac=None;clock.fault=None;clock.sd=SimpleNamespace(CallbackStop=Done)
         clock.fade_total=40;clock.fade_remaining=40;reference=[]
-        clock.reference=SimpleNamespace(send=lambda data,timing:reference.append(data.copy()))
+        clock.reference=SimpleNamespace(send=lambda data,timing,**_:reference.append(data.copy()))
+        clock.reference_clock=SimpleNamespace(convert=lambda t:t)
         timing=SimpleNamespace(outputBufferDacTime=1.,currentTime=.9)
         first=np.empty((20,1),np.float32);second=np.empty((20,1),np.float32)
         clock.callback(first,20,timing,None)
@@ -210,6 +228,10 @@ class EchoTests(unittest.TestCase):
 
 
 class SupervisorTests(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(patch.stopall)
+        patch('vivis.interaction.dialogue.preview_state',return_value=None).start()
+
     def test_fast_failed_child_reports_self_check_and_rejects_later_selection(self):
         prompts=[]
         class Prompts:

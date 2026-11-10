@@ -1,0 +1,9 @@
+{
+  "schema_version": "vivis-speech-presence-1.0",
+  "state_file": "outputs/runtime/face_presence.json",
+  "publish_hz": 5,
+  "max_age_s": 1.0,
+  "wake_without_face_hold_s": 30,
+  "face_loss_grace_s": 15.0,
+  "identity_uncertain_reset_s": 15.0
+}

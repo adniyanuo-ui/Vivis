@@ -1,0 +1,178 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -8,8 +8,8 @@
+ add_subdirectory(vendor/webrtc_audio)
+ 
+ find_package(pybind11 CONFIG REQUIRED)
+-pybind11_add_module(_webrtc_audio bindings/webrtc_audio_bindings.cpp)
+-target_link_libraries(_webrtc_audio PRIVATE webrtc_audio_static)
+-target_include_directories(_webrtc_audio PRIVATE vendor/webrtc_audio)
++pybind11_add_module(_vivis_aec3 bindings/webrtc_audio_bindings.cpp)
++target_link_libraries(_vivis_aec3 PRIVATE webrtc_audio_static)
++target_include_directories(_vivis_aec3 PRIVATE vendor/webrtc_audio)
+ 
+-install(TARGETS _webrtc_audio DESTINATION pywebrtc_audio)
++install(TARGETS _vivis_aec3 DESTINATION .)
+--- a/bindings/webrtc_audio_bindings.cpp
++++ b/bindings/webrtc_audio_bindings.cpp
+@@ -757,7 +757,7 @@
+     float get_speech_probability() const { return last_speech_probability_; }
+ };
+ 
+-class AudioProcessor {
++class VivisAudioProcessor {
+     std::unique_ptr<webrtc::EchoControl> aec_;
+     std::unique_ptr<webrtc::NoiseSuppressor> ns_;
+     std::unique_ptr<webrtc::HighPassFilter> hp_filter_;
+@@ -776,6 +776,7 @@
+     bool agc_enabled_;
+     int ns_level_;
+     int stream_delay_ms_ = 0;
++    float nearend_threshold_;
+     std::unique_ptr<Agc2State> agc_;
+     std::unique_ptr<webrtc::NoiseSuppressor> vad_;
+     // Reused to bridge interleaved multichannel audio and WebRTC's planar API.
+@@ -920,7 +921,7 @@
+     }
+ 
+ public:
+-    AudioProcessor(int sample_rate = 16000, int num_channels = 1,
++    VivisAudioProcessor(int sample_rate = 16000, int num_channels = 1,
+                    bool echo_cancellation = false,
+                    bool noise_suppression = false,
+                    bool high_pass_filter = false,
+@@ -928,13 +929,15 @@
+                    int ns_level = 1,
+                    float agc_gain_db = 0.0f,
+                    float agc_max_gain_db = 50.0f,
+-                   int stream_delay_ms = 0)
++                   int stream_delay_ms = 0,
++                   float nearend_threshold = 0.25f)
+         : sample_rate_(sample_rate),
+           processing_rate_(select_processing_rate(sample_rate)),
+           num_channels_(num_channels),
+           aec_enabled_(echo_cancellation), ns_enabled_(noise_suppression),
+           hp_enabled_(high_pass_filter), agc_enabled_(auto_gain_control),
+-          ns_level_(ns_level), stream_delay_ms_(stream_delay_ms) {
++          ns_level_(ns_level), stream_delay_ms_(stream_delay_ms),
++          nearend_threshold_(nearend_threshold) {
+ 
+         if (sample_rate < kMinSampleRate ||
+             sample_rate > static_cast<int>(webrtc::AudioBuffer::kMaxSampleRate))
+@@ -947,6 +950,10 @@
+         if (stream_delay_ms < 0)
+             throw std::invalid_argument("stream_delay_ms must be >= 0");
+ 
++        if (!std::isfinite(nearend_threshold) ||
++            nearend_threshold < 0.25f || nearend_threshold > 2.0f)
++            throw std::invalid_argument("nearend_threshold must be finite and0.25..2.0");
++
+         frame_size_ = sample_rate / 100;
+         processing_frame_size_ = processing_rate_ / 100;
+         frame_stride_ = frame_size_ * num_channels;
+@@ -960,6 +967,7 @@
+ 
+         if (aec_enabled_) {
+             webrtc::EchoCanceller3Config config;
++            config.suppressor.dominant_nearend_detection.enr_threshold = nearend_threshold_;
+             webrtc::EchoCanceller3Factory factory(config);
+             aec_ = factory.Create(
+                 processing_rate_, num_channels, num_channels);
+@@ -1097,6 +1105,7 @@
+         if (aec_enabled_) {
+             far_buf_ = create_audio_buffer();
+             webrtc::EchoCanceller3Config config;
++            config.suppressor.dominant_nearend_detection.enr_threshold = nearend_threshold_;
+             webrtc::EchoCanceller3Factory factory(config);
+             aec_ = factory.Create(
+                 processing_rate_, num_channels_, num_channels_);
+@@ -1142,61 +1151,12 @@
+     }
+ };
+ 
+-PYBIND11_MODULE(_webrtc_audio, m) {
++PYBIND11_MODULE(_vivis_aec3, m) {
++    m.attr("vivis_profile_api_version") = 1;
+     m.doc() = "WebRTC audio processing: echo cancellation, noise suppression, and combined pipeline";
+ 
+-    py::class_<EchoCanceller>(m, "EchoCanceller")
+-        .def(py::init<int, int, int>(),
+-             py::arg("sample_rate") = 16000,
+-             py::arg("num_channels") = 1,
+-             py::arg("stream_delay_ms") = 0)
+-        .def("process", &EchoCanceller::process,
+-             py::arg("near"), py::arg("far"))
+-        .def("reset", &EchoCanceller::reset)
+-        .def_property("stream_delay_ms",
+-                       &EchoCanceller::get_stream_delay_ms,
+-                       &EchoCanceller::set_stream_delay_ms);
+-
+-    py::class_<NoiseSuppressor>(m, "NoiseSuppressor")
+-        .def(py::init<int, int, int>(),
+-             py::arg("sample_rate") = 16000,
+-             py::arg("num_channels") = 1,
+-             py::arg("level") = 1)
+-        .def("process", &NoiseSuppressor::process,
+-             py::arg("audio"))
+-        .def("reset", &NoiseSuppressor::reset)
+-        .def_property_readonly("speech_probability",
+-                               &NoiseSuppressor::get_speech_probability);
+-
+-    py::class_<VoiceDetector>(m, "VoiceDetector")
+-        .def(py::init<int, int>(),
+-             py::arg("sample_rate") = 16000,
+-             py::arg("num_channels") = 1)
+-        .def("process", &VoiceDetector::process,
+-             py::arg("audio"))
+-        .def("reset", &VoiceDetector::reset)
+-        .def_property_readonly("speech_probability",
+-                               &VoiceDetector::get_speech_probability);
+-
+-    py::class_<GainController>(m, "GainController")
+-        .def(py::init<int, int, float, bool, float, float, float, float>(),
+-             py::arg("sample_rate") = 16000,
+-             py::arg("num_channels") = 1,
+-             py::arg("fixed_gain_db") = 0.0f,
+-             py::arg("adaptive_digital") = true,
+-             py::arg("max_gain_db") = 50.0f,
+-             py::arg("headroom_db") = 5.0f,
+-             py::arg("max_gain_change_db_per_second") = 6.0f,
+-             py::arg("max_output_noise_level_dbfs") = -50.0f)
+-        .def("process", &GainController::process,
+-             py::arg("audio"), py::arg("speech_probability") = py::none())
+-        .def("reset", &GainController::reset)
+-        .def_property_readonly("gain_db", &GainController::get_gain_db)
+-        .def_property_readonly("speech_probability",
+-                               &GainController::get_speech_probability);
+-
+-    py::class_<AudioProcessor>(m, "AudioProcessor")
+-        .def(py::init<int, int, bool, bool, bool, bool, int, float, float, int>(),
++    py::class_<VivisAudioProcessor>(m, "AudioProcessor", py::module_local())
++        .def(py::init<int, int, bool, bool, bool, bool, int, float, float, int, float>(),
+              py::arg("sample_rate") = 16000,
+              py::arg("num_channels") = 1,
+              py::arg("echo_cancellation") = false,
+@@ -1206,15 +1166,16 @@
+              py::arg("ns_level") = 1,
+              py::arg("agc_gain_db") = 0.0f,
+              py::arg("agc_max_gain_db") = 50.0f,
+-             py::arg("stream_delay_ms") = 0)
+-        .def("process", &AudioProcessor::process,
++             py::arg("stream_delay_ms") = 0,
++             py::arg("nearend_threshold") = 0.25f)
++        .def("process", &VivisAudioProcessor::process,
+              py::arg("near"), py::arg("far") = py::none())
+-        .def("reset", &AudioProcessor::reset)
++        .def("reset", &VivisAudioProcessor::reset)
+         .def_property("stream_delay_ms",
+-                       &AudioProcessor::get_stream_delay_ms,
+-                       &AudioProcessor::set_stream_delay_ms)
++                       &VivisAudioProcessor::get_stream_delay_ms,
++                       &VivisAudioProcessor::set_stream_delay_ms)
+         .def_property_readonly("speech_probability",
+-                               &AudioProcessor::get_speech_probability)
++                               &VivisAudioProcessor::get_speech_probability)
+         .def_property_readonly("gain_db",
+-                               &AudioProcessor::get_gain_db);
++                               &VivisAudioProcessor::get_gain_db);
+ }

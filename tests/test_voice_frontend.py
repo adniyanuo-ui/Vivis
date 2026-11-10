@@ -15,7 +15,7 @@ import numpy as np
 from scipy.signal import firwin,lfilter
 
 from vivis.paths import ROOT
-from vivis.speech.voice_frontend import Aec3,VoiceFrontEnd,validate_frontend
+from vivis.speech.voice_frontend import Aec3,VoiceFrontEnd,validate_frontend,select_frontend
 from vivis.speech.voice_check import main,source_audio,STAGES
 from vivis.speech.voice_analysis import stage_ranges,correlation_peak,replay,analyze,attenuation
 
@@ -61,6 +61,39 @@ class FrontendTests(unittest.TestCase):
     def test_missing_aec3_has_install_message_not_silent_speex_fallback(self):
         with patch.dict(sys.modules,{'pywebrtc_audio':None}):
             with self.assertRaisesRegex(RuntimeError,'setup_realtime_voice'):Aec3({})
+
+    def test_profile_selection_is_explicit_and_does_not_mutate_canonical_options(self):
+        original=dict(backend='speex',aec3=dict(ns_level=1))
+        selected=select_frontend(original,profile='voice-preserve')
+        self.assertEqual(selected['backend'],'aec3')
+        self.assertEqual(selected['aec3']['profile'],'voice-preserve')
+        self.assertNotIn('profile',original['aec3']);self.assertEqual(original['backend'],'speex')
+        with self.assertRaises(ValueError):select_frontend(original,'speex','voice-preserve')
+        with self.assertRaises(ValueError):select_frontend(original,'aec3','unknown')
+
+    def test_voice_profile_uses_supported_constructor_and_never_silently_falls_back(self):
+        module=ModuleType('_vivis_aec3');module.vivis_profile_api_version=1
+        engine=Mock();engine.process.side_effect=lambda near,far:near.copy()
+        module.AudioProcessor=Mock(return_value=engine)
+        with patch.dict(sys.modules,{'_vivis_aec3':module}):
+            proc=Aec3(dict(profile='voice-preserve',ns_level=1))
+            near=np.linspace(-.1,.1,320,dtype=np.float32);far=np.ones(320,dtype=np.float32)
+            np.testing.assert_array_equal(proc.process(near,far),near)
+            self.assertEqual(module.AudioProcessor.call_args.kwargs['nearend_threshold'],1.)
+            self.assertFalse(module.AudioProcessor.call_args.kwargs['auto_gain_control'])
+            self.assertTrue(module.AudioProcessor.call_args.kwargs['noise_suppression'])
+            proc.close()
+        with patch.dict(sys.modules,{'_vivis_aec3':None}):
+            with self.assertRaisesRegex(RuntimeError,'--voice-preserve'):Aec3(dict(profile='voice-preserve'))
+        module.vivis_profile_api_version=0
+        with patch.dict(sys.modules,{'_vivis_aec3':module}):
+            with self.assertRaisesRegex(RuntimeError,'rebuild'):Aec3(dict(profile='voice-preserve'))
+
+    def test_candidate_check_does_not_import_the_native_extension_or_open_devices(self):
+        with patch.dict(sys.modules,{'_vivis_aec3':None}),patch('vivis.speech.voice_check.AudioIO') as audio,redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(main(['--check','--aec-profile','voice-preserve']),0)
+        self.assertEqual(json.loads(out.getvalue())['frontend']['aec3']['profile'],'voice-preserve')
+        audio.assert_not_called()
 
     def test_check_mode_never_opens_devices_or_requires_api_key(self):
         with patch('vivis.speech.voice_check.AudioIO') as audio,redirect_stdout(io.StringIO()) as out:

@@ -40,12 +40,20 @@ def tts_signature(tts):
     return {k:v for k,v in tts.items() if k not in ('python','threads','device','dtype')}
 
 
+def expected_texts(config):
+    overrides=config.get('prompt_text_overrides',{})
+    if (not isinstance(overrides,dict) or not set(overrides)<=set(RUNTIME_PROMPTS)
+            or any(not isinstance(t,str) or not 1<=len(t)<=600 for t in overrides.values())):
+        raise ValueError('Invalid system prompt text overrides')
+    return {**TEXTS,**overrides}
+
+
 def cache_matches(config,metadata):
     return (isinstance(metadata,dict) and metadata.get('processing_version')==PROCESSING_VERSION and tts_signature(metadata.get('tts'))==tts_signature(config['tts'])
         and metadata.get('timing')==config.get('prompt_timing')
         and metadata.get('level',{}).get('config')==config.get('prompt_level')
         and isinstance(metadata.get('texts'),dict)
-        and all(metadata['texts'].get(name)==TEXTS[name] for name in RUNTIME_PROMPTS))
+        and all(metadata['texts'].get(name)==expected_texts(config)[name] for name in RUNTIME_PROMPTS))
 
 
 def prompt_cache_ready(config):
@@ -61,7 +69,7 @@ def prompt_cache_ready(config):
             path=directory/(name+'.wav')
             if not path.is_file():return False
             expected=metadata.get('prompt_sha256',{}).get(name)
-            if config['tts'].get('engine')=='qwen3' and not expected:return False
+            if config['tts'].get('engine') in ('qwen3','dashscope') and not expected:return False
             if expected and hashlib.sha256(path.read_bytes()).hexdigest()!=expected:return False
             with wave.open(str(path)) as wav:
                 if wav.getsampwidth()!=2 or wav.getnchannels() not in (1,2) or wav.getnframes()<=0:return False
@@ -154,7 +162,10 @@ def normalize_prompt(path,reference_lufs,settings):
         true_peak_dbfs=20*math.log10(peak(data)),gain=gain,compressed=compressed)
 
 
-def create_engine(config):
+def create_engine(config,cloud_key=None):
+    if config['tts'].get('engine')=='dashscope':
+        from vivis.speech.cloud_tts import CloudTTS
+        return CloudTTS(config['tts'],secret=cloud_key)
     if config['tts'].get('engine')=='qwen3':
         from vivis.speech.qwen import QwenEngine
         return QwenEngine(config)
@@ -172,8 +183,11 @@ def create_engine(config):
     return engine
 
 
-def prepare(config,include_diagnostics=False):
-    t=config['tts'];folder=ROOT/t['directory'];destination=ROOT/config['prompts'];destination.mkdir(parents=True,exist_ok=True)
+def prepare(config,include_diagnostics=False,cloud_key=None):
+    if not include_diagnostics and prompt_cache_ready(config):
+        print('Verified prepared prompt cache; no synthesis needed.',flush=True);return
+    t=config['tts'];folder=ROOT/t['directory'] if 'directory' in t else None
+    destination=ROOT/config['prompts'];destination.mkdir(parents=True,exist_ok=True)
     if t.get('engine')=='qwen3' and Path(sys.prefix).resolve()!=(ROOT/t['python']).parent.parent.resolve():
         job=destination/'prepare_config.json';job.write_text(json.dumps(config,ensure_ascii=False,indent=2)+'\n')
         command=[str(ROOT/t['python']),'-m','vivis.speech.prompts','--prepare','--config',str(job)]
@@ -181,14 +195,15 @@ def prepare(config,include_diagnostics=False):
         subprocess.run(command,
             cwd=ROOT,env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'PYTHONNOUSERSITE':'1','HF_HUB_OFFLINE':'1'},check=True)
         return
-    selected=TEXTS if t.get('engine')!='qwen3' or include_diagnostics else {name:TEXTS[name] for name in RUNTIME_PROMPTS}
+    texts=expected_texts(config)
+    selected=texts if t.get('engine') not in ('qwen3','dashscope') or include_diagnostics else {name:texts[name] for name in RUNTIME_PROMPTS}
     def file_hash(path):
         h=hashlib.sha256()
         with path.open('rb') as src:
             for chunk in iter(lambda:src.read(1024*1024),b''):h.update(chunk)
         return h.hexdigest()
     metadata=dict(processing_version=PROCESSING_VERSION,tts=t,texts=selected,timing=config.get('prompt_timing'),asset_sha256={k:file_hash(folder/t[k])
-        for k in ('model','tokens','voices','lexicon') if k in t})
+        for k in ('model','tokens','voices','lexicon') if k in t and folder is not None})
     if 'source_manifest' in t:metadata['asset_sha256']['source_manifest']=file_hash(ROOT/t['source_manifest'])
     level=config.get('prompt_level');reference_channels=1
     if level:
@@ -201,7 +216,7 @@ def prepare(config,include_diagnostics=False):
     try:cached=json.loads((destination/'metadata.json').read_text())
     except (OSError,ValueError):cached={}
     if not isinstance(cached,dict):cached={}
-    engine=create_engine(config)
+    engine=create_engine(config,cloud_key=cloud_key) if t.get('engine')=='dashscope' else create_engine(config)
     if hasattr(engine,'execution_info'):metadata['generation_execution']=engine.execution_info
     sid=t.get('speaker_id',0);speed=t.get('speed',1.)
     if type(sid) is not int or not 0<=sid<engine.num_speakers or not .5<=speed<=2:raise ValueError('Invalid prompt speaker or speed')
@@ -209,7 +224,7 @@ def prepare(config,include_diagnostics=False):
     for name,text in selected.items():
         path=destination/(name+'.wav')
         expected=cached.get('prompt_sha256',{}).get(name)
-        if (path.is_file() and all(cached.get(k)==v for k,v in metadata.items() if k not in ('texts','prompt_sha256'))
+        if (path.is_file() and all(cached.get(k)==v for k,v in metadata.items() if k not in ('texts','prompt_sha256','generation_execution'))
                 and cached.get('texts',{}).get(name)==text and (not expected or file_hash(path)==expected)):
             reports[name]=cached.get('level_reports',{}).get(name,{})
             timing_reports[name]=cached.get('timing_reports',{}).get(name,{})

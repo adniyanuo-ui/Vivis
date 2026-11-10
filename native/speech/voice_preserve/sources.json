@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/strands-labs/pywebrtc-audio.git",
+  "commit": "1bc860a2051c2b9b3c10b8c778770794b9321d84",
+  "patch_sha256": "4f1bf27bb19d1f16a71a2354b911364f6275e3485bbe672c6857cb98c3bbeb2d",
+  "upstream_files_sha256": {
+    "CMakeLists.txt": "49e990a0c440242e39fc4ee548c9c76770ba5c4dc09aed50493c0e8019e71ed5",
+    "bindings/webrtc_audio_bindings.cpp": "0552de46203def0aecee263e495ab63c0c94d8f652a5f0ca22a2767cac904658"
+  },
+  "module": "_vivis_aec3",
+  "api_version": 1,
+  "pybind11": "2.13.6",
+  "description": "Independent optional extension exposing a validated constructor setting; original wheel and WebRTC algorithms unchanged"
+}

@@ -94,6 +94,10 @@ class ThreeModePolicyTests(unittest.TestCase):
 
 
 class ThreeModeSupervisorTests(unittest.TestCase):
+    def setUp(self):
+        self.addCleanup(patch.stopall)
+        patch('vivis.interaction.dialogue.preview_state',return_value=None).start()
+
     def test_external_camera_owner_is_not_silently_reused_by_managed_sessions(self):
         from vivis.runtime.developer import vision_service
         robot=Robot(ROOT/'configs/robots/xiaoshuai/robot.json')
@@ -164,7 +168,7 @@ time.sleep(10)
                  patch('vivis.interaction.dialogue.program_command',side_effect=command), \
                  patch('vivis.interaction.dialogue.subprocess.Popen',side_effect=launch),redirect_stdout(io.StringIO()):
                 self.assertEqual(main(['--config',str(config),'--robot',str(ROOT/'configs/robots/xiaoshuai/robot.json'),
-                    '--seconds','3.9','--output',str(root/'run')]),0)
+                    '--realtime-voice','off','--seconds','3.9','--output',str(root/'run')]),0)
             self.assertEqual(len(launches),1)
             self.assertIsNone(home_speeds[0])
             self.assertTrue(all(value==120 for value in home_speeds[1:]))

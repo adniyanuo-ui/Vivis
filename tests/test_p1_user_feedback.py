@@ -54,7 +54,8 @@ class UserFeedbackTests(unittest.TestCase):
             for sid,value in goals.items():follower.observe(sid,value,now)
             goals.update(follower.step(packet,'tracking',1/60,now))
             values.append(sign*(goals[34]-2047)/200.)
-            self.assertTrue(1762<=goals[34]<=2300)
+            motor=robot.axes[34]
+            self.assertTrue(motor['device_min']<=goals[34]<=motor['device_max'])
         return follower,goals,np.array(values)
 
     def test_residual_roll_servo_follows_then_recovers_instead_of_restoring_toward_neutral_early(self):

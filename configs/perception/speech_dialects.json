@@ -1,0 +1,13 @@
+{
+  "schema_version": "vivis-speech-dialects-1.0",
+  "default": "普通话",
+  "dialect_voice": "xunanchuan_v3.1",
+  "documented_dialects": ["上海话", "广东话", "东北话", "重庆话", "陕西话", "云南话", "宁波话", "甘肃话"],
+  "voice_source": "https://help.aliyun.com/zh/model-studio/qwen-audio-tts-voice-list",
+  "dialects": [
+    "普通话", "广东话", "重庆话", "东北话", "甘肃话", "贵州话", "浙江话",
+    "河北话", "河南话", "湖北话", "湖南话", "江西话", "宁波话", "宁夏话",
+    "青岛话", "陕西话", "山西话", "山东话", "上海话", "四川话", "云南话"
+  ],
+  "source": "https://help.aliyun.com/zh/model-studio/qwen-audio-realtime-user-guides"
+}

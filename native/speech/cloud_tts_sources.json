@@ -1,0 +1,11 @@
+{
+  "provider": "Alibaba Cloud Model Studio",
+  "model": "qwen3-tts-flash",
+  "voice": "Ethan",
+  "display_name": "晨煦",
+  "api_reference": "https://help.aliyun.com/en/model-studio/qwen-tts-api",
+  "voice_reference": "https://www.alibabacloud.com/help/tc/model-studio/qwen-tts-voice-list",
+  "purpose": "Generate seven fixed system prompts once; runtime plays verified local WAVs without cloud TTS or model loading.",
+  "credentials": "Local interactive input or named environment variable only; never stored in cache or source control.",
+  "generated_assets": "Keep request IDs, WAV hashes, text and loudness processing metadata with the cache; do not store authorization headers or signed download URLs."
+}

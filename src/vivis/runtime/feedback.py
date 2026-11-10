@@ -29,12 +29,23 @@ class BudgetedFeedback:
         self.priority_ids=priority_ids;self.period=priority_period_s
         self.sid=None;self.parts=[];self.started=None;self.packet_bits=0
         self.last_attempt={}
+        self.last_failure={}
+        self.failure_backoff_s=min(.05,.1*max_feedback_age_s)
         # Reserve the final quarter of the existing freshness window for
         # recovery. This changes service order, never the watchdog deadline.
         self.urgent_age_s=.75*max_feedback_age_s
+        self.max_feedback_age_s=max_feedback_age_s
 
-    def step(self,deadline,clocks,on_sample,on_error,should_stop=lambda:False,confirmation_ids=()):
+    def command_hold_ids(self,clocks,now,control_period_s):
+        # Allow a complete four-field sample, the existing failure backoff and
+        # two control ticks before the UNCHANGED valid-feedback deadline.
+        reserve=min(.5*self.max_feedback_age_s,
+            len(self.fields)*self.timeout_s+self.failure_backoff_s+2*control_period_s+.00025)
+        return [sid for sid in self.ids if now-clocks[sid]>=self.max_feedback_age_s-reserve]
+
+    def step(self,deadline,clocks,on_sample,on_error,should_stop=lambda:False,confirmation_ids=(),critical_ids=()):
         if not set(confirmation_ids)<=set(self.ids):raise ValueError('Unknown sensor confirmation axis')
+        if not set(critical_ids)<=set(self.ids):raise ValueError('Unknown critical feedback axis')
         reads=completed=0;selected=[];urgent_selected=[];failed=set()
         # A bounded batch can complete several samples. A timeout consumes its
         # reservation; there is no sleep or immediate retry after that timeout.
@@ -47,12 +58,21 @@ class BudgetedFeedback:
                 def serviced(sid):return max(clocks[sid],self.last_attempt.get(sid,clocks[sid]))
                 available=[sid for sid in self.ids if sid not in failed]
                 if not available:break
+                critical=[sid for sid in available if sid in critical_ids and now-clocks[sid]>=self.urgent_age_s]
                 urgent=[sid for sid in available if now-clocks[sid]>=self.urgent_age_s]
-                if urgent:
-                    # Fair service still applies when several axes are urgent.
-                    # A damaged axis retains its old VALID clock, but its fresh
-                    # attempt must not block all the other approaching deadlines.
-                    self.sid=min(urgent,key=lambda sid:(serviced(sid),clocks[sid]))
+                if critical:
+                    # Position broadcasts are held by the caller. Do not let a
+                    # 50ms retry cooldown consume the last fresh-feedback slot.
+                    # The failed set still forbids retrying this axis in this step.
+                    self.sid=min(critical,key=lambda sid:clocks[sid]);urgent_selected.append(self.sid)
+                elif urgent:
+                    # Deadlines depend on VALID samples, not attempted reads.
+                    # An isolated bad packet must not move the oldest deadline
+                    # behind a whole rotation. Briefly defer repeated failures
+                    # when other urgent axes can use the slot; never refresh a
+                    # valid clock or relax the caller's watchdog.
+                    ready=[sid for sid in urgent if now-self.last_failure.get(sid,float('-inf'))>=self.failure_backoff_s]
+                    self.sid=min(ready or urgent,key=lambda sid:(clocks[sid],serviced(sid)))
                     urgent_selected.append(self.sid)
                 else:
                     confirming=[sid for sid in available if sid in confirmation_ids and now-serviced(sid)>=self.confirmation_period]
@@ -65,6 +85,7 @@ class BudgetedFeedback:
             try:data=self.bus.read(sid,address,count)
             except (CorruptResponse,ReadTimeout) as exc:
                 self.last_attempt[sid]=time.monotonic()
+                self.last_failure[sid]=self.last_attempt[sid]
                 self.sid=None;self.parts=[];self.started=None;self.packet_bits=0
                 on_error(sid,exc)
                 # Never retry this axis within this tick. Other axes may use
@@ -83,6 +104,7 @@ class BudgetedFeedback:
                 if self.packet_bits:state['packet_status_bits']=self.packet_bits
                 started=self.started
                 self.last_attempt[sid]=time.monotonic()
+                self.last_failure.pop(sid,None)
                 self.sid=None;self.parts=[];self.started=None;self.packet_bits=0
                 on_sample(sid,state,started)
                 completed+=1

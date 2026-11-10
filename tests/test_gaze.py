@@ -991,3 +991,16 @@ class BudgetedFeedbackTests(unittest.TestCase):
                 reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
         self.assertEqual(clocks[23],.9)
         self.assertEqual([sid for sid in reader.ids if now[0]-clocks[sid]>1.],[23])
+
+    def test_single_failed_read_cannot_postpone_the_earliest_valid_deadline_behind_a_rotation(self):
+        from unittest.mock import patch
+        reader,now,clock,clocks,sample,samples,errors=self.setup_reader()
+        # Captured ID19 failure pattern: its last attempt is recent, but its
+        # VALID sample is older than all other approaching watchdog deadlines.
+        clocks.update({2:.2,23:.21,32:.22})
+        reader.last_attempt[2]=.9;reader.last_failure[2]=.9
+        with patch('vivis.runtime.feedback.time',clock):
+            result=reader.step(now[0]+.007,clocks,sample,lambda *a:errors.append(a))
+        self.assertEqual(samples[0][0],2)
+        self.assertEqual(result['urgent_ids'][0],2)
+        self.assertGreater(clocks[2],1.)

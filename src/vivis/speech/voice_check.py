@@ -15,7 +15,7 @@ import numpy as np
 from vivis.paths import ROOT
 from vivis.speech.realtime import Journal,check_audio_callbacks
 from vivis.speech.realtime_audio import AudioIO,VoiceBuffer
-from vivis.speech.voice_frontend import validate_frontend
+from vivis.speech.voice_frontend import select_frontend,AEC_PROFILES
 
 
 PHRASE='小帅，请停止说话。今天阳光很好，我想和你聊一聊。'
@@ -109,6 +109,7 @@ def run(speech,speaker,frontend,folder,stages=STAGES,gain=1.):
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--aec-backend',choices=('speex','aec3'),default='aec3')
+    parser.add_argument('--aec-profile',choices=AEC_PROFILES,default='baseline')
     parser.add_argument('--stage',choices=('all','near-only','far-only','double-talk'),default='all')
     parser.add_argument('--seconds',type=int,default=30,help='单阶段时长10..60秒；all固定67秒')
     parser.add_argument('--output-gain',type=float,help='仅本次音箱数字幅度，不修改系统音量；0.5约为-6dB')
@@ -119,8 +120,8 @@ def main(argv=None):
     config=json.loads((ROOT/'configs/perception/realtime_voice.json').read_text())
     gain=config['output_gain'] if args.output_gain is None else args.output_gain
     if not math.isfinite(gain) or not .1<=gain<=2.:parser.error('output-gain必须是0.1..2.0的有限数')
-    speech=json.loads((ROOT/config['speech']).read_text());frontend=dict(config.get('frontend',{}))
-    frontend['backend']=args.aec_backend;validate_frontend(frontend)
+    speech=json.loads((ROOT/config['speech']).read_text())
+    frontend=select_frontend(config.get('frontend',{}),args.aec_backend,args.aec_profile)
     robot=json.loads((ROOT/config['robot']).read_text())
     hardware=json.loads((ROOT/config['robot']).with_name(robot['hardware']).read_text())
     speaker=args.speaker or hardware['runtime']['audio_device']

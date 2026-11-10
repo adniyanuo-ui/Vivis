@@ -14,6 +14,9 @@ from vivis.speech.voice_frontend import VoiceFrontEnd
 from vivis.speech.audio_clock import AudioStreamClock
 
 
+class PlaybackBufferFull(RuntimeError):pass
+
+
 class VoiceBuffer:
     """24k PCM -> continuous48k PCM; cancellation rejects late old-response audio."""
     def __init__(self, gain=1., fade_ms=40, max_seconds=30):
@@ -22,6 +25,9 @@ class VoiceBuffer:
         self.filters={};self.coefficients=firwin(63,.5)*2
         self.notices=queue.SimpleQueue();self.last_audible=None;self.clipped=0
         self.started_responses=set()
+        self.paused=set();self.pause_fade_left=0;self.pause_reported=set()
+        self.resume_fades={};self.resume_waiting=set()
+        self.mouth=None;self.consumed={}
 
     def add(self, response_id, pcm):
         if not isinstance(response_id,str) or not response_id or len(pcm)%2:raise ValueError('Invalid audio response packet')
@@ -31,7 +37,8 @@ class VoiceBuffer:
             up=np.zeros(len(samples)*2,np.float32);up[::2]=samples
             values,state=lfilter(self.coefficients,1,up,zi=self.filters.get(response_id,np.zeros(62)))
             values*=self.gain
-            if self.count+len(values)>self.maximum:raise RuntimeError('Playback backlog exceeded its bounded buffer')
+            if self.count+len(values)>self.maximum:raise PlaybackBufferFull('Playback backlog exceeded its bounded buffer')
+            if self.mouth:self.mouth.add(response_id,pcm)
             self.filters[response_id]=state
             self.clipped+=int(np.count_nonzero(np.abs(values)>1.))
             self.blocks.append((response_id,np.clip(values,-1,1).astype(np.float32)))
@@ -39,31 +46,89 @@ class VoiceBuffer:
 
     def finish(self, response_id):
         # End of synthesis does not discard audio still waiting to reach the DAC.
-        with self.lock:self.filters.pop(response_id,None)
+        with self.lock:
+            self.filters.pop(response_id,None)
+            if self.mouth:self.mouth.finish(response_id)
+
+    def pause(self,response_id=None):
+        """Stop audibly now, retaining bounded PCM until the turn is resolved."""
+        with self.lock:
+            ids={sid for sid,_ in self.blocks}|set(self.filters)
+            if response_id:ids.add(response_id)
+            ids.difference_update(self.cancelled)
+            fresh=ids-self.paused
+            self.paused.update(ids)
+            if fresh:self.pause_fade_left=self.fade
+            return dict(responses=sorted(ids),retained_samples=sum(len(v) for sid,v in self.blocks if sid in ids))
+
+    def response_ids(self,response_id=None):
+        with self.lock:
+            ids={sid for sid,_ in self.blocks}|set(self.filters)
+            if response_id:ids.add(response_id)
+            return sorted(ids-set(self.cancelled))
+
+    def resume(self,response_ids):
+        with self.lock:
+            ids=set(response_ids)&self.paused
+            ids.difference_update(self.cancelled)
+            self.paused.difference_update(ids);self.pause_reported.difference_update(ids)
+            for sid in ids:
+                self.resume_fades[sid]=self.fade;self.resume_waiting.add(sid)
+            return dict(responses=sorted(ids),retained_samples=sum(len(v) for sid,v in self.blocks if sid in ids))
 
     def cancel(self, response_id=None):
         with self.lock:
-            ids=({sid for sid,_ in self.blocks}|set(self.filters)) if response_id is None else {response_id}
-            fade_left=self.fade;kept=deque();dropped=0
+            if self.mouth:self.mouth.deactivate()
+            ids=({sid for sid,_ in self.blocks}|set(self.filters)|self.paused) if response_id is None else {response_id}
+            fade_left=self.fade;kept=deque();dropped=0;faded=0
             for sid,values in self.blocks:
                 if sid not in ids:kept.append((sid,values));continue
-                take=min(fade_left,len(values)) if sid in self.started_responses else 0
+                ramp_start=min(fade_left,self.pause_fade_left) if sid in self.paused else fade_left
+                take=min(ramp_start,len(values)) if sid in self.started_responses else 0
                 if take:
-                    ramp=np.arange(fade_left,fade_left-take,-1,dtype=np.float32)/max(self.fade,1)
-                    kept.append((sid,values[:take]*ramp));fade_left-=take
+                    ramp=np.arange(ramp_start,ramp_start-take,-1,dtype=np.float32)/max(self.fade,1)
+                    kept.append((sid,values[:take]*ramp));fade_left-=take;faded+=take
+                    if sid in self.paused:self.pause_fade_left-=take
                 dropped+=len(values)-take
             self.blocks=kept;self.count=sum(len(v) for _,v in kept)
             for sid in ids:
                 if sid not in self.cancelled:self.cancelled.append(sid)
                 self.filters.pop(sid,None)
-            return dict(responses=sorted(ids),discarded_samples=dropped,fade_samples=self.fade-fade_left)
+                self.paused.discard(sid);self.pause_reported.discard(sid)
+                self.resume_fades.pop(sid,None);self.resume_waiting.discard(sid)
+            return dict(responses=sorted(ids),discarded_samples=dropped,fade_samples=faded)
 
     def render(self, count, dac_time):
         out=np.zeros(count,np.float32);cursor=0
         with self.lock:
             while self.blocks and cursor<count:
+                sid,values=self.blocks[0]
+                position=self.consumed.get(sid,0)
+                if (self.mouth and sid not in self.cancelled
+                        and not self.mouth.ready(sid,position+min(len(values),count-cursor))):break
+                if sid in self.paused and (self.pause_fade_left==0 or sid not in self.started_responses):
+                    if sid not in self.pause_reported:
+                        self.notices.put(dict(kind='playback_paused',response_id=sid,dac_monotonic=dac_time+cursor/48000))
+                        self.pause_reported.add(sid)
+                    break
                 sid,values=self.blocks.popleft();take=min(len(values),count-cursor)
-                out[cursor:cursor+take]=values[:take];self.count-=take
+                if sid in self.paused:take=min(take,self.pause_fade_left)
+                out[cursor:cursor+take]=values[:take]
+                if sid in self.paused:
+                    out[cursor:cursor+take]*=np.arange(self.pause_fade_left,self.pause_fade_left-take,-1,dtype=np.float32)/max(self.fade,1)
+                    self.pause_fade_left-=take
+                if self.resume_fades.get(sid,0)>0:
+                    left=self.resume_fades[sid]
+                    out[cursor:cursor+take]*=np.minimum((self.fade-left+np.arange(take,dtype=np.float32)+1)/max(self.fade,1),1)
+                    self.resume_fades[sid]=max(0,left-take)
+                if sid in self.resume_waiting:
+                    self.notices.put(dict(kind='playback_resumed',response_id=sid,dac_monotonic=dac_time+cursor/48000))
+                    self.resume_waiting.discard(sid)
+                self.count-=take
+                if self.mouth and sid not in self.cancelled:
+                    self.mouth.played(sid,position,position+take,dac_time+cursor/48000)
+                self.consumed[sid]=position+take
+                if len(self.consumed)>128:self.consumed.pop(next(iter(self.consumed)))
                 if len(values)>take:self.blocks.appendleft((sid,values[take:]))
                 if np.any(np.abs(values[:take])>1e-6):
                     self.started_responses.add(sid)
@@ -91,8 +156,9 @@ class AudioIO:
                         clock_samples=[])
         self.last_capture=None;self.last_output=None
         self.meters=queue.Queue(maxsize=2)
+        self.output_stream=None;self.output_opened_at=None
 
-    def open(self):
+    def open(self,with_output=True):
         import sounddevice as sd
         c=self.speech['capture']
         if c['sample_rate_hz']!=48000 or c['frame_ms']!=20:raise ValueError('Voice test capture requires48kHz/20ms')
@@ -111,6 +177,7 @@ class AudioIO:
             self.stack.callback(publisher.close)
             front=VoiceFrontEnd(self.speech,self.frontend,self.aec)
             self.stack.callback(front.close);self.stats['aec_backend']=front.backend
+            self.stats['aec_profile']=front.echo.profile if front.backend=='aec3' else None
             clocks={}
             def observe_clock(stream,timing,entry,stamp,index):
                 if (index<=16 or index%50==0) and len(self.stats['clock_samples'])<2048:
@@ -145,19 +212,43 @@ class AudioIO:
                 except Exception as exc:self.fault='Input callback: '+str(exc)
             # Open BOTH devices, map their clocks, then start. Callback execution
             # time is a watchdog observation; it must not time-warp the PCM.
-            out=sd.OutputStream(device=output_device,samplerate=48000,
+            self._output_factory=lambda:sd.OutputStream(device=output_device,samplerate=48000,
                 channels=min(2,devices[output_device]['max_output_channels']),dtype='float32',blocksize=960,latency='low',callback=output)
-            self.stack.callback(out.close)
+            self._clocks=clocks
+            out=self._output_factory() if with_output else None
+            self.output_stream=out
+            self.stack.callback(self.disable_output)
             inp=sd.InputStream(device=input_device,samplerate=48000,channels=c['channels'],
                 dtype='float32',blocksize=960,latency='low',callback=capture)
             self.stack.callback(inp.close)
-            clocks.update(output=AudioStreamClock.calibrate(out),input=AudioStreamClock.calibrate(inp))
+            clocks.update(input=AudioStreamClock.calibrate(inp))
+            if out is not None:clocks['output']=AudioStreamClock.calibrate(out)
             self.stats['clock_alignment']={key:clock.metadata() for key,clock in clocks.items()}
-            out.start();self.stack.callback(out.stop)
+            if out is not None:out.start();self.output_opened_at=time.monotonic()
             inp.start();self.stack.callback(inp.stop)
             self.thread=threading.Thread(target=self.process,args=(udp,front),daemon=True);self.thread.start()
             return dict(microphone=devices[input_device]['name'],speaker=devices[output_device]['name'])
         except BaseException:self.close();raise
+
+    def enable_output(self,player=None):
+        """Lease the speaker without reopening capture or resetting the DSP."""
+        if self.output_stream is not None:raise RuntimeError('Voice speaker is already owned')
+        if player is not None:self.player=player
+        stream=self._output_factory()
+        try:
+            self._clocks['output']=AudioStreamClock.calibrate(stream)
+            self.stats['clock_alignment']['output']=self._clocks['output'].metadata()
+            self.last_output=None;stream.start()
+            self.output_stream=stream;self.output_opened_at=time.monotonic()
+        except BaseException:stream.close();raise
+
+    def disable_output(self):
+        stream=self.output_stream
+        self.output_stream=None;self.output_opened_at=None
+        if stream is not None:
+            try:
+                if stream.active:stream.stop()
+            finally:stream.close()
 
     def process(self, udp, front):
         c=self.speech['aec'];reference=ReferenceBuffer();previous=None
