@@ -19,3 +19,6 @@ dist/
 *.key
 *credentials*
 *token*
+
+# This module contains the loader only, never a stored credential.
+!/src/vivis/speech/credentials.py

@@ -9,3 +9,6 @@
 
 # Preserve the pinned upstream SDK byte-for-byte, including its formatting.
 src/vivis/hardware/feetech/_vendor/** -whitespace
+
+# Unified patches encode an empty context line as one space; preserve its hash.
+native/speech/voice_preserve/profile.patch whitespace=-blank-at-eol

@@ -99,6 +99,7 @@ class CloudManagedVoice(ManagedVoice):
         self.tasks=RobotTasks(self.memory,self.tasks_config) if self.memory and self.tasks_config['enabled'] else None
         self.task_cache=None;self.task_refresh_at=0.;self.task_cache_version=-1
         self.task_visit_announced=set();self.task_notice_attempts={};self.relay_pending={};self.turn_item_id=None;self.turn_message_id=None;self.turn_ended_at=None
+        self.memory_turns={}
         self.response_request_pending=False;self.last_response_request_at=None
         self.memory_task=None;self.memory_retry_at=0.;self.anonymous='anonymous:'+uuid.uuid4().hex
         self.turn_person=self.anonymous;self.turn_engaged=False;self.turn_saved=False;self.pending_user_text=None;self.reply_people={};self.pending_memories={}
@@ -259,13 +260,33 @@ class CloudManagedVoice(ManagedVoice):
             return True
         return False
 
+    def begin_user_turn(self,item_id):
+        self.turn_item_id=item_id;self.turn_message_id=None;self.turn_ended_at=None
+        self.turn_person=self.identified_person() or self.anonymous
+        self.turn_saved=False;self.pending_user_text=None;self.turn_engaged=self.can_speak()
+        if isinstance(item_id,str) and item_id:
+            self.memory_turns[item_id]=dict(person=self.turn_person,session=self.memory_session,
+                engaged=self.turn_engaged,valid=True,text=None,message_id=None)
+            while len(self.memory_turns)>128:self.memory_turns.pop(next(iter(self.memory_turns)))
+
     def remember(self,event):
         if not self.memory:return
         kind=event.get('type');rid=event.get('response_id')
-        if kind=='conversation.item.input_audio_transcription.completed':self.pending_user_text=event.get('transcript','')
-        if self.turn_engaged and self.pending_user_text and not self.turn_saved:
-            self.turn_message_id=self.memory.append(self.turn_person,self.memory_session,'user',self.pending_user_text);self.turn_saved=True
-            if self.tasks and self.turn_item_id:self.tasks.bind_source(self.memory_session,self.turn_item_id,self.turn_message_id)
+        current=self.memory_turns.get(self.turn_item_id)
+        if current:current['engaged']|=self.turn_engaged
+        candidates={self.turn_item_id} if current else set()
+        if kind=='conversation.item.input_audio_transcription.completed':
+            item_id=event.get('item_id');turn=self.memory_turns.get(item_id)
+            if turn:
+                turn['text']=event.get('transcript','');candidates.add(item_id)
+                if item_id==self.turn_item_id:self.pending_user_text=turn['text']
+            else:self.log.write('memory_transcript_unattributed',item_id=item_id,reason='unknown_user_turn')
+        for item_id in candidates:
+            turn=self.memory_turns[item_id];text=turn['text']
+            if turn['valid'] and turn['engaged'] and isinstance(text,str) and text.strip() and turn['message_id'] is None:
+                mid=self.memory.append(turn['person'],turn['session'],'user',text);turn['message_id']=mid
+                if self.tasks:self.tasks.bind_source(turn['session'],item_id,mid)
+                if item_id==self.turn_item_id:self.turn_message_id=mid;self.turn_saved=True
         if kind=='response.audio_transcript.done' and rid and rid not in self.blocked:
             self.pending_memories[rid]=(self.reply_people.get(rid,self.anonymous),event.get('transcript',''))
         for key,(person,text) in list(self.pending_memories.items()):
@@ -548,18 +569,18 @@ class CloudManagedVoice(ManagedVoice):
                             for relay in self.relay_pending.values():relay['response_id']=rid
                         if kind=='input_audio_buffer.speech_started':
                             self.relay_pending.clear()
-                            self.turn_item_id=event.get('item_id');self.turn_message_id=None;self.turn_ended_at=None
                             self.awaiting_recovery_user=False
                             self.in_speech=True;self.continue_response=False;self.tool_retry_budget=2
                             self.tool_repair=None
                             self.presence.continued_turn()
                             if self.can_speak():self.announcement_revision=None
-                            self.turn_person=self.identified_person() or self.anonymous
-                            self.turn_saved=False;self.pending_user_text=None
-                            self.turn_engaged=self.can_speak()
-                        elif kind=='input_audio_buffer.speech_stopped':
+                            self.begin_user_turn(event.get('item_id'))
+                        elif kind=='input_audio_buffer.speech_stopped' and event.get('item_id')==self.turn_item_id:
                             self.in_speech=False
-                            if event.get('reason')=='turn_invalid':self.turn_item_id=None;self.turn_ended_at=None
+                            if event.get('reason')=='turn_invalid':
+                                turn=self.memory_turns.get(self.turn_item_id)
+                                if turn:turn['valid']=False
+                                self.turn_item_id=None;self.turn_ended_at=None
                             else:self.turn_ended_at=time.monotonic()
                         if kind=='response.function_call_arguments.done':await self.tool(ws,event);continue
                         if kind=='response.audio.delta' and (rid in self.blocked or not self.can_speak()):
