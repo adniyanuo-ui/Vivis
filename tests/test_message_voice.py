@@ -48,3 +48,25 @@ class MessageVoiceTests(unittest.IsolatedAsyncioTestCase):
         await self.wait_for(lambda:player.count>=16*48000)
         player.render(player.count,time.monotonic()-20)
         self.assertTrue(await asyncio.wait_for(task,.5))
+
+    async def test_long_tts_with_mouth_cost_does_not_starve_microphone_sender(self):
+        speaker,player,state,_=self.speaker(16)
+        original=player.add
+        def add_with_mouth_cost(rid,pcm):
+            time.sleep(.004)  # Bounded per-packet A2F/filter work, no real model.
+            return original(rid,pcm)
+        player.add=add_with_mouth_cost
+        gaps=[];last=time.monotonic();finished=False
+        async def capture_sender():
+            nonlocal last
+            while not finished:
+                now=time.monotonic();gaps.append(now-last);last=now
+                if player.count:player.render(player.count,time.monotonic()-20)
+                await asyncio.sleep(.01)
+        sender=asyncio.create_task(capture_sender())
+        try:await asyncio.wait_for(speaker.say('带口型处理开销的长查询。',None),3.)
+        finally:
+            finished=True;await sender
+        # The production microphone sender rejects frames older than500ms.
+        # Preserve that guard; no TTS batch should monopolize the loop near it.
+        self.assertLess(max(gaps),.2,f'event loop blocked for {max(gaps):.3f}s')
