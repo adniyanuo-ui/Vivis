@@ -8,12 +8,11 @@ from vivis.paths import ROOT
 def policy():
     c=json.loads((ROOT/'configs/perception/voice_runtime.json').read_text())
     if c.pop('schema_version',None)!='vivis-voice-runtime-1.0':raise ValueError('Invalid voice runtime policy')
-    required=set("uplink_max_age_s send_timeout_s callback_stall_s connect_timeout_s handshake_timeout_s close_timeout_s ping_interval_s ping_timeout_s controller_ack_s message_extract_s message_tts_request_s message_tts_operation_s playback_stall_s recovery_cooldown_s audio_close_s audio_open_s".split())
+    required=set("uplink_max_age_s send_timeout_s callback_stall_s connect_timeout_s handshake_timeout_s close_timeout_s ping_interval_s ping_timeout_s controller_ack_s message_extract_s message_tts_operation_s playback_stall_s recovery_cooldown_s audio_close_s audio_open_s".split())
     if set(c)!=required:raise ValueError('Missing or unknown voice runtime deadline')
     for key,value in c.items():
         if type(value) not in (int,float) or not math.isfinite(value) or not 0<value<=120:
             raise ValueError('Invalid voice runtime deadline: '+key)
-    if c['message_tts_operation_s']<c['message_tts_request_s']:raise ValueError('TTS operation deadline too short')
     return c
 
 class VoiceTransportError(RuntimeError):

@@ -19,6 +19,7 @@ class MessageRequest:
     verified_person:str|None
     clarified:bool=False
     guard:object=None
+    notice_guard:object=None
 
 
 @dataclass(frozen=True)

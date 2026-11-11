@@ -127,7 +127,8 @@ class FamiliarFaces:
                 observation.update(confirmation_hits=self.hits,confirmation_required=self.c['confirmation_samples'])
                 if pid is not None:observation['decision_reason']='confirmed' if self.hits>=self.c['confirmation_samples'] else 'confirming'
                 # A credible different candidate invalidates the previous identity
-                # immediately. Low confidence alone may retain only its social name.
+                # immediately. Low confidence alone enters bounded same-face review;
+                # consumers may retain an already established interaction identity.
                 if pid is not None and pid!=self.confirmed:self.confirmed=None
                 if pid is not None and self.hits>=self.c['confirmation_samples']:
                     self.confirmed=pid;self.last_confirmed=stamp;state='recognized'

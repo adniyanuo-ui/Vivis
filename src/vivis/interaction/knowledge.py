@@ -28,7 +28,7 @@ IDENTITY_RULES=('身份来源规则：云端没有收到摄像头图像，只收
     '自报“小王”等称呼只表示对方这样介绍自己，不能据此匹配熟人档案、补全姓名职务或读取留言。'
     '询问“看看我是谁/认出我了吗”必须以最新视觉核验为准；unknown时明确说尚未确认，不能沿用自报或历史称呼宣称认出。'
     'reviewing表示同一张脸正在短暂复核，可以保留之前的称呼，不要说突然不认识了；询问身份时坦诚说明正在复核。'
-    '复核不等于新近核验成功，不能据此读取个人历史、职业背景或留言，也不能代确认收件。'
+    '复核不等于新近核验成功；仅当控制器明确identity_retained=true时，沿用同一张脸此前确认的身份和权限，其他复核状态不能读取私人内容或代确认收件。'
     '身份未知且对方没有明确要求怎样称呼时，只用“您好/您”；对方提到、否认或询问一个熟人称呼不代表那是本人，不能把该称呼套用给当前用户。'
     '不能说“我看着摄像头确认您就是某某”，不能编造画面模糊、失焦等原因，不能声称已调整相机或颈部。')
 
@@ -127,15 +127,21 @@ class Knowledge:
         identity=self.current_identity(now)
         return identity['person'] if identity['state']=='recognized' else None
 
-    def person_context(self,now=None,*,allow_identification=True,allow_review=False):
+    def person_context(self,now=None,*,allow_identification=True,allow_review=False,retained_person_id=None):
         if self.config is None:return dict(instructions='',recognized=False,person_id=None)
         identity=self.current_identity(now)
         if ((identity['state']=='recognized' and not allow_identification)
                 or (identity['state']=='reviewing' and not allow_review)):
             identity=dict(state='unknown',person=None)
         person=identity['person'];reviewing=identity['state']=='reviewing'
+        retained=bool(reviewing and person and retained_person_id==person['person_id'])
+        if retained:
+            person=dict(person_id=retained_person_id,**self.people[retained_person_id])
+            identity=dict(identity,person=person,identity_retained=True)
         instructions=' current_visual_identity='+json.dumps(identity,ensure_ascii=False)+'。'+IDENTITY_RULES
-        if reviewing:
+        if retained:
+            instructions+=' 同一张脸在既有防抖有效期内复核，保持当前身份、背景和留言权限，正常继续，不反复询问身份、不重新问候。'
+        elif reviewing:
             instructions+=' 之前的称呼暂时保留，正在复核；不反复问姓名、不触发重新问候，不加载个人背景或留言。'
         elif person:
             instructions+=' 可自然使用已确认称呼，不反复问候、不打断话轮，不主动背诵简历。'

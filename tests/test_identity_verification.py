@@ -27,6 +27,41 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
         self.state=VoiceSession(self.service.player,self.service.log)
         self.state.interrupt=Mock(wraps=self.state.interrupt)
 
+    async def test_bounded_same_face_review_preserves_inflight_message_authority(self):
+        from vivis.speech.cloud_managed import CloudManagedVoice
+        s=self.service;s.identified_person=CloudManagedVoice.identified_person.__get__(s)
+        s.recognized_person=Mock(return_value='alice');s.conversation_person='alice'
+        s.turn_person='alice';s.turn_item_id='request';s.pending_user_text='给小王的留言保存了吗？'
+        request=s.message_request()
+        s.recognized_person.return_value=None
+        s.reviewing_identity=Mock(return_value=dict(state='reviewing',person=dict(person_id='alice')))
+        self.assertEqual(s.identified_person(),'alice');request.guard()
+        s.verify_identity(self.state);self.state.interrupt.assert_not_called()
+        s.begin_user_turn('next');self.assertEqual(s.turn_person,'alice')
+        s.reviewing_identity.return_value=None
+        self.assertIsNone(s.identified_person())
+        from vivis.interaction.message_lane import StaleMessageTurn
+        with self.assertRaises(StaleMessageTurn):request.guard()
+
+    async def test_review_never_bootstraps_new_identity_or_preserves_a_different_person(self):
+        from vivis.speech.cloud_managed import CloudManagedVoice
+        s=self.service;s.identified_person=CloudManagedVoice.identified_person.__get__(s)
+        s.recognized_person=Mock(return_value=None)
+        s.reviewing_identity=Mock(return_value=dict(state='reviewing',person=dict(person_id='bob')))
+        self.assertIsNone(s.identified_person())
+        s.conversation_person='alice';self.assertIsNone(s.identified_person())
+        s.recognized_person.return_value='bob';self.assertEqual(s.identified_person(),'bob')
+
+    async def test_public_notice_guard_survives_review_but_not_new_turn_or_new_person(self):
+        from vivis.interaction.message_lane import StaleMessageTurn
+        s=self.service;s.turn_person='alice';request=s.message_request()
+        self.person=None;request.notice_guard()
+        with self.assertRaises(StaleMessageTurn):request.guard()
+        self.person='bob'
+        with self.assertRaises(StaleMessageTurn):request.notice_guard()
+        self.person='alice';s.input_generation+=1
+        with self.assertRaises(StaleMessageTurn):request.notice_guard()
+
     async def test_identity_is_audited_every_three_seconds_with_faster_change_checks(self):
         with patch.object(self.service.log,'write') as log,patch('vivis.speech.cloud_managed.time.monotonic',return_value=10.) as clock:
             self.service.verify_identity(self.state)

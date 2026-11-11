@@ -10,7 +10,6 @@
   "ping_timeout_s": 20.0,
   "controller_ack_s": 3.0,
   "message_extract_s": 12.0,
-  "message_tts_request_s": 20.0,
   "message_tts_operation_s": 45.0,
   "playback_stall_s": 12.0,
   "recovery_cooldown_s": 30.0,

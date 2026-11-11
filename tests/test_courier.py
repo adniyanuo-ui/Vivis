@@ -67,6 +67,15 @@ class CourierStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.store.register('alice','甲工',['甲工'],'4321',[self.mid,newer],source_reason='stale code')
         self.assertEqual(self.store.get(self.row['id'])['code'],'4321')
 
+    def test_owner_query_reads_separate_ledger_without_marking_delivery(self):
+        result=self.store.owner_query('alice')
+        self.assertEqual(result['status'],'pending');self.assertIn('4、3、2、1',result['spoken_receipt'])
+        self.assertEqual(self.store.get(self.row['id'])['status'],'pending')
+        self.assertEqual(self.store.owner_query('bob')['status'],'not_found')
+        self.store.cancel(self.row['id'],'alice')
+        result=self.store.owner_query('alice')
+        self.assertEqual(result['status'],'cancelled');self.assertNotIn('4、3、2、1',result['spoken_receipt'])
+
 
 class CourierRuntimeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -107,6 +116,31 @@ class CourierRuntimeTests(unittest.IsolatedAsyncioTestCase):
         for index,args in enumerate((dict(action='register',code='9999'),dict(action='cancel',handoff_id=self.row['id']))):
             result=await self.call(args,'denied'+str(index));self.assertFalse(result['accepted'])
         self.assertEqual(self.service.courier.get(self.row['id'])['code'],'4321')
+
+    async def test_owner_status_is_not_public_lookup_and_never_marks_announced(self):
+        s=self.service
+        denied=await self.call(dict(action='owner_query'))
+        self.assertFalse(denied['accepted'])
+        s.identified_person=lambda:'alice';s.turn_person='alice';s.pending_user_text='我的退件留言保存了吗？'
+        allowed=await self.call(dict(action='owner_query'),'owner')
+        self.assertTrue(allowed['accepted']);self.assertTrue(allowed['face_identity_required'])
+        self.assertEqual(allowed['result']['status'],'pending');self.assertIsNone(s.courier_offer)
+
+    async def test_error_notice_cannot_mark_a_previous_code_offer_delivered(self):
+        from unittest.mock import AsyncMock
+        s=self.service
+        s.courier_offer=s.courier.lookup('甲工','我来取甲工的快递。')
+        s.speak_message_notice=AsyncMock(return_value=True)
+        result=await self.call(dict(action='owner_query'))
+        await s.message_lane.task
+        self.assertFalse(result['accepted']);s.speak_message_notice.assert_awaited_once()
+        self.assertEqual(s.courier.get(self.row['id'])['status'],'pending')
+
+    async def test_late_chat_courier_call_cannot_replace_claimed_fixed_message_flow(self):
+        s=self.service;s.message_claimed=s.input_generation
+        result=await self.call(dict(action='lookup',owner_name='甲工'))
+        self.assertFalse(result['accepted']);self.assertEqual(result['status'],'stale_user_turn')
+        self.assertIsNone(s.courier_offer);self.assertIsNone(s.message_lane)
 
     async def test_lookup_for_another_owner_cannot_acknowledge_previous_offer(self):
         s=self.service;await self.call(dict(action='lookup',owner_name='甲工'))

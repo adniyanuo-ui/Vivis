@@ -12,11 +12,19 @@ class StaleMessageTurn(ValueError):pass
 
 
 class MessageLane:
-    def __init__(self,store,people,extract,speak,valid,log):
+    def __init__(self,store,people,extract,speak,valid,log,*,courier=None,notify=None):
         self.store=store;self.service=MessageService(store);self.people=people
         self.extract=extract;self.speak=speak;self.valid=valid;self.log=log
         self.last={};self.offered={};self.seen=set();self.task=None;self.active_relay=None
         self.result=None
+        self.courier=courier;self.notify=notify
+
+    async def notice(self,text,request):
+        if self.notify:
+            try:await self.notify(text,request)
+            except (asyncio.CancelledError,StaleMessageTurn):raise
+            except Exception as exc:self.log('message_notice_failed',error_type=type(exc).__name__)
+        elif self.valid(request):await self.say(text,request)
 
     def check(self,request):
         if not self.valid(request):raise StaleMessageTurn('话轮、说话人或模式已变化；未提交的旧请求不执行。')
@@ -60,7 +68,7 @@ class MessageLane:
             if not request.source_item or not request.source_text:raise ValueError('需要本轮最终识别文字。')
             if request.verified_person!=request.actor:
                 self.result=dict(operation_status='needs_clarification',saved=False)
-                await self.say('请正对摄像头确认身份后再交代或查询私人留言。',request);return
+                await self.notice('请正对摄像头确认身份后再交代或查询私人留言。',request);return
             hint=self.last.get(request.actor,{})
             if request.actor not in self.offered:
                 waiting=self.store.list('announced',recipient=request.actor,limit=2)
@@ -82,6 +90,12 @@ class MessageLane:
             if action=='none':
                 if hint.get('draft_source'):self.last.pop(request.actor,None)
                 return
+            if action=='courier_query':
+                if not self.courier:raise ValueError('退件留言查询尚未启用。')
+                result=await asyncio.to_thread(self.courier.owner_query,request.actor)
+                self.check(request);self.result=dict(operation_status='read',saved=None,result=result)
+                self.log('courier_owner_query',actor=request.actor,status=result['status'])
+                await self.say(result['spoken_receipt'],request);return
             if action=='clarify':
                 field=instruction.get('missing','content')
                 question={'recipient':'这条留言是给谁的？','content':'请补充要转告的具体内容。',
@@ -161,9 +175,15 @@ class MessageLane:
                 label=person.get('preferred_address') or person.get('display_name') or '收件人'
                 text='已保存，等见到'+label+'后转告。'
             await self.say(text,request)
-        except (asyncio.CancelledError,StaleMessageTurn):
+        except asyncio.CancelledError:
             if self.result is None:self.result=dict(operation_status='rejected',saved=None)
             self.log('message_operation_cancelled');return
+        except StaleMessageTurn:
+            if self.result is None:self.result=dict(operation_status='rejected',saved=None)
+            self.log('message_operation_cancelled',reason='request_guard_changed')
+            try:await self.notice('身份正在复核，本次留言处理已暂停。已有记录不会因此删除，请正对摄像头确认后再查询。',request)
+            except (asyncio.CancelledError,StaleMessageTurn):pass
+            return
         except MessageMeaningUncertain:
             self.last[request.actor]=dict(draft_source=request.source_text,missing='meaning')
             self.result=dict(operation_status='needs_clarification',saved=False)
@@ -228,7 +248,7 @@ def query_recipient_fields(out,text,people,hint):
 def extraction_tool(people=None):
     tool=dict(type='function',name='message_fields',description='只提取当前最终文字中的留言指令，不保存、不查重、不回复用户。',
         parameters=dict(type='object',additionalProperties=False,required=['action','recipient_reference'],
-            properties=dict(recipient_reference=dict(type='string',description='原话中的收件人称呼，逐字摘录，例如小王、我、小儿；没有指定则空字符串，不纠正或猜名字。'),action=dict(type='string',enum=['create','supplement','retry','query','relay','acknowledge','clarify','none']),
+            properties=dict(recipient_reference=dict(type='string',description='原话中的收件人称呼，逐字摘录，例如小王、我、小儿；没有指定则空字符串，不纠正或猜名字。'),action=dict(type='string',enum=['create','supplement','retry','query','courier_query','relay','acknowledge','clarify','none']),
                 recipient_id=dict(type='string'),content=dict(type='string',maxLength=500),task_id=dict(type='string'),
                 status=dict(type='string',enum=['active','all','pending','announced','completed','cancelled']),
                 missing=dict(type='string',enum=['','recipient','content','target','meaning']))))
@@ -248,6 +268,7 @@ async def extract_qwen(url,secret,session,log,text,people,hint):
         '明确说补充才supplement；明确重新保存刚才同一请求才retry；问保存了吗或状态是query；明确收到刚转告的留言才acknowledge。'
         '只有明确要听给当前说话人自己的留言时才用relay，recipient_id填recent.current_person_id。刚转告的内容没听清也可relay。'
         '给别人的留言保存了吗、把内容完整说一下、帮我查给小王的留言都用query；完整读出不等于转告收件人，不用relay。'
+        '本人询问自己给快递员的留言有没有、退件留言保存了吗、我的取件码是什么，使用courier_query，只查询当前核验委托人自己的独立退件账本；不查普通同事留言、不替别人查、不把快递员猜成某位熟人。'
         'query和relay必须用recipient_reference逐字摘录原话中的收件人称呼，没有明确称呼时填空。不要把第三方名字替换成当前说话人。'
         '还没收到、没听清、询问是否收到都不是acknowledge。'
         '人名只按people中的姓名和称呼对应ID，不能拼写一个新ID，也不能把听错或不明的人名猜成名单中的别人。比如小儿不是小王，收件人不明用clarify和missing=recipient，不查询一个猜测对象后说没有留言。'

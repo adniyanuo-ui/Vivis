@@ -98,6 +98,18 @@ class CourierHandoffs:
         return dict(status='available',handoff_id=record['id'],version=record['version'],
             owner_label=record['owner_label'],code=record['code'],spoken_receipt=public_receipt(record['owner_label'],record['code']))
 
+    def owner_query(self,owner):
+        """Caller must verify the owner; a status query never delivers the code."""
+        person_key(owner);self.ensure_schema()
+        with self.memory.db() as db:
+            row=db.execute('SELECT status,code FROM courier_handoffs WHERE owner=?',(owner,)).fetchone()
+        if not row:return dict(status='not_found',spoken_receipt='没有查到您本人登记的退件取件码留言。')
+        labels={'pending':'已保存，等待转告快递员','announced':'已完整转告，等待快递员确认收到',
+            'completed':'快递员已确认收到取件码，不代表包裹已取走','cancelled':'已取消，不再转告'}
+        text='您本人的退件留言'+labels[row['status']]+'。'
+        if row['status']!='cancelled':text+='取件码是'+'、'.join(row['code'])+'。'
+        return dict(status=row['status'],spoken_receipt=text,physical_collection_verified=False)
+
     def acknowledge(self,hid,version,source_message_id):
         self.ensure_schema()
         with self.memory.db() as db:

@@ -12,7 +12,8 @@ from vivis.interaction.memory import PersonMemory
 from vivis.interaction.robot_tasks import RobotTasks
 from vivis.interaction.message_delivery import MessageRequest
 from vivis.interaction.message_lane import MessageLane,extract_qwen
-from vivis.speech.cloud_tts import CloudTTS
+from vivis.speech.trusted_reading import RealtimeReader
+from vivis.interaction.courier import CourierHandoffs
 from vivis.speech.credentials import load_key
 from vivis.speech.managed import voice_configuration
 from vivis.speech.message_voice import MessageSpeaker
@@ -27,10 +28,10 @@ async def main():
     _,_,url,session=voice_configuration(speech,ROOT/'configs/robots/xiaoshuai/robot.json')
     folder=ROOT/'outputs/message_lane'/datetime.now().strftime('%Y%m%d_%H%M%S');folder.mkdir(parents=True)
     journal=Journal(folder/'events.jsonl',secret);player=VoiceBuffer(max_seconds=120);state=VoiceSession(player,journal)
-    engine=CloudTTS(dict(speech['tts'],timeout_s=20),secret=secret,cache_directory=False)
+    engine=RealtimeReader(url,secret,session,journal)
     spoken=[];current=None;reports=[]
     def valid(request):return request==current
-    speaker=MessageSpeaker(engine,player,state,valid,spoken.append,journal.write)
+    speaker=MessageSpeaker(engine,player,state,valid,spoken.append,journal.write,tts=engine)
     async def virtual_dac():
         while True:
             if player.count:player.render(min(player.count,48000),time.monotonic()-2)
@@ -42,7 +43,8 @@ async def main():
             policy=json.loads((ROOT/'configs/interaction/tasks.json').read_text());store=RobotTasks(memory,policy)
             people={'alpha':dict(display_name='测试甲',preferred_address='甲工'),'beta':dict(display_name='测试乙',preferred_address='小乙')}
             async def extract(text,people,hint):return await extract_qwen(url,secret,session,journal,text,people,hint)
-            lane=MessageLane(store,people,extract,speaker.say,valid,journal.write)
+            courier=CourierHandoffs(memory)
+            lane=MessageLane(store,people,extract,speaker.say,valid,journal.write,courier=courier)
             cases=[('alpha','给小乙留条测试留言：明天准备两份资料。'),
                 ('alpha','刚才给小乙的留言保存了吗？'),('alpha','重新保存刚才那条。'),
                 ('beta','把给我的留言说一下。'),('beta','没听清，暂时没收到。')]
@@ -59,6 +61,16 @@ async def main():
             fresh=RobotTasks(PersonMemory(memory.c,tmp),policy);assert fresh.get(tid)['status']=='completed'
             reports.append(dict(case='delivery_ack_reload',status='completed',last_spoken=spoken[-1]))
             print('PASS delivery/ack/reload',spoken[-1],flush=True)
+            mid=memory.append('alpha','synthetic','user','我的退件取件码4321。')
+            row=courier.register('alpha','甲工',['甲工'],'4321',[mid],source_reason='synthetic')
+            text='我还有其他的留言吗？给快递的有没有？'
+            mid=memory.append('alpha','synthetic','user',text)
+            current=MessageRequest('alpha','synthetic','courier-query',mid,text,'alpha')
+            await lane.run(current)
+            assert lane.result['result']['status']=='pending' and '4、3、2、1' in spoken[-1]
+            assert courier.get(row['id'])['status']=='pending'
+            reports.append(dict(case='courier_owner_query',status='pending',last_spoken=spoken[-1]))
+            print('PASS courier owner query',spoken[-1],flush=True)
         (folder/'summary.json').write_text(json.dumps(dict(passed=True,synthetic_only=True,physical_devices_opened=False,
             virtual_dac=True,reports=reports),ensure_ascii=False,indent=2)+'\n')
         print('Evidence:',folder)

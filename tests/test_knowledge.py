@@ -116,7 +116,14 @@ class KnowledgeTests(unittest.TestCase):
         self.assertIn('测试工',social['instructions'])
         for private in ('喜欢讨论算法验证','测试公司','工程师'):
             self.assertNotIn(private,social['instructions'])
+        retained=k.person_context(22.,allow_review=True,retained_person_id='testperson')
+        self.assertIn('"identity_retained": true',retained['instructions'])
+        self.assertIn('喜欢讨论算法验证',retained['instructions'])
+        wrong=k.person_context(22.,allow_review=True,retained_person_id='another-person')
+        self.assertNotIn('"identity_retained": true',wrong['instructions'])
         self.assertEqual(k.current_identity(24.),dict(state='unknown',person=None)) # stale producer
+        expired=k.person_context(24.,allow_review=True,retained_person_id='testperson')
+        self.assertIsNone(expired['person_id']);self.assertNotIn('"identity_retained": true',expired['instructions'])
         for changed in (dict(review,observed_monotonic=25.),dict(review,confirmed_monotonic=23.),
                         dict(review,confirmed_monotonic=None)):
             path.write_text(json.dumps(changed))

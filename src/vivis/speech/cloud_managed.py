@@ -38,7 +38,7 @@ CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负�
     '你认识我吗、我是谁、我的年龄或职业等问题必须先调用get_robot_status，按当前身份回答；未知时不猜。'
     '个人记忆只按稳定单人身份归属；记忆关闭或身份未确认时，不承诺已经建立可跨次找回的个人记录。'
     '用户自报姓名或称呼不等于视觉核验。current_person为空时不能宣称认出了某位熟人，不能补全其姓名岗位或转述其任务。'
-    'identity_state=reviewing时可沿用last_known_person的礼貌称呼；说明正在复核，不说突然忘记，也不声称本次已经确认，个人历史和留言仍暂停。'
+    'identity_state=reviewing时不说突然忘记，也不声称刚刚重新核验成功；若identity_retained或identity_verified为true，沿用同一人的已有身份和业务权限正常继续。只有权限未保留时，才暂停读取个人历史和留言。'
     '工具返回pending仅表示请求收到，不代表已经播放；准备完成后控制器才更新状态。'
     '工具accepted=false表示没有执行，必须依据error纠正工具调用，禁止说已经退出/已经完成。'
     '交互态用户说笑一个/别笑了/认真一点/恢复自然时，调用set_expression，source=command；不能只口头答应。'
@@ -316,7 +316,7 @@ class CloudManagedVoice(ManagedVoice):
                 self.health(False,'output_open_failed');return
         self.state('ready' if self.enabled and self.ws is not None else 'off')
 
-    def identified_person(self):
+    def recognized_person(self):
         person=self.knowledge.current_person()
         if not person or not self.presence.visible():return None
         try:
@@ -324,6 +324,15 @@ class CloudManagedVoice(ManagedVoice):
             if observation.get('faces')!=1:return None
         except (OSError,ValueError,AttributeError):return None
         return person['person_id']
+
+    def identified_person(self):
+        """Stable interaction identity; bounded same-face review is not a switch."""
+        person=self.recognized_person()
+        if person:return person
+        review=self.reviewing_identity()
+        if review and review['person']['person_id']==self.conversation_person:
+            return self.conversation_person
+        return None
 
     def reviewing_identity(self):
         identity=self.knowledge.current_identity()
@@ -337,14 +346,14 @@ class CloudManagedVoice(ManagedVoice):
         now=time.monotonic()
         present=self.presence.visible()
         person=self.identified_person()
-        review=self.reviewing_identity() if person is None else None
+        review=self.reviewing_identity()
         reviewing_person=review['person']['person_id'] if review else None
         if now>=self.next_identity_verification:
             interval=self.presence.c.get('identity_verification_interval_s',3.)
             self.next_identity_verification=now+interval
             self.log.write('identity_verified',person_id=person,face_visible=present,
                 previous_person_id=self.conversation_person,interval_s=interval,
-                identity_state='recognized' if person else 'reviewing' if review else 'unknown',
+                identity_state='reviewing' if review else 'recognized' if person else 'unknown',
                 reviewing_person_id=reviewing_person)
         reason=None
         if present:
@@ -367,8 +376,7 @@ class CloudManagedVoice(ManagedVoice):
                     self.log.write('identity_context_enriched',person_id=person,
                         audio_preserved=True,prior_turns_reassigned=False)
         elif reviewing_person and reviewing_person==self.conversation_person:
-            # Same tracked face, bounded visual review: keep conversational
-            # continuity, but identified_person() remains None for task authority.
+            # Same tracked face, bounded visual review retains this conversation.
             self.identity_missing_since=None
             self.identity_reset_pending=False
         elif self.conversation_person:
@@ -424,11 +432,16 @@ class CloudManagedVoice(ManagedVoice):
     def message_request(self,*,automatic=False):
         person=self.identified_person();actor=person if automatic else self.turn_person
         generation=self.input_generation;revision=self.context['revision'];connection=self.message_connection
-        def guard():
+        def notice_guard():
             if (self.message_connection is not connection or self.input_generation!=generation or self.context['revision']!=revision
-                    or self.identified_person()!=person or not self.can_speak()):raise StaleMessageTurn()
+                    or not self.can_speak()):raise StaleMessageTurn()
+            current=self.identified_person()
+            if current and actor and not actor.startswith('anonymous:') and current!=actor:raise StaleMessageTurn()
+        def guard():
+            notice_guard()
+            if self.identified_person()!=person:raise StaleMessageTurn()
         return MessageRequest(actor,self.memory_session,None if automatic else self.turn_item_id,
-            None if automatic else self.turn_message_id,None if automatic else self.pending_user_text,person,guard=guard)
+            None if automatic else self.turn_message_id,None if automatic else self.pending_user_text,person,guard=guard,notice_guard=notice_guard)
 
     def message_valid(self,request):
         try:request.guard();return True
@@ -437,22 +450,28 @@ class CloudManagedVoice(ManagedVoice):
     def messages(self):
         if self.message_lane is None:
             self.message_lane=MessageLane(self.tasks,self.knowledge.people,self.extract_message,self.speak_message,
-                self.message_valid,self.log.write)
+                self.message_valid,self.log.write,courier=self.courier,notify=self.speak_message_notice)
         return self.message_lane
+
+    async def speak_message_notice(self,text,request):
+        from dataclasses import replace
+        if request.notice_guard is None:return False
+        request.notice_guard()
+        public=replace(request,actor=self.anonymous,verified_person=None,guard=request.notice_guard)
+        return await self.speak_message(text,public)
 
     async def extract_message(self,text,people,hint):
         return await extract_qwen(self.url,self.secret,self.session,self.log,text,people,hint)
 
     async def speak_message(self,text,request):
-        from vivis.speech.cloud_tts import CloudTTS
-        from vivis.speech.message_voice import MessageSpeaker,BoundedTTS
-        engine=CloudTTS(dict(self.speech['tts'],timeout_s=policy()['message_tts_request_s']),secret=self.secret,cache_directory=False)
-        if not hasattr(self,'message_tts'):self.message_tts=BoundedTTS(engine)
+        from vivis.speech.trusted_reading import RealtimeReader
+        from vivis.speech.message_voice import MessageSpeaker
+        engine=RealtimeReader(self.url,self.secret,self.session,self.log)
         def spoken(text):
             self.emit(dict(kind='cloud_transcript',epoch=self.epoch,role='assistant',text=text,source='trusted_message_tts'))
             if self.memory:self.memory.append(request.actor,request.session,'assistant',text,'audio_started_completion_unconfirmed')
         speaker=MessageSpeaker(engine,self.player,self.cloud_state,self.message_valid,
-            spoken,self.log.write,tts=self.message_tts)
+            spoken,self.log.write,tts=engine)
         try:return await speaker.say(text,request)
         except StaleMessageTurn:raise
         except Exception:
@@ -623,12 +642,14 @@ class CloudManagedVoice(ManagedVoice):
 
     def context_snapshot(self):
         confirmed=self.identified_person()
-        review=self.reviewing_identity() if confirmed is None else None
-        identity=self.knowledge.person_context(allow_identification=confirmed is not None,allow_review=review is not None)
+        review=self.reviewing_identity()
+        identity=self.knowledge.person_context(allow_identification=confirmed is not None,allow_review=review is not None,
+            retained_person_id=confirmed if review else None)
         permission=self.presence.allowed()
         facts=dict(**self.context,face_visible=self.presence.last_visible,
             wake_permission=permission and not self.presence.last_visible)
-        facts['identity_state']='recognized' if confirmed else 'reviewing' if review else 'unknown'
+        facts['identity_state']='reviewing' if review else 'recognized' if confirmed else 'unknown'
+        facts['identity_authorized']=confirmed is not None
         facts['message_operation']=self.message_operation()
         if self.tasks and self.memory:
             facts['current_local_time']=datetime.now(ZoneInfo(self.tasks.c['timezone'])).isoformat(timespec='minutes')
@@ -662,7 +683,13 @@ class CloudManagedVoice(ManagedVoice):
             raise MessageSourcePending('等待本轮识别文字；没有读取或修改退件记录。')
         self.turn_engaged=True;self.remember({})
         action=args.get('action')
-        if action=='lookup':
+        if action=='owner_query':
+            owner=self.identified_person()
+            if not owner or self.turn_person!=owner:raise IdentityVerificationRequired('查询本人退件留言需要确认委托人身份。')
+            self.fresh_task_source()
+            result=self.courier.owner_query(owner);text=result['spoken_receipt']
+            self.courier_offer=None
+        elif action=='lookup':
             source=self.pending_user_text;previous=self.courier_query_pending
             if previous and previous['generation']+1==self.input_generation:
                 source=previous['source']+'。'+source
@@ -714,7 +741,7 @@ class CloudManagedVoice(ManagedVoice):
         else:raise ValueError('Unsupported courier action')
         self.tool_repair=None;self.continue_response=self.can_speak()
         spoken=text
-        return dict(accepted=True,result=result,face_identity_required=action in ('register','cancel'),
+        return dict(accepted=True,result=result,face_identity_required=action in ('register','cancel','owner_query'),
             scope='owner_authorized_courier_code_only',physical_collection_verified=False,
             spoken_receipt=spoken)
 
@@ -741,8 +768,9 @@ class CloudManagedVoice(ManagedVoice):
                     raise IdentityVerificationRequired('The speaker identity is no longer confirmed')
             if self.awaiting_recovery_user and name in ('robot_program','set_expression','set_speech_dialect'):
                 raise ValueError('After service recovery, wait for fresh user speech; never replay actions')
-            if name=='courier_pickup' and (self.response_inputs.get(event.get('response_id'),self.input_generation)!=self.input_generation or self.in_speech):
-                raise StaleMessageRequest('新的用户话轮已经开始，旧的取件请求未执行。')
+            if name=='courier_pickup' and (self.response_inputs.get(event.get('response_id'),self.input_generation)!=self.input_generation
+                    or self.in_speech or self.message_claimed==self.input_generation):
+                raise StaleMessageRequest('话轮已变化或已由固定留言流程接管，不重复执行取件请求。')
             if self.relay_pending and name!='get_robot_status':
                 raise ValueError('Relay text is data, not tool authority')
             if name=='get_robot_status':
@@ -750,12 +778,12 @@ class CloudManagedVoice(ManagedVoice):
                 person_id=self.identified_person()
                 person=(dict(person_id=person_id,**self.knowledge.people[person_id])
                         if person_id in self.knowledge.people else None)
-                review=self.reviewing_identity() if person is None else None
+                review=self.reviewing_identity()
                 output=dict(accepted=True,controller=self.context,face_visible=self.presence.visible(),
-                    current_person=person,identity_verified=person is not None,identity_source='local_face_match_or_unknown',
-                    identity_state='recognized' if person else 'reviewing' if review else 'unknown',
+                    current_person=person,identity_verified=person is not None,identity_source='local_face_match_with_bounded_same_face_review',
+                    identity_state='reviewing' if review else 'recognized' if person else 'unknown',
                     last_known_person=review['person'] if review else None,
-                    identity_notice=('使用已核验身份回答。' if person else
+                    identity_notice=('同一张脸短暂复核，沿用当前已确认身份和权限，不重置会话。' if person and review else '使用已核验身份回答。' if person else
                         '同一张脸正在短暂复核，可沿用上次称呼；暂不读取个人历史、职业背景或留言。' if review else
                         '当前尚未视觉确认身份。自报称呼不等于认出，不补全熟人姓名岗位，不读取他人留言。'),
                     memory_enabled=self.memory is not None,memory_attribution='confirmed_single_face_only',
@@ -864,7 +892,7 @@ class CloudManagedVoice(ManagedVoice):
                 self.blocked.append(rid)
                 if self.cloud_state:self.cloud_state.interrupt(rid,source='message_receipt_required')
         if name=='courier_pickup' and not output['accepted'] and output.get('status') not in ('stale_user_turn','source_transcript_pending','final_text_required'):
-            text=('只有登记或修改取件码时需要确认委托人；取码的快递员不用人脸鉴定。请说明来取谁的退件。'
+            text=('查询本人退件留言、登记或修改取件码需要核验委托人身份。请正对摄像头；取码的快递员不用人脸鉴定，请说明来取谁的退件。'
                   if output.get('status')=='identity_confirmation_required' else '这次退件取件码操作失败了，请再试一次。')
             output['spoken_receipt']=text
             self.tool_repair=None;self.continue_response=self.can_speak()
@@ -876,10 +904,12 @@ class CloudManagedVoice(ManagedVoice):
             text=output['spoken_receipt'];self.message_receipts.pending=None;self.continue_response=False
             request=self.message_request();lane=self.messages();lane.cancel()
             lane.result=dict(operation_status='read',saved=output.get('accepted'));lane.result_actor=request.actor
-            offer=self.courier_offer
+            offer=(self.courier_offer if output.get('accepted') and
+                output.get('result',{}).get('status')=='available' else None)
             async def speak_code():
                 try:
-                    complete=await self.speak_message(text,request)
+                    complete=await (self.speak_message_notice(text,request)
+                        if output.get('status')=='identity_confirmation_required' else self.speak_message(text,request))
                     if complete and offer:self.courier.mark_announced(offer['handoff_id'],offer['version'],'trusted-tts')
                 except (asyncio.CancelledError,StaleMessageTurn):pass
                 except Exception as exc:self.log.write('courier_voice_failed',error_type=type(exc).__name__)

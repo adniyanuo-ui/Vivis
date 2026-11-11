@@ -32,6 +32,27 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
     async def save(self):
         r=self.request();await self.lane.run(r);self.assertTrue(self.lane.result['saved']);return r
 
+    async def test_courier_query_uses_owner_ledger_not_colleague_messages(self):
+        from vivis.interaction.courier import CourierHandoffs
+        self.lane.courier=CourierHandoffs(self.memory)
+        mid=self.memory.append('alice','owner','user','退件取件码4321。')
+        row=self.lane.courier.register('alice','甲工',['甲工'],'4321',[mid],source_reason='synthetic')
+        await self.save();self.answer=dict(action='courier_query')
+        await self.lane.run(self.request(text='我还有其他的留言吗？给快递的有没有？'))
+        self.assertIn('4、3、2、1',self.spoken[-1]);self.assertNotIn('USB',self.spoken[-1])
+        self.assertEqual(self.lane.courier.get(row['id'])['status'],'pending')
+        self.assertEqual(len(self.store.list('all')),1)
+
+    async def test_identity_loss_during_extraction_notifies_without_reading_private_data(self):
+        from unittest.mock import AsyncMock
+        self.lane.notify=AsyncMock()
+        async def extract(*_):self.current=None;return dict(action='query')
+        self.lane.extract=extract
+        await self.lane.run(self.request(text='留言保存了吗？'))
+        self.lane.notify.assert_awaited_once()
+        self.assertIn('身份正在复核',self.lane.notify.call_args.args[0])
+        self.assertFalse(self.spoken);self.assertFalse(self.store.list('all'))
+
     async def test_say_once_stores_once_and_same_request_retries_are_idempotent(self):
         request=await self.save();await self.lane.run(request)
         self.assertEqual(len(self.store.list('all')),1)
