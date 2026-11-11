@@ -14,7 +14,7 @@ from vivis.interaction.dialogue import main
 
 
 class ManagedSupervisorTests(unittest.TestCase):
-    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False):
+    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False):
         actual_popen=subprocess.Popen;voice_starts=[];prompts=[]
         settings=json.loads((ROOT/'configs/interaction/p1.json').read_text())
         settings['realtime_voice']['control_backend']='qwen_realtime' if qwen else 'local'
@@ -67,8 +67,11 @@ emit(kind='ready');start=time.monotonic()
 turns=[(.2,'小帅'),(.8,'你是谁'),(1.2,'播放白骨夫人'),(2.,'自己玩'),(2.5,'小帅'),(3.,'停止'),(3.3,'待机')]
 if sys.argv[3]=='True':turns=[(.2,'小帅'),(.8,'呃播放剧本'),(1.2,'停止'),(1.8,'模仿我的表情'),(2.2,'待机'),(2.7,'小帅'),(3.2,'播放歌曲'),(4.1,'待机')]
 if sys.argv[4]=='True':turns=[(.2,'小帅'),(.8,'播放宇飞剧本'),(1.4,'停止'),(2.1,'再演一遍'),(2.8,'退出'),(3.4,'待机')]
+if sys.argv[6]=='True':turns=[(.2,'小帅'),(.8,'断网'),(1.1,'播放白骨夫人'),(1.4,'恢复'),(2.,'小帅'),(2.6,'待机')]
 for n,(deadline,text) in enumerate(turns,1):
  time.sleep(max(0,start+deadline-time.monotonic()))
+ if text in ('断网','恢复'):
+  emit(kind='voice_health',available=text=='恢复',reason='synthetic network');continue
  if sys.argv[5]=='True':
   actions={'小帅':('wake',''),'播放白骨夫人':('play','baigufuren'),'自己玩':('standby',''),'停止':('stop',''),'待机':('standby','')}
   if text in actions:
@@ -102,7 +105,7 @@ time.sleep(10)
             def popen(command,**kwargs):
                 if 'vivis.speech.managed' in command:
                     voice_starts.append(command)
-                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen)],**kwargs)
+                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover)],**kwargs)
                 return actual_popen(command,**kwargs)
             with patch('vivis.interaction.dialogue.ROOT',root), \
                  patch('vivis.interaction.dialogue.dependencies',return_value=(speech,[])), \
@@ -120,7 +123,11 @@ time.sleep(10)
             expected=(['standby','interaction','wz2','interaction','wz2','interaction','standby'] if repeated else
                       ['standby','interaction','wz2','interaction','expression-follow','standby','interaction','baigufuren','interaction','standby']
                       if extended else ['standby','interaction','baigufuren','interaction','standby','interaction','standby'])
+            if recover:expected=['standby','interaction','standby','interaction','standby']
             self.assertEqual([s[6:] for s in lines if s.startswith('start ')],expected)
+            if recover:
+                self.assertIn('管理器继续运行',console.getvalue())
+                self.assertIn('语音链路已恢复',console.getvalue())
             for a,b in zip(lines[::2],lines[1::2]):self.assertEqual(a.replace('start ','end '),b)
             if qwen:
                 self.assertEqual(prompts,[])
@@ -133,6 +140,9 @@ time.sleep(10)
                 contexts=[json.loads(s) for s in speaker.with_suffix('.contexts').read_text().splitlines()]
                 results=[c['last_program'] for c in contexts if 'last_program' in c]
                 self.assertEqual(results,[dict(id='wz2',title='宇飞剧本',outcome='interrupted')]*2)
+
+    def test_network_outage_holds_motion_and_requires_fresh_request_after_recovery(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,recover=True)
 
     def test_qwen_tools_alone_execute_modes_and_cached_prompts_are_disabled(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True)

@@ -10,6 +10,7 @@ from datetime import datetime,timedelta,timezone
 from zoneinfo import ZoneInfo
 
 from vivis.paths import ROOT
+from vivis.speech.runtime_policy import policy,VoiceTransportError,bounded_send
 from vivis.interaction.cloud_control import SpeechPresence,controller_intent,normalize_program,ReceptionGate
 from vivis.interaction.expression_intent import IntentWriter,configuration as expression_configuration
 from vivis.interaction.speech_dialect import SpeechDialect
@@ -77,10 +78,10 @@ class ControllerEventGate:
         try:
             # Qwen requires a user-role item to initiate a response. Its CONTENT
             # explicitly identifies the controller source, never a fake ASR turn.
-            await ws.send(json.dumps(dict(type='conversation.item.create',item=dict(id=item_id,type='message',role='user',
+            await bounded_send(ws,json.dumps(dict(type='conversation.item.create',item=dict(id=item_id,type='message',role='user',
                 content=[dict(type='input_text',text=text)])),ensure_ascii=False))
-            try:await asyncio.wait_for(future,timeout=3.)
-            except asyncio.TimeoutError:raise RuntimeError('Controller event acknowledgement timed out') from None
+            try:await asyncio.wait_for(future,timeout=policy()['controller_ack_s'])
+            except asyncio.TimeoutError:raise VoiceTransportError('Controller event acknowledgement timed out') from None
             return item_id
         finally:self.pending.pop(item_id,None)
 
@@ -127,9 +128,59 @@ class CloudManagedVoice(ManagedVoice):
         self.active_voice=self.session['voice'];self.pending_voice_switch=None
         self.service_recovery=ServiceRecovery(self.config['service_recovery'])
         self.awaiting_recovery_user=False
+        self.transport_fault=None;self.health_available=True;self.audio_ready=True;self.audio_recovery=None
         self.expression.clear();self.resume_history=deque(maxlen=max(12,2*self.config['max_history_turns']))
         self.summary['control_backend']='qwen_realtime';self.summary['local_asr_started']=False
         self.log.write('cloud_control_backend',name='qwen_realtime',local_asr_started=False,reception_enabled=reception['enabled'],memory_enabled=self.memory is not None)
+
+    def health(self,available,reason):
+        if available==self.health_available:return
+        self.health_available=available
+        if not available:
+            self.message_connection=object()
+            if self.message_lane:self.message_lane.cancel()
+            if self.cloud_state:self.cloud_state.interrupt(source='voice_unavailable')
+        self.emit(dict(kind='voice_health',available=available,reason=reason))
+
+    def input_overflow(self):
+        self.cloud_queue=None
+        self.transport_fault='Cloud input queue full; current turn invalidated'
+        self.health(False,'input_overflow')
+
+    async def recover_audio(self,reason):
+        """Close the previous owner before reopening; no hardware-controller restart."""
+        self.audio_ready=False;self.health(False,reason)
+        self.message_connection=object();self.awaiting_recovery_user=True
+        self.cloud_queue=None
+        if self.cloud_task:
+            self.cloud_task.cancel();await asyncio.gather(self.cloud_task,return_exceptions=True)
+        self.cloud_task=None
+        self.enabled=False
+        if self.mouth:self.mouth.deactivate()
+        # Never open a second owner when close has not actually completed.
+        await asyncio.wait_for(asyncio.to_thread(self.audio.close),policy()['audio_close_s'])
+        self.state('off')
+        from vivis.speech.realtime_audio import AudioIO
+        while not self.shutdown.is_set():
+            board=self.speech['managed_voice'].get('board_reference_device')
+            audio=AudioIO(self.speech,self.speaker,self.player,aec=board is None,
+                frontend=self.config['frontend'],board_reference_device=board)
+            try:
+                devices=await asyncio.wait_for(asyncio.to_thread(audio.open,with_output=False),policy()['audio_open_s'])
+            except asyncio.TimeoutError:
+                # The native call may still own devices. Do not start another open.
+                raise RuntimeError('Audio open did not finish; automatic reopening stopped') from None
+            except (ValueError,TypeError):raise
+            except Exception as exc:
+                await asyncio.wait_for(asyncio.to_thread(audio.close),policy()['audio_close_s'])
+                self.log.write('audio_reopen_failed',error_type=type(exc).__name__)
+                await asyncio.sleep(policy()['recovery_cooldown_s']);continue
+            self.audio=audio;self.audio_ready=True
+            self.opened=time.monotonic();self.last_input=self.opened
+            self.summary['microphone_opens']+=1
+            self.log.write('audio_reopened',**devices)
+            self.cloud_task=asyncio.create_task(self.cloud(0))
+            return
 
     def start_decoder(self):
         # The base class owns only audio/AEC; deliberately no Decoder construction.
@@ -251,8 +302,18 @@ class CloudManagedVoice(ManagedVoice):
 
     async def apply_mode(self):
         if self.pending_mode is None or time.monotonic()<self.release_at:return
-        self.audio.disable_output();self.epoch,self.enabled=self.pending_mode;self.pending_mode=None
-        if self.enabled:self.audio.enable_output(self.player)
+        self.epoch,self.enabled=self.pending_mode;self.pending_mode=None
+        if not self.audio_ready:
+            self.enabled=False
+            if self.audio.output_stream is None:self.state('off')
+            return
+        self.audio.disable_output()
+        if self.enabled:
+            try:self.audio.enable_output(self.player)
+            except (ValueError,TypeError):raise
+            except Exception as exc:
+                self.audio.fault='Voice output open: '+str(exc)
+                self.health(False,'output_open_failed');return
         self.state('ready' if self.enabled and self.ws is not None else 'off')
 
     def identified_person(self):
@@ -374,14 +435,20 @@ class CloudManagedVoice(ManagedVoice):
 
     async def speak_message(self,text,request):
         from vivis.speech.cloud_tts import CloudTTS
-        from vivis.speech.message_voice import MessageSpeaker
-        engine=CloudTTS(dict(self.speech['tts'],timeout_s=20),secret=self.secret,cache_directory=False)
+        from vivis.speech.message_voice import MessageSpeaker,BoundedTTS
+        engine=CloudTTS(dict(self.speech['tts'],timeout_s=policy()['message_tts_request_s']),secret=self.secret,cache_directory=False)
+        if not hasattr(self,'message_tts'):self.message_tts=BoundedTTS(engine)
         def spoken(text):
             self.emit(dict(kind='cloud_transcript',epoch=self.epoch,role='assistant',text=text,source='trusted_message_tts'))
             if self.memory:self.memory.append(request.actor,request.session,'assistant',text,'audio_started_completion_unconfirmed')
         speaker=MessageSpeaker(engine,self.player,self.cloud_state,self.message_valid,
-            spoken,self.log.write)
-        return await speaker.say(text,request)
+            spoken,self.log.write,tts=self.message_tts)
+        try:return await speaker.say(text,request)
+        except StaleMessageTurn:raise
+        except Exception:
+            self.emit(dict(kind='voice_warning',epoch=self.epoch,
+                message='本次留言语音未完整播出；数据库结果保留，不会因此重新建单或标记已转告。'))
+            raise
 
     def final_message(self,event,state):
         from vivis.speech.message_receipts import MESSAGE_REQUEST
@@ -731,7 +798,7 @@ class CloudManagedVoice(ManagedVoice):
                     try:
                         # Same voice: ordered before tool continuation, without reconnecting.
                         instructions,_,_=self.context_snapshot()
-                        await asyncio.wait_for(ws.send(json.dumps(dict(type='session.update',session=dict(instructions=instructions)),ensure_ascii=False)),timeout=.5)
+                        await asyncio.wait_for(ws.send(json.dumps(dict(type='session.update',session=dict(instructions=instructions)),ensure_ascii=False)),timeout=policy()['send_timeout_s'])
                     except BaseException:
                         self.dialect.name=previous;raise
                 self.tool_repair=None;self.continue_response=self.can_speak()
@@ -811,7 +878,7 @@ class CloudManagedVoice(ManagedVoice):
             error=output.get('error'),arguments=args if name in ('robot_program','set_expression','set_speech_dialect') and isinstance(args,dict) else None,
             status=output.get('status'))
         try:
-            await ws.send(json.dumps(dict(type='conversation.item.create',item=dict(type='function_call_output',
+            await bounded_send(ws,json.dumps(dict(type='conversation.item.create',item=dict(type='function_call_output',
                 call_id=call,output=json.dumps(output,ensure_ascii=False))),ensure_ascii=False))
         except BaseException:
             if switch_request is not None:
@@ -824,18 +891,22 @@ class CloudManagedVoice(ManagedVoice):
             try:
                 await self._connection();return
             except TransientServiceError as exc:
+                self.health(False,exc.code)
                 self.relay_pending.clear()
                 try:retry=self.service_recovery.next()
                 except RuntimeError as exhausted:
                     self.log.write('cloud_service_recovery_exhausted',code=exc.code,event_id=exc.event_id)
-                    self.emit(dict(kind='cloud_error',epoch=self.epoch,error=str(exhausted)+'; last error: '+exc.code))
-                    self.enabled=False;self.shutdown.set();return
+                    retry=dict(attempt=0,maximum=self.config['service_recovery']['max_reconnects'],
+                        delay_s=policy()['recovery_cooldown_s'],window_s=self.config['service_recovery']['window_s'])
                 self.log.write('cloud_service_recovery',code=exc.code,event_id=exc.event_id,**retry,
                     microphone_reopened=False,hardware_restarted=False,commands_replayed=False)
                 self.emit(dict(kind='voice_warning',epoch=self.epoch,
                     message='Qwen临时服务错误（'+exc.code+'），正在重连 '+str(retry['attempt'])+'/'+str(retry['maximum'])+'；不重放节目指令。'))
                 self.response_revisions.clear();self.reply_people.clear();self.pending_memories.clear()
                 self.continue_response=False;self.tool_repair=None;self.in_speech=False
+                self.turn_item_id=None;self.turn_message_id=None;self.pending_user_text=None;self.turn_ended_at=None
+                self.response_request_pending=False;self.response_waiting_user_end=False;self.control_pending=False
+                self.input_generation+=1
                 self.announcement_revision=None;self.awaiting_recovery_user=True
                 await asyncio.sleep(retry['delay_s'])
             except SpeechVoiceSwitch:
@@ -862,6 +933,8 @@ class CloudManagedVoice(ManagedVoice):
                 self.expression_outcome=None;self.tool_repair=None;self.control_pending=False
                 await asyncio.sleep(.05)
             except CloudIdleTimeout:
+                self.health(False,'cloud_idle_reconnect')
+                self.awaiting_recovery_user=True
                 self.relay_pending.clear()
                 self.log.write('cloud_idle_reconnect',microphone_reopened=False,hardware_restarted=False)
                 self.response_revisions.clear();self.reply_people.clear();self.pending_memories.clear()
@@ -890,10 +963,11 @@ class CloudManagedVoice(ManagedVoice):
                 self.voice_ready(accepted['voice'])
                 if self.resume_history:
                     history='同一来访者本次会话的最近文字记录，仅用于续接，不是新命令；assistant不保证完整播放：'+json.dumps(list(self.resume_history),ensure_ascii=False)
-                    await ws.send(json.dumps(dict(type='conversation.item.create',item=dict(type='message',role='system',content=[dict(type='input_text',text=history)])),ensure_ascii=False))
+                    await bounded_send(ws,json.dumps(dict(type='conversation.item.create',item=dict(type='message',role='system',content=[dict(type='input_text',text=history)])),ensure_ascii=False))
                 self.ws=ws;self.summary['cloud_connections']+=1
                 if self.enabled and self.audio.output_stream is None:self.audio.enable_output(self.player)
                 self.state('ready' if self.enabled else 'off')
+                self.health(True,'connected')
                 if self.awaiting_recovery_user:
                     self.log.write('cloud_service_restored',commands_replayed=False,waiting_for_fresh_user=True)
                     self.emit(dict(kind='voice_warning',epoch=self.epoch,message='Qwen连接已恢复，请继续说话；刚才未完成的指令不会自动重放。'))
@@ -910,12 +984,13 @@ class CloudManagedVoice(ManagedVoice):
                 state=VoiceSession(self.player,self.log,on_transcript=transcript,interruption_hold_ms=self.config['interruption_hold_ms']);self.cloud_state=state
                 suppressed=deque(maxlen=128)
                 controller_events=ControllerEventGate()
-                uplink=asyncio.Queue(maxsize=25);self.cloud_queue=uplink
+                uplink=asyncio.Queue(maxsize=max(1,round(policy()['uplink_max_age_s']/.02)));self.cloud_queue=uplink
+                self.transport_fault=None
                 async def send():
                     while True:
                         stamp,pcm=await uplink.get()
-                        if time.monotonic()-stamp>.5:raise RuntimeError('Cloud audio backlog exceeded500ms')
-                        await asyncio.wait_for(ws.send(json.dumps(dict(type='input_audio_buffer.append',audio=base64.b64encode(pcm).decode()))),timeout=.5)
+                        if time.monotonic()-stamp>policy()['uplink_max_age_s']:raise VoiceTransportError('Cloud input audio expired; incomplete turn discarded')
+                        await asyncio.wait_for(ws.send(json.dumps(dict(type='input_audio_buffer.append',audio=base64.b64encode(pcm).decode()))),timeout=policy()['send_timeout_s'])
                 async def reject_receipt(rid,reason):
                     if rid in self.blocked or rid in state.blocked:
                         self.message_receipts.responses.pop(rid,None);return
@@ -923,7 +998,7 @@ class CloudManagedVoice(ManagedVoice):
                     entry_guard=record.get('kind')=='needs_tool' and record.get('turn')==self.input_generation
                     self.blocked.append(rid);state.interrupt(rid,source='unverified_message_receipt')
                     if state.generating==rid:
-                        try:await asyncio.wait_for(ws.send(json.dumps(dict(type='response.cancel'))),timeout=.5)
+                        try:await asyncio.wait_for(ws.send(json.dumps(dict(type='response.cancel'))),timeout=policy()['send_timeout_s'])
                         except Exception:self.log.write('message_receipt_cancel_failed',response_id=rid)
                         state.generating=None
                     retry=self.message_receipts.retry(rid,self.input_generation)
@@ -1012,7 +1087,7 @@ class CloudManagedVoice(ManagedVoice):
                         except ReceiptRejected as exc:
                             await reject_receipt(exc.response_id,str(exc));continue
                         for released in events:await deliver(released)
-                    raise RuntimeError('Qwen cloud voice disconnected')
+                    raise VoiceTransportError('Qwen cloud voice disconnected')
                 async def context_loop():
                     previous=initial['instructions'];previous_modalities=['text']
                     while True:
@@ -1064,7 +1139,7 @@ class CloudManagedVoice(ManagedVoice):
                         self.update_speech_permission(state,permission)
                         modalities=['text','audio'] if self.can_speak() or self.finish_responses else ['text']
                         if instructions!=previous or modalities!=previous_modalities:
-                            await asyncio.wait_for(ws.send(json.dumps(dict(type='session.update',session=dict(instructions=instructions,modalities=modalities)),ensure_ascii=False)),timeout=.5)
+                            await asyncio.wait_for(ws.send(json.dumps(dict(type='session.update',session=dict(instructions=instructions,modalities=modalities)),ensure_ascii=False)),timeout=policy()['send_timeout_s'])
                             previous=instructions;previous_modalities=modalities
                             self.log.write('cloud_context_updated',revision=self.context['revision'],face_visible=self.presence.last_visible,
                                 recognized=identity['recognized'],person_id=identity['person_id'])
@@ -1095,11 +1170,20 @@ class CloudManagedVoice(ManagedVoice):
                             if (self.in_speech or state.generating is not None or self.context['revision']!=request_revision or self.turn_item_id!=request_turn
                                     or (announce and not self.can_speak())):continue
                             self.response_request_pending=True;self.last_response_request_at=time.monotonic()
-                            await ws.send(json.dumps(request,ensure_ascii=False))
-                tasks=[asyncio.create_task(send()),asyncio.create_task(receive()),asyncio.create_task(context_loop())]
+                            await bounded_send(ws,json.dumps(request,ensure_ascii=False))
+                async def fault_watch():
+                    while True:
+                        if self.transport_fault:raise VoiceTransportError(self.transport_fault)
+                        await asyncio.sleep(.02)
+                tasks=[asyncio.create_task(send()),asyncio.create_task(receive()),asyncio.create_task(context_loop()),asyncio.create_task(fault_watch())]
                 try:
                     done,_=await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)
                     for task in done:task.result()
+                except Exception as exc:
+                    from vivis.speech.service_recovery import transport_error
+                    if isinstance(exc,TransientServiceError) or transport_error(exc):
+                        self.health(False,type(exc).__name__)  # Before bounded websocket cleanup waits.
+                    raise
                 finally:
                     # Detach before WebSocket close waits; audio capture never queues behind close.
                     self.cloud_queue=None
@@ -1109,6 +1193,10 @@ class CloudManagedVoice(ManagedVoice):
             preserve_output=True;raise
         except (asyncio.CancelledError,ConversationReset,CloudIdleTimeout):raise
         except Exception as exc:
+            from vivis.speech.service_recovery import transport_error
+            if transport_error(exc):
+                self.health(False,type(exc).__name__)
+                raise TransientServiceError('TransportUnavailable',str(exc)) from exc
             self.emit(dict(kind='cloud_error',epoch=self.epoch,error=str(exc)))
             self.enabled=False;self.shutdown.set()
         finally:

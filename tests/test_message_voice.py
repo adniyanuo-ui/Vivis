@@ -3,7 +3,7 @@ import asyncio
 from types import SimpleNamespace
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock,patch
 
 import numpy as np
 
@@ -49,6 +49,35 @@ class MessageVoiceTests(unittest.IsolatedAsyncioTestCase):
         player.render(player.count,time.monotonic()-20)
         self.assertTrue(await asyncio.wait_for(task,.5))
 
+    async def test_stalled_output_ends_only_current_speech(self):
+        from vivis.speech.runtime_policy import policy,PlaybackStalled
+        speaker,player,state,_=self.speaker(1)
+        with patch('vivis.speech.message_voice.policy',return_value={**policy(),'playback_stall_s':.06}):
+            with self.assertRaises(PlaybackStalled):await asyncio.wait_for(speaker.say('停滞测试',None),1)
+        self.assertTrue(state.blocked)
+        self.assertTrue(player.add('next-response',b'\0'*4800))
+
+    async def test_progressing_speech_can_exceed_stall_interval(self):
+        from vivis.speech.runtime_policy import policy
+        speaker,player,state,_=self.speaker(.2)
+        with patch('vivis.speech.message_voice.policy',return_value={**policy(),'playback_stall_s':.08}):
+            task=asyncio.create_task(speaker.say('持续有进展',None))
+            await self.wait_for(lambda:player.count>0)
+            started=time.monotonic()
+            while not task.done():
+                player.render(960,time.monotonic()-.02)
+                await asyncio.sleep(.02)
+            self.assertTrue(await task);self.assertGreater(time.monotonic()-started,.08)
+
+    async def test_tts_generation_timeout_does_not_mark_playback_complete(self):
+        from vivis.speech.runtime_policy import policy
+        speaker,player,state,_=self.speaker()
+        def slow(*_):time.sleep(.1);return None
+        speaker.engine.generate=slow
+        with patch('vivis.speech.message_voice.policy',return_value={**policy(),'message_tts_operation_s':.02}):
+            with self.assertRaises(TimeoutError):await speaker.say('生成超时',None)
+        self.assertTrue(state.blocked);self.assertEqual(player.count,0)
+
     async def test_long_tts_with_mouth_cost_does_not_starve_microphone_sender(self):
         speaker,player,state,_=self.speaker(16)
         original=player.add
@@ -70,3 +99,20 @@ class MessageVoiceTests(unittest.IsolatedAsyncioTestCase):
         # The production microphone sender rejects frames older than500ms.
         # Preserve that guard; no TTS batch should monopolize the loop near it.
         self.assertLess(max(gaps),.2,f'event loop blocked for {max(gaps):.3f}s')
+
+    async def test_cancelled_synthesis_does_not_queue_another_background_http_request(self):
+        import threading
+        from vivis.speech.message_voice import BoundedTTS
+        entered=threading.Event();release=threading.Event();calls=[]
+        def generate(text):
+            calls.append(text);entered.set();release.wait(1);return 'audio'
+        tts=BoundedTTS(SimpleNamespace(generate=generate))
+        task=asyncio.create_task(tts.generate('first'))
+        try:
+            await self.wait_for(entered.is_set);task.cancel()
+            with self.assertRaises(asyncio.CancelledError):await task
+            with self.assertRaisesRegex(RuntimeError,'still finishing'):await tts.generate('second')
+            self.assertEqual(calls,['first'])
+        finally:release.set()
+        await self.wait_for(lambda:tts.flight.done())
+        self.assertEqual(await tts.generate('third'),'audio')

@@ -19,12 +19,14 @@ from urllib.parse import urlencode,urlsplit,urlunsplit
 import wave
 
 from vivis.paths import ROOT
+from vivis.speech.runtime_policy import policy
 from vivis.speech.realtime_audio import AudioIO,VoiceBuffer,PlaybackBufferFull
 from vivis.speech.service_recovery import ServiceRecovery,transient_error
 from vivis.speech.voice_frontend import select_frontend,AEC_PROFILES
 
 
 def configuration(args):
+    policy()  # Validate live deadlines during offline configuration checks too.
     config=json.loads(args.config.read_text())
     if config.get('schema_version')!='vivis-realtime-voice-test-1.0':raise ValueError('Unsupported voice test config')
     config['frontend']=select_frontend(config.get('frontend',{'backend':'speex'}),
@@ -265,9 +267,12 @@ async def receive_event(ws,state,event):
 
 
 async def connect_session(ws,session,log):
-    await ws.send(json.dumps(dict(type='session.update',session=session),ensure_ascii=False))
+    deadline=time.monotonic()+policy()['handshake_timeout_s']
+    await asyncio.wait_for(ws.send(json.dumps(dict(type='session.update',session=session),ensure_ascii=False)),timeout=policy()['send_timeout_s'])
     for _ in range(20):
-        event=json.loads(await asyncio.wait_for(ws.recv(),timeout=15.))
+        remaining=deadline-time.monotonic()
+        if remaining<=0:raise TimeoutError('Voice session handshake deadline exceeded')
+        event=json.loads(await asyncio.wait_for(ws.recv(),timeout=remaining))
         if event.get('type')=='error':
             retryable=transient_error(event)
             if retryable:raise retryable
@@ -295,7 +300,8 @@ def check_audio_callbacks(audio,opened_at,now):
 def websocket_connection(url,key):
     from websockets.asyncio.client import connect
     return connect(url,additional_headers={'Authorization':'Bearer '+key},compression=None,
-                   open_timeout=15,close_timeout=3,ping_interval=20,ping_timeout=20,max_size=4*1024*1024,max_queue=16)
+                   open_timeout=policy()['connect_timeout_s'],close_timeout=policy()['close_timeout_s'],
+                   ping_interval=policy()['ping_interval_s'],ping_timeout=policy()['ping_timeout_s'],max_size=4*1024*1024,max_queue=16)
 
 
 async def conversation(args,config,speech,speaker,url,session,key,folder,log,summary):

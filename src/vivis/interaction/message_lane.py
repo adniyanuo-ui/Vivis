@@ -43,7 +43,14 @@ class MessageLane:
         return target
 
     async def say(self,text,request):
-        self.check(request);return await self.speak(text,request)
+        self.check(request)
+        try:return await self.speak(text,request)
+        except (asyncio.CancelledError,StaleMessageTurn):raise
+        except Exception as exc:
+            # Voice is an output of the operation, never its database result.
+            if self.result is not None:self.result['speech_status']='failed'
+            self.log('message_voice_failed',error_type=type(exc).__name__)
+            return False
 
     async def run(self,request):
         """Extraction never runs on partial ASR; it cannot read/modify the DB."""
@@ -232,4 +239,5 @@ async def extract_qwen(url,secret,session,log,text,people,hint):
                     return out
                 if event.get('type')=='response.done':raise ValueError('未能提取明确留言指令，请只补充缺少的对象或内容。')
         raise RuntimeError('Message extraction disconnected')
-    return await asyncio.wait_for(run(),timeout=12.)
+    from vivis.speech.runtime_policy import policy
+    return await asyncio.wait_for(run(),timeout=policy()['message_extract_s'])

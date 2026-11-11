@@ -324,6 +324,7 @@ def main(argv=None):
     events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_trace=asr_thread=None;active_target=None;active_program=None
     quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;preparation={};log=(output/'events.jsonl').open('w')
     ready=False;warm_ready=False;reported_fault=None;semantic=cloud=voice=None
+    voice_available=True
     def request_shutdown(*_):
         nonlocal quitting
         quitting=True
@@ -337,7 +338,7 @@ def main(argv=None):
         if not force and now-last_published<.2:return
         last_published=now
         state=dict(schema_version='vivis-program-state-1.0',updated_monotonic=time.monotonic(),
-            phase=phase,mode=session.mode_of(active_target) if active_target is not None else session.mode,
+            voice_available=voice_available,phase=phase,mode=session.mode_of(active_target) if active_target is not None else session.mode,
             desired_mode=session.mode,active_program=active_program,desired_program=session.desired if session.mode=='task' else None,
             microphone_active=ready and asr is not None and asr.poll() is None,
             microphone_pid=getattr(asr,'pid',None),
@@ -396,7 +397,7 @@ def main(argv=None):
                         try:events.put_nowait(event)
                         except queue.Full:pass
                         continue
-                    if event.get('kind') not in ('asr_final','asr_control','asr_error','ready','voice_state','voice_warning','cloud_error','cloud_transcript','cloud_action','mouth_error'):continue
+                    if event.get('kind') not in ('asr_final','asr_control','asr_error','ready','voice_state','voice_warning','cloud_error','cloud_transcript','cloud_action','mouth_error','voice_health'):continue
                     while not quitting:
                         try:events.put(event,timeout=.05);break
                         except queue.Full:
@@ -423,6 +424,16 @@ def main(argv=None):
                 try:event=events.get_nowait()
                 except queue.Empty:break
                 if event.get('kind')=='shutdown':quitting=True;continue
+                if event.get('kind')=='voice_health' and qwen_only:
+                    voice_available=bool(event['available']);record('voice_health',detail=event)
+                    if not voice_available:
+                        phase='voice_recovering';session.desired=STANDBY;session.pending_prompt=None
+                        if worker:worker.cancel()
+                        if voice:voice.enable(False)
+                        print('语音链路恢复中；停止当前任务并保持扭矩，管理器继续运行。原因：'+event['reason'],flush=True)
+                    else:
+                        print('语音链路已恢复；等待新的唤醒或接待，不续播旧节目、不重放旧指令。',flush=True)
+                    continue
                 if event.get('kind')=='mouth_error':
                     record('mouth_error',detail=event)
                     print('语音口型暂不可用，语音及本地控制继续：'+event['error'],flush=True);continue
@@ -446,7 +457,7 @@ def main(argv=None):
                     preparation['last_message']=event['message']
                     record('preparation',program=active_program,**preparation);continue
                 if event.get('kind')=='cloud_action':
-                    if not qwen_only or not voice or event.get('revision')!=voice.context_revision or quitting or fault:
+                    if not qwen_only or not voice or not voice_available or event.get('revision')!=voice.context_revision or quitting or fault:
                         record('cloud_action_stale',detail=event);continue
                     from vivis.interaction.cloud_control import controller_intent
                     try:requested=controller_intent(event.get('arguments'),session.programs,session.mode)
@@ -612,8 +623,8 @@ def main(argv=None):
             if voice:
                 if qwen_only:
                     session.pending_prompt=None
-                    voice.context(session.mode,session.desired,bool(worker and worker.ready and worker.cancelled_at is None and active_target==session.desired and not quitting and fault is None))
-                desired_voice=(not quitting and not fault and session.desired==INTERACTION and active_target==INTERACTION
+                    voice.context(session.mode,session.desired,bool(worker and worker.ready and worker.cancelled_at is None and active_target==session.desired and not quitting and fault is None and voice_available))
+                desired_voice=(voice_available and not quitting and not fault and session.desired==INTERACTION and active_target==INTERACTION
                     and worker is not None and worker.ready and worker.cancelled_at is None
                     and session.pending_prompt is None and (prompt is None or prompt.clock is None)
                     and (prompt is None or not prompt.contains(time.monotonic())))
@@ -625,7 +636,7 @@ def main(argv=None):
                 if prompt:prompt.stop()
                 if worker:worker.cancel()
                 else:break
-            elif not args.listen_only and ready and worker is None and fault is None and (voice is None or voice.released):worker=start_worker(session.desired)
+            elif not args.listen_only and ready and voice_available and worker is None and fault is None and (voice is None or voice.released):worker=start_worker(session.desired)
             if not quitting and worker is not None and prompt and (voice is None or voice.released):
                 spoken=session.take_prompt(active_target,getattr(worker,'ready',False) and worker.cancelled_at is None)
                 if spoken:prompt.play(spoken)

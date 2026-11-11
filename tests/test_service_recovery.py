@@ -32,6 +32,14 @@ class RecoveryPolicyTests(unittest.TestCase):
         self.assertEqual(retry.next(161)['attempt'],2)  #100/101 expire;102 is still in window.
         self.assertEqual(retry.next(222)['attempt'],1)
 
+    def test_network_failures_recover_but_configuration_and_disk_errors_do_not(self):
+        from vivis.speech.service_recovery import transport_error
+        from vivis.speech.runtime_policy import VoiceTransportError
+        for error in (TimeoutError(),ConnectionResetError(),VoiceTransportError('age')):
+            self.assertTrue(transport_error(error))
+        for error in (ValueError('bad settings'),RuntimeError('bad protocol'),PermissionError('disk')):
+            self.assertFalse(transport_error(error))
+
     def test_invalid_retry_policies_are_rejected(self):
         for change in (dict(max_reconnects=True),dict(window_s=float('nan')),dict(backoff_s=[0,1,2]),dict(backoff_s=[.5])):
             with self.assertRaises(ValueError):ServiceRecovery({**policy(),**change})
@@ -67,17 +75,47 @@ class RecoveryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(e['kind']=='voice_warning' for e in self.events))
         self.assertFalse(any(e['kind'] in ('cloud_error','cloud_action') for e in self.events))
 
-    async def test_persistent_service_failure_is_bounded_and_fails_closed(self):
+    async def test_persistent_service_failure_enters_cooldown_without_killing_manager(self):
         service=self.service;count=0
         async def connection():
             nonlocal count
-            count+=1;raise TransientServiceError('InternalError','persistent')
-        async def no_delay(_):pass
+            count+=1
+            if count==5:service.shutdown.set();return
+            raise TransientServiceError('InternalError','persistent')
+        delays=[]
+        async def no_delay(value):delays.append(value)
         with patch.object(service,'_connection',side_effect=connection),patch('vivis.speech.cloud_managed.asyncio.sleep',side_effect=no_delay):
             await service.cloud(0)
-        self.assertEqual(count,4);self.assertTrue(service.shutdown.is_set());self.assertFalse(service.enabled)
-        self.assertEqual(sum(e['kind']=='voice_warning' for e in self.events),3)
-        self.assertEqual(sum(e['kind']=='cloud_error' for e in self.events),1)
+        self.assertEqual(count,5);self.assertEqual(delays,[.5,1,2,30])
+        self.assertEqual(sum(e['kind']=='voice_warning' for e in self.events),4)
+        self.assertEqual(sum(e['kind']=='cloud_error' for e in self.events),0)
+        self.assertEqual(sum(e['kind']=='voice_health' and not e['available'] for e in self.events),1)
+
+    async def test_audio_failure_closes_old_owner_before_reopening_and_keeps_manager(self):
+        from test_managed_voice import FakeAudio
+        service=self.service;old=FakeAudio();service.audio=old
+        service.enabled=True;old.enable_output(service.player)
+        service.cloud_task=asyncio.create_task(asyncio.sleep(20))
+        async def connected(_):service.health(True,'test-connected')
+        opened=[]
+        class NewAudio(FakeAudio):
+            def open(self,with_output):
+                self_test.assertTrue(old.closed);opened.append(self)
+                return super().open(with_output)
+        self_test=self
+        with patch('vivis.speech.realtime_audio.AudioIO',NewAudio),patch.object(service,'cloud',side_effect=connected):
+            await service.recover_audio('synthetic callback fault')
+            await service.cloud_task
+        self.assertEqual(len(opened),1);self.assertIs(service.audio,opened[0])
+        self.assertFalse(service.shutdown.is_set());self.assertTrue(service.awaiting_recovery_user)
+        self.assertEqual([e['available'] for e in self.events if e['kind']=='voice_health'],[False,True])
+
+    async def test_uplink_overflow_invalidates_old_message_and_requests_local_reconnect(self):
+        service=self.service;old=service.message_connection;service.cloud_queue=asyncio.Queue(maxsize=1)
+        service.input_overflow()
+        self.assertIsNone(service.cloud_queue);self.assertIsNot(old,service.message_connection)
+        self.assertTrue(service.transport_fault);self.assertFalse(service.shutdown.is_set())
+        self.assertTrue(any(e['kind']=='voice_health' and not e['available'] for e in self.events))
 
     async def test_handshake_internal_error_is_typed_but_bad_key_is_not_retryable(self):
         class WS:
@@ -88,7 +126,10 @@ class RecoveryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError) as error:await connect_session(WS('InvalidApiKey'),{},Mock())
         self.assertNotIsInstance(error.exception,TransientServiceError)
 
-    async def test_real_receive_path_keeps_speaker_lease_and_recovers_until_fresh_speech(self):
+    async def test_expired_uplink_recovers_without_replaying_audio_or_old_command(self):
+        await self.test_real_receive_path_keeps_speaker_lease_and_recovers_until_fresh_speech(expired=True)
+
+    async def test_real_receive_path_keeps_speaker_lease_and_recovers_until_fresh_speech(self,expired=False):
         from test_managed_voice import FakeAudio
         service=self.service;service.audio=FakeAudio({},'',service.player)
         service.context.update(revision=1,mode='interaction',target='interaction',ready=True)
@@ -118,9 +159,16 @@ class RecoveryRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 await connections[0].messages.put(dict(type='response.created',response=dict(id='failed')))
                 await connections[0].messages.put(dict(type='response.audio_transcript.done',response_id='failed',transcript=''))
                 await connections[0].messages.put(dict(type='response.done',response=dict(id='failed',status='failed')))
-                await connections[0].messages.put(dict(type='error',event_id='injected-event',error=dict(code='InternalError',message='injected')))
+                if expired:
+                    import time
+                    await service.cloud_queue.put((time.monotonic()-1,b'\0'*640))
+                else:
+                    await connections[0].messages.put(dict(type='error',event_id='injected-event',error=dict(code='InternalError',message='injected')))
                 await until(lambda:len(sessions)==2 and service.ws is not None)
-                self.assertIs(service.audio.output_stream,stream)
+                if not expired:self.assertIs(service.audio.output_stream,stream)
+                else:
+                    self.assertTrue(any(e['kind']=='voice_health' and not e['available'] for e in self.events))
+                    self.assertFalse(any(p['type']=='input_audio_buffer.append' for p in connections[1].sent))
                 self.assertEqual(service.audio.opens,0);self.assertEqual(service.context['revision'],1)
                 self.assertIn('合成历史保留',json.dumps(connections[1].sent,ensure_ascii=False))
                 self.assertTrue(service.awaiting_recovery_user)
@@ -137,6 +185,18 @@ class RecoveryRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(any(e['kind']=='cloud_error' for e in self.events))
             finally:
                 task.cancel();await asyncio.gather(task,return_exceptions=True)
+
+class DeadlineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_handshake_has_one_total_deadline_despite_intermediate_events(self):
+        from vivis.speech.runtime_policy import policy
+        base=policy()
+        class WS:
+            async def send(self,_):pass
+            async def recv(self):
+                await asyncio.sleep(.02)
+                return json.dumps(dict(type='session.created'))
+        with patch('vivis.speech.realtime.policy',return_value={**base,'handshake_timeout_s':.055}):
+            with self.assertRaises(TimeoutError):await connect_session(WS(),{},Mock())
 
 
 if __name__=='__main__':unittest.main()

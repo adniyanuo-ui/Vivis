@@ -12,6 +12,7 @@ from scipy.signal import firwin,lfilter
 from vivis.speech.echo import ReferencePublisher,ReferenceBuffer
 from vivis.speech.voice_frontend import VoiceFrontEnd
 from vivis.speech.audio_clock import AudioStreamClock
+from vivis.speech.runtime_policy import policy
 from vivis.speech.board_reference import BoardReferenceOutput
 
 
@@ -149,7 +150,8 @@ class AudioIO:
         self.speech=speech;self.output_device=output_device;self.player=player;self.aec=aec
         self.board_reference_device=board_reference_device
         self.frontend=frontend or {}
-        self.capture=queue.Queue(maxsize=25);self.uplink=queue.Queue(maxsize=25)
+        capacity=max(1,round(policy()['uplink_max_age_s']/(speech['capture']['frame_ms']/1000)))
+        self.capture=queue.Queue(maxsize=capacity);self.uplink=queue.Queue(maxsize=capacity)
         self.stop=threading.Event();self.fault=None;self.stack=None
         self.stats=dict(captured_frames=0,processed_frames=0,callback_warnings=[],reference_covered_frames=0,
                         processing_total_s=0.,processing_max_ms=0.,capture_age_max_ms=0.,
@@ -214,7 +216,7 @@ class AudioIO:
                     observe_clock('input',timing,self.last_capture,stamp,self.stats['captured_frames'])
                     if status:warning('input',status)
                     self.capture.put_nowait((stamp,data[:,c['channel']].copy()))
-                except queue.Full:self.fault='Microphone processing backlog exceeded500ms'
+                except queue.Full:self.fault='Microphone processing queue full'
                 except Exception as exc:self.fault='Input callback: '+str(exc)
             # Open BOTH devices, map their clocks, then start. Callback execution
             # time is a watchdog observation; it must not time-warp the PCM.
@@ -277,7 +279,7 @@ class AudioIO:
                 except queue.Empty:continue
                 began=time.monotonic()
                 self.stats['capture_age_max_ms']=max(self.stats['capture_age_max_ms'],(began-stamp)*1000)
-                if time.monotonic()-stamp>.5:raise RuntimeError('Stale microphone frames exceeded500ms')
+                if time.monotonic()-stamp>policy()['uplink_max_age_s']:raise RuntimeError('Microphone audio expired')
                 if previous is not None and stamp-previous>.035:raise RuntimeError('Gap in microphone capture clock')
                 previous=stamp
                 for _ in range(64):
@@ -290,7 +292,7 @@ class AudioIO:
                 self.stats['uplink_clipped_samples']+=int(np.count_nonzero(np.abs(cleaned)>=.999))
                 pcm=lambda x:np.clip(x*32768,-32768,32767).astype('<i2').tobytes()
                 try:self.uplink.put_nowait((stamp,pcm(cleaned),pcm(near),pcm(far)))
-                except queue.Full:raise RuntimeError('Network uplink backlog exceeded500ms')
+                except queue.Full:raise RuntimeError('Processed microphone queue full')
                 self.stats['processed_frames']+=1
                 if coverage>.95:self.stats['reference_covered_frames']+=1
                 else:self.stats['reference_missing_frames']+=1

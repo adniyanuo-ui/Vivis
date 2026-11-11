@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from vivis.paths import ROOT
+from vivis.speech.runtime_policy import policy
 from vivis.speech.listen import Decoder
 from vivis.speech.realtime import configuration,VoiceSession,Journal,connect_session,websocket_connection,receive_event
 from vivis.speech.realtime_audio import AudioIO,VoiceBuffer
@@ -260,8 +261,16 @@ class ManagedVoice:
                     w=self.recorders.enter_context(wave.open(str(self.folder/(name+'_16k.wav')),'wb'))
                     w.setparams((1,2,16000,0,'NONE','not compressed'));self.writers[name]=w
                 self.frame_log=self.recorders.enter_context((self.folder/'frames.jsonl').open('w'))
-            self.start_decoder();devices=self.audio.open(with_output=False)
-            self.summary['microphone_opens']+=1;self.opened=time.monotonic();self.last_input=self.opened
+            self.start_decoder()
+            try:
+                devices=await asyncio.wait_for(asyncio.to_thread(self.audio.open,with_output=False),policy()['audio_open_s'])
+                self.summary['microphone_opens']+=1
+            except (asyncio.TimeoutError,ValueError,TypeError):raise
+            except Exception as exc:
+                if not hasattr(self,'recover_audio'):raise
+                devices={}
+                self.audio_recovery=asyncio.create_task(self.recover_audio('Audio startup: '+str(exc)))
+            self.opened=time.monotonic();self.last_input=self.opened
             ready=False
             reported_mouth_warning=None
             while not self.shutdown.is_set():
@@ -272,15 +281,31 @@ class ManagedVoice:
                 warning=getattr(self.mouth,'warning',None)
                 if warning and warning!=reported_mouth_warning:
                     reported_mouth_warning=warning;self.emit(dict(kind='mouth_error',error=warning))
-                if self.audio.fault:raise RuntimeError(self.audio.fault)
+                recovery=getattr(self,'audio_recovery',None)
+                if recovery is not None and recovery.done():
+                    recovery.result();self.audio_recovery=None;recovery=None
+                if recovery is not None:
+                    for _ in range(32):
+                        try:self.request(self.controls.get_nowait())
+                        except queue.Empty:break
+                    await self.apply_mode()
+                    await asyncio.sleep(.02);continue
+                audio_fault=self.audio.fault
+                if not audio_fault and now-(self.audio.last_capture or self.opened)>policy()['callback_stall_s']:
+                    audio_fault='Microphone callback stalled'
+                if not audio_fault and now-self.last_input>policy()['callback_stall_s']:
+                    audio_fault='Processed microphone stalled'
+                if (not audio_fault and self.audio.output_stream is not None
+                        and now-(self.audio.last_output or self.audio.output_opened_at)>policy()['callback_stall_s']):
+                    audio_fault='Voice output callback stalled'
+                if audio_fault:
+                    if hasattr(self,'recover_audio'):
+                        self.audio_recovery=asyncio.create_task(self.recover_audio(audio_fault));continue
+                    raise RuntimeError(audio_fault)
                 if self.asr_fault:raise RuntimeError(self.asr_fault)
                 if self.cloud_task is not None and self.cloud_task.done():
                     try:self.cloud_task.result()
                     except asyncio.CancelledError:pass
-                if now-(self.audio.last_capture or self.opened)>1:raise RuntimeError('Microphone callback watchdog')
-                if now-self.last_input>1:raise RuntimeError('Processed microphone watchdog')
-                if self.audio.output_stream is not None and now-(self.audio.last_output or self.audio.output_opened_at)>1:
-                    raise RuntimeError('Voice output callback watchdog')
                 for _ in range(32):
                     try:command=self.controls.get_nowait()
                     except queue.Empty:break
@@ -303,6 +328,8 @@ class ManagedVoice:
                     if self.cloud_queue is not None:
                         try:self.cloud_queue.put_nowait((stamp,pcm))
                         except asyncio.QueueFull:
+                            if hasattr(self,'input_overflow'):
+                                self.input_overflow();continue
                             self.emit(dict(kind='cloud_error',epoch=self.epoch,error=('Cloud queue full; no local speech fallback' if self.speech['managed_voice'].get('control_backend')=='qwen_realtime' else 'Cloud queue full; local control continues')))
                             self.enabled=False;self.cloud_task.cancel()
                     if not ready:
@@ -317,6 +344,8 @@ class ManagedVoice:
                 await asyncio.sleep(.005)
         finally:
             self.shutdown.set()
+            if getattr(self,'audio_recovery',None):
+                self.audio_recovery.cancel();await asyncio.gather(self.audio_recovery,return_exceptions=True)
             if self.cloud_task:
                 self.cloud_task.cancel();await asyncio.gather(self.cloud_task,return_exceptions=True)
             self.audio.close()

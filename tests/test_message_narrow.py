@@ -96,3 +96,21 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.lane.run(self.request('bob','补充这条。'))
         self.assertNotIn('未经授权',self.store.get(tid)['content'])
         self.assertFalse(self.lane.result['saved'])
+
+    async def test_voice_decoder_failure_after_commit_cannot_report_unsaved_or_duplicate(self):
+        async def broken(*_):raise ValueError('synthetic malformed TTS WAV')
+        self.lane.speak=broken
+        request=self.request();await self.lane.run(request)
+        self.assertTrue(self.lane.result['saved']);self.assertEqual(len(self.store.list('all')),1)
+        await self.lane.run(request)
+        self.assertTrue(self.lane.result['saved']);self.assertEqual(len(self.store.list('all')),1)
+        self.assertEqual(self.store.list('all')[0]['status'],'pending')
+
+    async def test_query_voice_failure_preserves_read_result_without_retrying_as_database_failure(self):
+        await self.save();calls=[]
+        async def broken(*_):calls.append(True);raise ValueError('bad TTS WAV')
+        self.lane.speak=broken;self.answer=dict(action='query',status='active')
+        await self.lane.run(self.request(text='保存了吗？'))
+        self.assertEqual(self.lane.result['operation_status'],'read')
+        self.assertEqual(self.lane.result['speech_status'],'failed')
+        self.assertEqual(len(calls),1);self.assertEqual(len(self.store.list('all')),1)

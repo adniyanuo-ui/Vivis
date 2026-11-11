@@ -37,3 +37,17 @@ class ServiceRecovery:
         if len(self.attempts)>=self.limit:raise RuntimeError('Qwen transient recovery exhausted within '+str(self.window)+' seconds')
         self.attempts.append(now)
         return dict(attempt=len(self.attempts),maximum=self.limit,delay_s=self.delays[len(self.attempts)-1],window_s=self.window)
+
+
+def transport_error(exc):
+    from vivis.speech.runtime_policy import VoiceTransportError
+    import errno
+    import socket
+    if isinstance(exc,(VoiceTransportError,TimeoutError,ConnectionError,socket.gaierror)):return True
+    if isinstance(exc,OSError) and exc.errno in (errno.ENETUNREACH,errno.ENETDOWN,errno.EHOSTUNREACH,errno.ETIMEDOUT):return True
+    try:
+        from websockets.exceptions import ConnectionClosed,InvalidStatus
+        if isinstance(exc,ConnectionClosed):return True
+        if isinstance(exc,InvalidStatus):return exc.response.status_code in (408,429,500,502,503,504)
+    except ImportError:pass
+    return False
