@@ -24,7 +24,7 @@ def config(path):return json.loads((ROOT/path).read_text())
 class CloudPolicyTests(unittest.TestCase):
     def test_tools_are_limited_to_programme_and_readonly_context(self):
         declared=tools(['song','script'])
-        self.assertEqual({t['name'] for t in declared},{'robot_program','get_robot_status','search_person_memory','set_expression','set_speech_dialect','search_robot_memory','manage_robot_task','courier_pickup'})
+        self.assertEqual({t['name'] for t in declared},{'robot_program','get_robot_status','search_person_memory','set_expression','set_speech_dialect','search_robot_memory','courier_pickup'})
         self.assertEqual(controller_intent(dict(action='wake',program='song'),{'song'},'standby'),dict(kind='wake',followup=dict(kind='select',program='song')))
         self.assertEqual(controller_intent(dict(action='stop',program=''),{'song'},'task'),dict(kind='interaction'))
         for args in (dict(action='play',program='missing'),dict(action='play',program=''),dict(action='shell',program=''),dict(action='play',program='song',position=0)):

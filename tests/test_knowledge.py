@@ -138,7 +138,7 @@ class KnowledgeTests(unittest.TestCase):
         for text in ('前台接待兼首席情绪陪伴官','六层仿生皮肤','首钢','魏宇飞','CEO','只介绍能力类别'):
             self.assertIn(text,session['instructions'])
         self.assertEqual(session['voice'],c['voice']);self.assertEqual(session['speech_rate'],c['speech_rate'])
-        self.assertEqual({t['name'] for t in session['tools']},{'robot_program','get_robot_status','search_person_memory','set_expression','set_speech_dialect','search_robot_memory','manage_robot_task','courier_pickup'})
+        self.assertEqual({t['name'] for t in session['tools']},{'robot_program','get_robot_status','search_person_memory','set_expression','set_speech_dialect','search_robot_memory','courier_pickup'})
         self.assertIsNone(Knowledge(ROOT/'configs/robots/mojia/robot.json').config)
         self.assertEqual(Knowledge(ROOT/'configs/robots/mojia/robot.json').person_instructions(),'')
 

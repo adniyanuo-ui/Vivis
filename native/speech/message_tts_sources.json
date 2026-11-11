@@ -1,0 +1,10 @@
+{
+  "provider": "Alibaba Cloud Model Studio",
+  "configuration": "configs/perception/speech.json#/tts",
+  "existing_voice_provenance": "native/speech/cloud_tts_sources.json",
+  "api_reference": "https://help.aliyun.com/en/model-studio/qwen-tts-api",
+  "purpose": "Synthesize trusted database receipts, query lists and delivery text without conversational rewriting. Reuse the accepted voice configuration and original audio/AEC/A2F route.",
+  "personal_text_cache": false,
+  "credentials": "Use the existing process-local API key loader; never put keys, signed URLs or personal data in Git.",
+  "completion": "Record announced only after every corresponding PCM sample is consumed and its final DAC time has passed. Cancellation leaves the message pending."
+}

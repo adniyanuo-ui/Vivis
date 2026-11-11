@@ -4,32 +4,13 @@ from collections import OrderedDict
 import re
 import time
 
+from vivis.interaction.message_status import RECEIPTS
 
-RECEIPTS={
-    'created':'这条留言已保存，我会在确认收件人身份后转告。',
-    'merged':'这条留言已合并更新，不会重复建单。',
-    'unchanged':'这条留言已经记录，不会重复建单。',
-    'already_acknowledged':'这条留言之前已确认送达，不会再次提醒。',
-    'acknowledged':'已记录您收到这条留言，不会再重复提醒。',
-    'cancelled':'这条留言已取消。',
-    'failed':'这次留言操作失败了，请再说一遍。',
-    'clarify':'这是补充之前的留言，还是另外一条新留言？',
-    'meaning':'刚才留言里的关键内容我没有听清，请再说一遍。这条留言还没有保存。',
-    'recipient':'这条留言是给谁的？请告诉我收件人。这条留言还没有保存。',
-    'unsupported_recipient':'目前还不能自动向未登记的访客转告，这条留言没有保存。',
-    'delivery_scope':'我只负责保存和转告留言。您想给谁留什么话？',
-    'not_saved':'这条留言还没有保存成功，请再说一遍。',
-    'source_timeout':'本轮识别文字暂未返回，这条留言尚未保存。',
-}
-
-MESSAGE_REQUEST=re.compile(r'留.{0,2}言|转告|捎.{0,2}话|带.{0,2}话|传话|取件码|快递|告诉[他她]|通知|'
+MESSAGE_REQUEST=re.compile(r'留.{0,2}言|转告|捎.{0,2}话|带.{0,2}话|传话|取件码|快递|告诉(?!我)|通知|'
     r'(?:跟|和|同).{1,12}(?:说一声|说一下|讲一声|讲一下)|让.{1,16}(?:帮|买|寄|带)|'
     r'(?:帮|替|麻烦).{0,12}办.{0,6}(?:件事|事情)|第[一二三123].{0,2}件事',re.I)
-MESSAGE_ENTRY=('本轮可能是留言或委托请求，目前没有数据库成功回执。禁止口头说已记下、会告诉、会办理、没问题或包在身上。'
-    '若用户只是查询已有留言，调用list；正式转述已有留言用prepare_relay。'
-    '语义和内容明确时先调用manage_robot_task create；关键内容不清楚用clarify并指定meaning，收件人不清楚用recipient，'
-    '普通未登记收件人用unsupported_recipient；退件取件码例外，调用courier_pickup，快递员不需要人脸身份。'
-    '只要真实闲聊则clarify_topic=chat。不要猜买的东西，听成Uber等不明商品名必须追问。')
+MESSAGE_ENTRY=('普通熟人留言由最终识别文字启动本地固定流程；聊天模型没有保存、修改、确认留言的工具，不能口头承诺已保存或会转告。'
+    '退件码交接先调用courier_pickup，快递员不需要人脸身份。普通聊天不假造数据库结果，不猜不明物品。')
 MESSAGE_PROMISE=re.compile(r'已经.{0,5}(?:保存|记录|记下|安排|办好|办完|完成|转告)|我.{0,4}(?:会|就|已).{0,8}(?:告诉|转告|通知|记下|记录|保存|办理)|包在我身上|我记下了')
 NEW_MESSAGE_PROMISE=re.compile(r'我.{0,4}(?:会|就|已).{0,8}(?:告诉|转告|通知|记下|记录|保存|办理)|包在我身上|我记下了|已为您.{0,5}(?:保存|记录)|已帮您.{0,5}(?:保存|记录)')
 

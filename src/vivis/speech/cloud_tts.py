@@ -1,4 +1,4 @@
-"""Explicit preparation-only Qwen-TTS adapter. Runtime needs only cached WAVs."""
+"""Qwen TTS for prepared prompts and trusted message text, with no intent logic."""
 import argparse
 import copy
 import getpass

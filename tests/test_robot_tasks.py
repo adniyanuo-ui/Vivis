@@ -15,7 +15,7 @@ from unittest.mock import Mock,patch
 
 from vivis.paths import ROOT
 from vivis.interaction.memory import PersonMemory
-from vivis.interaction.robot_tasks import RobotTasks,relay_matches,ReconciliationRequired,MessageMeaningUncertain
+from vivis.interaction.robot_tasks import RobotTasks,relay_matches,MessageMeaningUncertain
 
 
 def read(name):return json.loads((ROOT/name).read_text())
@@ -59,33 +59,35 @@ print(json.dumps(t.due('bob','2026-11-11T09:00:01+08:00')))
         self.tasks.bind_source('session','utterance',mid)
         self.assertEqual(self.tasks.get(task['task_id'])['source_message_id'],mid)
 
-    def test_exact_restatement_survives_sessions_and_does_not_reopen_acknowledged_message(self):
-        task=self.create()
-        self.tasks.acknowledge(task['task_id'],'bob','received')
-        again=self.tasks.create(dict(action='create',kind='message',title='换个标题',content='请准备两份资料！',recipient_id='bob'),
-            'alice','another-session','another-turn',None,self.people)
+    def test_same_request_retry_does_not_reopen_acknowledged_message(self):
+        task=self.create();self.tasks.acknowledge(task['task_id'],'bob','received')
+        again=self.create()
         self.assertEqual(again['task_id'],task['task_id']);self.assertEqual(again['effect'],'already_acknowledged')
         self.assertEqual(len(self.tasks.list('all')),1);self.assertFalse(self.tasks.due('bob'))
 
-    def test_semantic_restatement_requires_review_then_merges_complete_content(self):
+    def test_new_request_does_not_scan_history_even_when_content_is_similar(self):
         task=self.create()
-        args=dict(action='create',kind='message',title='补充',content='请准备两份资料，并带到会议室。',recipient_id='bob')
-        with self.assertRaises(ReconciliationRequired) as caught:
-            self.tasks.create(args,'alice','s2','u2',None,self.people)
-        self.assertEqual(caught.exception.candidates[0]['task_id'],task['task_id'])
-        result=self.tasks.create(dict(args,merge_task_id=task['task_id'],merge_reason='同一委托的地点补充'),
-            'alice','s2','u2',None,self.people)
-        self.assertEqual(result['task_id'],task['task_id']);self.assertEqual(result['content'],args['content'])
-        self.assertEqual(len(self.tasks.list('all')),1)
+        other=self.tasks.create(dict(action='create',kind='message',title='新请求',content='请准备两份资料。',recipient_id='bob'),
+            'alice','new-session','new-turn',None,self.people)
+        self.assertNotEqual(task['task_id'],other['task_id']);self.assertEqual(len(self.tasks.list('all')),2)
 
-    def test_distinct_messages_need_explicit_semantic_review_and_cannot_merge_across_recipients(self):
-        task=self.create();args=dict(action='create',kind='message',title='另件',content='下午请带钥匙。',recipient_id='bob')
-        other=self.tasks.create(dict(args,distinct_from=[task['task_id']],merge_reason='带钥匙与准备资料是不同委托'),
-            'alice','s2','u2',None,self.people)
-        self.assertNotEqual(task['task_id'],other['task_id'])
-        with self.assertRaisesRegex(ValueError,'same recipient'):
-            self.tasks.create(dict(args,recipient_id='alice',merge_task_id=task['task_id'],merge_reason='错误对象'),
-                'alice','s3','u3',None,self.people)
+    def test_explicit_supplement_is_idempotent_and_cannot_update_another_owner(self):
+        task=self.create()
+        changed=self.tasks.supplement(task['task_id'],'alice','s2','u2',None,'请带到前台。')
+        again=self.tasks.supplement(task['task_id'],'alice','s2','u2',None,'请带到前台。')
+        self.assertEqual(changed['content'],again['content']);self.assertEqual(changed['content'].count('前台'),1)
+        with self.assertRaises(ValueError):self.tasks.supplement(task['task_id'],'bob','s','u3',None,'不属于我。')
+
+    def test_authority_change_before_commit_rolls_back_the_entire_request(self):
+        calls=[]
+        def guard():
+            calls.append(1)
+            if len(calls)==2:raise ValueError('new speaker')
+        with self.assertRaises(ValueError):
+            self.tasks.create(dict(action='create',kind='message',title='测试',content='准备资料。',recipient_id='bob'),
+                'alice','s','u',None,self.people,guard=guard)
+        self.assertFalse(self.tasks.list('all'))
+        with self.memory.db() as db:self.assertEqual(db.execute('SELECT COUNT(*) FROM message_writes').fetchone()[0],0)
 
     def test_acknowledgement_is_persistent_delivery_only_after_restart(self):
         task=self.create();result=self.tasks.acknowledge(task['task_id'],'bob','收到')
@@ -170,310 +172,124 @@ print(json.dumps(t.due('bob','2026-11-11T09:00:01+08:00')))
 class RobotTaskRuntimeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         from test_cloud_control import CloudBackendTests
-        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
-        self.events=[];self.service=CloudBackendTests().service(self.tmp.name,self.events);self.addCleanup(self.service.log.close)
-        self.service.memory=PersonMemory(read('configs/interaction/memory.json'),self.tmp.name)
-        self.service.tasks=RobotTasks(self.service.memory,read('configs/interaction/tasks.json'))
-        self.service.knowledge.people={'alice':dict(display_name='测试甲',preferred_address='甲工'),'bob':dict(display_name='测试乙',preferred_address='小王')}
-        self.service.context.update(revision=1,mode='interaction',target='interaction',ready=True)
-        self.service.response_revisions['r']=1;self.service.enabled=True;self.service.presence.wake()
-        self.service.turn_person='alice';self.service.turn_item_id='human-turn';self.service.turn_ended_at=time.monotonic()
-        self.service.pending_user_text='请给小王留言，准备两份资料。'
-        self.service.identified_person=lambda:'alice'
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.events=[]
+        self.service=CloudBackendTests().service(self.tmp.name,self.events);self.addCleanup(self.service.log.close)
+        s=self.service;s.memory=PersonMemory(read('configs/interaction/memory.json'),self.tmp.name)
+        s.tasks=RobotTasks(s.memory,read('configs/interaction/tasks.json'));s.tasks.c=dict(s.tasks.c,auto_announce=False)
+        s.knowledge.people={'alice':dict(display_name='测试甲',preferred_address='甲工'),'bob':dict(display_name='测试乙',preferred_address='小乙')}
+        s.context.update(revision=1,mode='interaction',target='interaction',ready=True)
+        s.enabled=True;s.presence.wake();self.person='alice';s.identified_person=lambda:self.person
+        self.answers=dict(action='create',recipient_id='bob',content='请准备两份资料。');self.spoken=[]
+        async def extract(*_):return dict(self.answers)
+        async def speak(text,request):self.spoken.append(text);return True
+        s.extract_message=extract;s.speak_message=speak
         self.sent=[]
-        async def send(s):self.sent.append(json.loads(s))
-        self.ws=SimpleNamespace(send=send)
+        async def send(text):self.sent.append(json.loads(text))
+        self.ws=SimpleNamespace(send=send);s.cloud_state=SimpleNamespace(interrupt=Mock(),generating=None)
 
-    async def tool(self,args,call='task'):
-        await self.service.tool(self.ws,dict(call_id=call,name='manage_robot_task',response_id='r',arguments=json.dumps(args)))
-        return json.loads(self.sent[-1]['item']['output'])
+    def final(self,text='给小乙留言，请准备两份资料。'):
+        s=self.service;s.input_generation+=1;s.begin_user_turn('turn'+str(s.input_generation));s.turn_ended_at=time.monotonic()
+        event=dict(type='conversation.item.input_audio_transcription.completed',item_id=s.turn_item_id,transcript=text)
+        s.remember(event);return event
 
-    async def create(self):
-        result=await self.tool(dict(action='create',kind='message',title='准备资料',content='请准备两份资料。',recipient_id='bob'))
-        self.assertTrue(result['accepted']);return result['result']
+    async def finish(self):
+        await asyncio.wait_for(self.service.messages().task,2.)
 
-    async def test_create_requires_current_user_not_historical_context_and_update_has_actor(self):
-        task=await self.create();self.assertEqual(task['creator'],'alice')
-        self.service.turn_item_id=None
-        bad=await self.tool(dict(action='update',task_id=task['task_id'],status='cancelled'),'historical')
-        self.assertFalse(bad['accepted']);self.assertEqual(self.service.tasks.get(task['task_id'])['status'],'pending')
+    async def test_final_text_is_the_only_start_and_duplicate_final_does_not_save_twice(self):
+        s=self.service;s.begin_user_turn('early')
+        s.final_message(dict(type='conversation.item.input_audio_transcription.delta',item_id='early',text='给小乙'),s.cloud_state)
+        self.assertIsNone(s.message_lane)
+        event=self.final();s.final_message(event,s.cloud_state);await self.finish()
+        s.final_message(event,s.cloud_state)
+        self.assertEqual(len(s.tasks.list('all')),1);self.assertEqual(len(self.spoken),1)
+        self.assertEqual(self.spoken[0],'已保存，等见到小乙后转告。')
+        self.assertFalse(hasattr(s,'source_waiters'))
 
-    async def test_speaker_change_cannot_reuse_another_persons_current_turn(self):
-        self.service.identified_person=lambda:'bob'
-        result=await self.tool(dict(action='create',kind='message',title='测试',content='请准备资料。',recipient_id='bob'))
-        self.assertFalse(result['accepted']);self.assertFalse(self.service.tasks.list())
+    async def test_an_early_chat_tool_can_never_write_or_queue_a_message(self):
+        s=self.service;s.response_revisions['r']=1
+        await s.tool(self.ws,dict(name='manage_robot_task',call_id='early',response_id='r',arguments=json.dumps(dict(action='create',kind='message',title='测试',content='准备资料。',recipient_id='bob'))))
+        self.assertFalse(json.loads(self.sent[-1]['item']['output'])['accepted']);self.assertFalse(s.tasks.list('all'))
 
-    async def test_fresh_receipt_ack_can_close_message_while_old_relay_guard_remains(self):
-        task=await self.create();service=self.service
-        service.identified_person=lambda:'bob';service.turn_person='bob'
-        service.turn_item_id='recipient-ack';service.turn_ended_at=time.monotonic()
-        service.relay_pending[task['task_id']]=dict(recipient='bob',content=task['content'],revision=1,response_id=None)
-        result=await self.tool(dict(action='acknowledge',task_id=task['task_id']),'ack')
-        self.assertTrue(result['accepted']);self.assertTrue(result['durable'])
-        self.assertIn('收到',result['spoken_receipt']);self.assertNotIn('办完',result['spoken_receipt'])
-        self.assertEqual(service.tasks.get(task['task_id'])['status'],'completed')
-        self.assertFalse(service.tasks.due('bob'));self.assertFalse(service.relay_pending)
+    async def test_changed_speaker_invalidates_extraction_before_write(self):
+        s=self.service;started=asyncio.Event();end=asyncio.Event()
+        async def extract(*_):started.set();await end.wait();return dict(self.answers)
+        s.extract_message=extract;s.final_message(self.final(),s.cloud_state)
+        await started.wait();self.person='bob';end.set();await self.finish()
+        self.assertFalse(s.tasks.list('all'));self.assertFalse(self.spoken)
 
-    async def test_late_relay_request_from_prior_user_turn_cannot_reinstall_guard(self):
-        task=await self.create();service=self.service;service.identified_person=lambda:'bob'
-        service.response_inputs['r']=0;service.input_generation=1
-        result=await self.tool(dict(action='prepare_relay',task_id=task['task_id']),'late-relay')
-        self.assertFalse(result['accepted']);self.assertEqual(result['status'],'stale_user_turn')
-        self.assertFalse(service.relay_pending);self.assertIsNone(service.tasks.get(task['task_id'])['last_attempt'])
-
-    async def test_failed_commit_rolls_back_and_returns_only_failure_receipt(self):
-        task=await self.create();service=self.service;service.identified_person=lambda:'bob';service.turn_person='bob'
-        with patch.object(service.tasks,'event',side_effect=sqlite3.OperationalError('simulated commit failure')):
-            result=await self.tool(dict(action='acknowledge',task_id=task['task_id']),'failed-write')
-        self.assertFalse(result['accepted']);self.assertIn('操作失败',result['spoken_receipt'])
-        self.assertEqual(service.tasks.get(task['task_id'])['status'],'pending')
-
-    async def test_physical_work_tracking_is_not_exposed(self):
-        result=await self.tool(dict(action='create',kind='todo',title='采购',content='买资料。'),'no-todo')
-        self.assertFalse(result['accepted']);self.assertFalse(self.service.tasks.list('all'))
-
-    async def test_ambiguous_object_is_forced_to_clarify_even_if_model_attempts_create(self):
-        service=self.service;service.pending_user_text='让小王帮我买一个uber。'
-        result=await self.tool(dict(action='create',kind='message',title='采购',content='买一个Uber。',recipient_id='bob'),'ambiguous')
-        self.assertFalse(result['accepted']);self.assertEqual(result['status'],'meaning_clarification_required')
-        self.assertIn('还没有保存',result['spoken_receipt']);self.assertFalse(service.tasks.list('all'))
-
-    async def test_mutation_waits_for_final_source_transcript_instead_of_guessing(self):
-        service=self.service;service.begin_user_turn('human-turn');service.turn_ended_at=time.monotonic()
-        args=dict(action='create',kind='message',title='资料',content='准备两份资料。',recipient_id='bob')
-        event=dict(call_id='before-asr',name='manage_robot_task',response_id='r',arguments=json.dumps(args))
-        await service.tool(self.ws,event)
-        await service.tool(self.ws,event)  # Duplicate network event is not a second job.
-        self.assertFalse(self.sent);self.assertEqual(len(service.source_waiters),1)
-        self.assertTrue(service.message_source_waiting);self.assertFalse(service.tasks.list('all'))
-        service.remember(dict(type='conversation.item.input_audio_transcription.completed',item_id='human-turn',transcript='给小王留一句，准备两份资料。'))
-        await service.resume_source_tools(self.ws)
-        self.assertEqual(self.sent[-1]['item']['call_id'],'before-asr')
-        result=json.loads(self.sent[-1]['item']['output'])
-        self.assertTrue(result['accepted']);self.assertEqual(len(service.tasks.list('all')),1)
-        self.assertEqual(service.tasks.list('all')[0]['source_message_id'],service.turn_message_id)
-        await service.resume_source_tools(self.ws);self.assertEqual(len(self.sent),1)
-        self.assertFalse(service.message_source_waiting)
-
-    async def test_deferred_source_cannot_write_after_new_turn_or_mode_change(self):
-        for change in ('turn','mode','person'):
-            s=self.service;s.pending_user_text=None;s.turn_item_id='original-'+change
-            args=dict(action='create',kind='message',title='资料',content='准备资料。',recipient_id='bob')
-            await s.tool(self.ws,dict(call_id='pending-'+change,name='manage_robot_task',response_id='r',arguments=json.dumps(args)))
-            if change=='turn':s.input_generation+=1
-            elif change=='mode':s.context['revision']+=1
-            else:s.turn_person='bob'
-            s.pending_user_text='新话轮不能授权旧请求。'
-            await s.resume_source_tools(self.ws)
-            self.assertEqual(json.loads(self.sent[-1]['item']['output'])['status'],'stale_user_turn')
-            self.assertFalse(s.tasks.list('all'))
-            s.context['revision']=1;s.response_revisions['r']=1;s.turn_person='alice'
-
-    async def test_source_timeout_reports_not_saved_without_requesting_full_repetition(self):
-        s=self.service;s.pending_user_text=None
-        args=dict(action='create',kind='message',title='资料',content='准备资料。',recipient_id='bob')
-        await s.tool(self.ws,dict(call_id='pending',name='manage_robot_task',response_id='r',arguments=json.dumps(args)))
-        s.source_waiters['pending']['deadline']=0
-        await s.resume_source_tools(self.ws)
-        result=json.loads(self.sent[-1]['item']['output'])
-        self.assertEqual(result['status'],'source_transcript_timeout');self.assertIn('尚未保存',result['spoken_receipt'])
-        self.assertFalse(s.tasks.list('all'));self.assertFalse(s.source_waiters)
-
-    async def test_semantic_review_does_not_turn_internal_check_into_a_question(self):
+    async def test_readback_failure_does_not_speak_success_or_claim_rollback(self):
         s=self.service
-        first=await self.create()
-        result=await self.tool(dict(action='create',kind='message',title='采购',content='买一个USB扩展坞。',recipient_id='bob'),'different')
-        self.assertEqual(result['status'],'semantic_reconciliation_required')
-        self.assertNotIn('spoken_receipt',result);self.assertEqual(s.message_receipts.pending['kind'],'needs_tool')
-        self.assertEqual(s.message_reconciliation['request']['content'],'买一个USB扩展坞。')
-        result=await self.tool(dict(action='create',kind='message',title='采购',content='买一个USB扩展坞。',recipient_id='bob',
-            distinct_from=[first['task_id']],merge_reason='资料准备和购买扩展坞是不同事项。'),'reviewed')
-        self.assertTrue(result['accepted']);self.assertEqual(len(s.tasks.list('all')),2)
-        self.assertFalse(s.message_reconciliation)
+        with patch.object(s.tasks,'get',side_effect=RuntimeError('readback failed after commit')):
+            s.final_message(self.final(),s.cloud_state);await self.finish()
+        self.assertEqual(len(s.tasks.list('all')),1)
+        self.assertIn('尚未确认',self.spoken[-1]);self.assertNotIn('已保存',self.spoken[-1])
+        self.assertIsNone(s.messages().result['saved'])
 
-    async def test_unknown_identity_can_be_asked_to_clarify_without_reading_or_writing_tasks(self):
-        self.service.identified_person=lambda:None
-        result=await self.tool(dict(action='clarify',clarify_topic='meaning'),'clarify-unknown')
-        self.assertTrue(result['accepted']);self.assertFalse(result['durable'])
-        self.assertIn('没有听清',result['spoken_receipt']);self.assertIn('还没有保存',result['spoken_receipt'])
-        self.assertFalse(self.service.tasks.list('all'))
+    async def test_automatic_relay_marks_announced_only_after_complete_playback(self):
+        s=self.service;s.final_message(self.final(),s.cloud_state);await self.finish()
+        tid=s.tasks.list('all')[0]['task_id'];self.person='bob';s.tasks.c=dict(s.tasks.c,auto_announce=True)
+        s.continue_response=False;s.announcement_revision=None
+        started=asyncio.Event();end=asyncio.Event()
+        async def speak(*_):started.set();await end.wait();return True
+        s.messages().speak=speak;s.schedule_task_notice(SimpleNamespace(generating=None))
+        await started.wait();self.assertEqual(s.tasks.get(tid)['status'],'pending')
+        s.schedule_task_notice(SimpleNamespace(generating=None))  # No duplicate notice while busy.
+        end.set();await self.finish()
+        self.assertEqual(s.tasks.get(tid)['status'],'announced');self.assertIn(tid,s.task_visit_announced)
 
-    async def test_actual_receive_loop_holds_false_success_and_plays_verified_database_receipt(self):
-        from test_managed_voice import FakeAudio
-        from vivis.speech.message_receipts import RECEIPTS
-        service=self.service;service.audio=FakeAudio();service.conversation_person='alice'
-        service.presence.visible=Mock(return_value=True);service.announcement_revision=None
-        service.reception.c=dict(service.reception.c,enabled=False)
-        messages=asyncio.Queue()
-        class WS:
-            async def __aenter__(self):return self
-            async def __aexit__(self,*_):return False
-            async def send(self,_):pass
-            def __aiter__(self):return self
-            async def __anext__(self):return json.dumps(await messages.get())
-        async def connect(_ws,session,_log):return session
-        with patch('vivis.speech.cloud_managed.websocket_connection',return_value=WS()), \
-             patch('vivis.speech.cloud_managed.connect_session',side_effect=connect):
-            task=asyncio.create_task(service._connection())
-            async def until(predicate):
-                deadline=time.monotonic()+2
-                while not predicate():
-                    if task.done():task.result()
-                    if time.monotonic()>deadline:raise AssertionError('Receipt integration timed out')
-                    await asyncio.sleep(.01)
-            try:
-                await until(lambda:service.ws is not None)
-                service.last_response_request_at=time.monotonic()
-                await messages.put(dict(type='error',error=dict(type='invalid_request_error',code='invalid_value',
-                    param='response.create',message='Cannot create response while user is speaking.')))
-                await until(lambda:service.response_waiting_user_end)
-                self.assertFalse(task.done());self.assertFalse(service.shutdown.is_set())
-                await messages.put(dict(type='input_audio_buffer.speech_started',item_id='fresh-message'))
-                await messages.put(dict(type='input_audio_buffer.speech_stopped',item_id='fresh-message'))
-                await until(lambda:not service.response_waiting_user_end)
-                # Reproduce the real failure: model promises without invoking
-                # ANY tool, and the final ASR text arrives after its reply.
-                await messages.put(dict(type='response.created',response=dict(id='skipped-tool')))
-                pcm=base64.b64encode(b'\1\0'*480).decode()
-                await messages.put(dict(type='response.audio.delta',response_id='skipped-tool',delta=pcm))
-                await messages.put(dict(type='response.audio_transcript.done',response_id='skipped-tool',transcript='我记下了，会告诉小王的。'))
-                await messages.put(dict(type='conversation.item.input_audio_transcription.completed',item_id='fresh-message',transcript='请给小王留言，让他准备两份资料。'))
-                await until(lambda:'skipped-tool' in service.blocked)
-                self.assertEqual(service.player.count,0);self.assertFalse(service.tasks.list('all'))
-                await messages.put(dict(type='response.done',response=dict(id='skipped-tool',status='completed')))
-                await messages.put(dict(type='input_audio_buffer.speech_started',item_id='late-source'))
-                await messages.put(dict(type='input_audio_buffer.speech_stopped',item_id='late-source'))
-                await messages.put(dict(type='response.created',response=dict(id='create')))
-                args=dict(action='create',kind='message',title='测试留言',content='请准备两份资料。',recipient_id='bob')
-                await messages.put(dict(type='response.function_call_arguments.done',response_id='create',name='manage_robot_task',call_id='write',arguments=json.dumps(args)))
-                await until(lambda:'write' in service.source_waiters)
-                self.assertFalse(service.tasks.list('all'))
-                await messages.put(dict(type='conversation.item.input_audio_transcription.completed',item_id='late-source',transcript='给小王留言，请准备两份资料。'))
-                await until(lambda:len(service.tasks.list('all'))==1)
-                self.assertFalse(service.source_waiters)
-                await messages.put(dict(type='response.done',response=dict(id='create',status='completed')))
-                await messages.put(dict(type='response.created',response=dict(id='false-receipt')))
-                await messages.put(dict(type='response.audio.delta',response_id='false-receipt',delta=pcm))
-                await asyncio.sleep(.05);self.assertEqual(service.player.count,0)
-                await messages.put(dict(type='response.audio_transcript.done',response_id='false-receipt',transcript='好的，事情我已经办完了。'))
-                await until(lambda:'false-receipt' in service.blocked)
-                self.assertEqual(service.player.count,0)
-                await messages.put(dict(type='response.done',response=dict(id='false-receipt',status='completed')))
-                await messages.put(dict(type='response.created',response=dict(id='verified-receipt')))
-                await messages.put(dict(type='response.audio.delta',response_id='verified-receipt',delta=pcm))
-                await asyncio.sleep(.05);self.assertEqual(service.player.count,0)
-                await messages.put(dict(type='response.audio_transcript.done',response_id='verified-receipt',transcript=RECEIPTS['created']))
-                await until(lambda:service.player.count>0)
-                self.assertEqual(service.tasks.list('all')[0]['status'],'pending')
-                self.assertFalse(any(e.get('role')=='assistant' and '办完' in e.get('text','') for e in self.events))
-            finally:
-                task.cancel();await asyncio.gather(task,return_exceptions=True)
-
-    async def test_recipient_lookup_after_rejected_guess_can_continue_and_create_once(self):
-        bad=await self.tool(dict(action='create',kind='message',title='测试',content='请准备资料。',recipient_id='guessed'))
-        self.assertFalse(bad['accepted']);self.assertIn('没有保存',bad['spoken_receipt'])
-        await self.service.tool(self.ws,dict(call_id='status',name='get_robot_status',response_id='r',arguments='{}'))
-        self.assertIsNone(self.service.tool_repair);self.assertTrue(self.service.continue_response)
-        result=await self.tool(dict(action='create',kind='message',title='测试',content='请准备资料。',recipient_id='bob'),'corrected')
-        self.assertTrue(result['accepted']);self.assertEqual(len(self.service.tasks.list()),1)
-
-    async def test_wrong_person_cannot_prepare_and_unplayed_text_does_not_mark_announced(self):
-        task=await self.create()
-        wrong=await self.tool(dict(action='prepare_relay',task_id=task['task_id']),'wrong')
-        self.assertFalse(wrong['accepted'])
-        self.service.identified_person=lambda:'bob';self.service.tool_repair=None
-        result=await self.tool(dict(action='prepare_relay',task_id=task['task_id']),'right')
-        self.assertTrue(result['accepted'])
-        relay=self.service.relay_pending[task['task_id']];relay['response_id']='spoken'
-        state=SimpleNamespace(blocked=set(),responses={'spoken':dict(status='completed',transcript=task['content'],received_audio_s=1,empty_dac=0)})
-        self.service.check_task_delivery(state)
-        self.assertEqual(self.service.tasks.get(task['task_id'])['status'],'pending')
-        self.service.player.consumed['spoken']=48000
-        self.service.check_task_delivery(state)
-        self.assertEqual(self.service.tasks.get(task['task_id'])['status'],'announced')
-
-    async def test_incomplete_speech_cancellation_or_identity_change_cannot_claim_delivery(self):
-        task=await self.create();self.service.identified_person=lambda:'bob'
-        await self.tool(dict(action='prepare_relay',task_id=task['task_id']),'prepare')
-        relay=self.service.relay_pending[task['task_id']];relay['response_id']='spoken'
-        self.service.player.consumed['spoken']=48000
-        state=SimpleNamespace(interrupt=Mock(),blocked=set(),responses={'spoken':dict(status='completed',transcript='请准备资料',received_audio_s=1,empty_dac=0)})
-        self.service.check_task_delivery(state)
-        self.assertEqual(self.service.tasks.get(task['task_id'])['status'],'pending')
-        self.service.tool_repair=None
-        await self.tool(dict(action='prepare_relay',task_id=task['task_id']),'prepare2')
-        self.service.identified_person=lambda:'alice'
-        self.service.check_task_delivery(state)
-        self.assertEqual(self.service.tasks.get(task['task_id'])['status'],'pending')
-        state.interrupt.assert_called_once_with(None,source='relay_recipient_changed')
-
-    async def test_due_inbox_triggers_one_notice_per_visit_and_global_search_is_readonly(self):
-        task=await self.create();service=self.service;service.identified_person=lambda:'bob'
-        service.message_receipts.pending=None  # The creation receipt is already spoken in this scenario.
-        service.continue_response=False;service.announcement_revision=None
-        service.schedule_task_notice(SimpleNamespace(generating=None))
-        self.assertEqual(service.announcement_kind,'tasks');self.assertIn(task['task_id'],service.task_notice_attempts)
-        self.assertNotIn(task['task_id'],service.task_visit_announced)
-        service.announcement_revision=None;service.schedule_task_notice(SimpleNamespace(generating=None))
-        self.assertIsNone(service.announcement_revision)
-        service.memory.append('alice','previous','user','请给小王准备资料。')
-        await service.tool(self.ws,dict(call_id='search',response_id='r',name='search_robot_memory',arguments=json.dumps(dict(keywords=['小王']))))
-        result=json.loads(self.sent[-1]['item']['output'])
-        self.assertTrue(result['accepted']);self.assertEqual(result['result']['matches'][0]['person'],'alice')
-
-    async def test_only_known_response_create_race_is_coalesced_and_pending_request_blocks_new_notice(self):
-        service=self.service;service.last_response_request_at=time.monotonic()
-        event=dict(type='error',error=dict(code='invalid_value',param='response.create',message='Cannot create response while another response is in progress.'))
-        self.assertTrue(service.response_busy(event,SimpleNamespace(generating='existing')))
-        self.assertFalse(service.response_request_pending)
-        wrong=dict(type='error',error=dict(code='invalid_value',param='response.create',message='conversation has no messages'))
-        self.assertFalse(service.response_busy(wrong,SimpleNamespace(generating=None)))
-        task=await self.create();service.identified_person=lambda:'bob'
-        service.response_request_pending=True;service.continue_response=False;service.announcement_revision=None
-        service.schedule_task_notice(SimpleNamespace(generating=None))
-        self.assertIsNone(service.announcement_revision)
-
-    async def test_user_speaking_response_race_is_deferred_without_replaying_or_faulting(self):
-        service=self.service;service.last_response_request_at=time.monotonic();service.response_request_pending=True
-        service.continue_response=True
-        event=dict(type='error',error=dict(code='invalid_value',param='response.create',message='Cannot create response while user is speaking.'))
-        self.assertTrue(service.response_busy(event,SimpleNamespace(generating=None)))
-        self.assertTrue(service.response_waiting_user_end)
-        self.assertFalse(service.response_request_pending);self.assertFalse(service.continue_response)
-        self.assertTrue(service.enabled)
-        service.last_response_request_at=time.monotonic()-6
-        self.assertFalse(service.response_busy(event,SimpleNamespace(generating=None)))
-
-    async def test_self_report_cannot_expose_someone_elses_tasks_or_global_history(self):
-        await self.create()
-        service=self.service
-        service.turn_person='anonymous:'+'a'*32
-        service.pending_user_text='我是小王'
-        service.identified_person=lambda:None
-        await service.tool(self.ws,dict(call_id='status',name='get_robot_status',response_id='r',arguments='{}'))
-        status=json.loads(self.sent[-1]['item']['output'])
-        self.assertFalse(status['identity_verified'])
-        self.assertIsNone(status['current_person'])
-        self.assertEqual(status['known_people'],[])
-        self.assertEqual(status['robot_tasks']['active'],[])
-        self.assertEqual(status['robot_tasks']['due_task_inbox'],[])
-        self.assertNotIn('准备资料',json.dumps(status,ensure_ascii=False))
-        for index,args in enumerate((dict(action='list'),dict(action='list',recipient_id='bob'))):
-            result=await self.tool(args,'unverified-list'+str(index))
-            self.assertFalse(result['accepted'])
-            self.assertEqual(result['status'],'identity_confirmation_required')
-            self.assertIsNone(service.tool_repair)
-            self.assertTrue(service.continue_response)
-        await service.tool(self.ws,dict(call_id='global',name='search_robot_memory',response_id='r',arguments=json.dumps(dict(keywords=[]))))
+    async def test_unknown_self_report_cannot_query_private_tasks_or_global_history(self):
+        s=self.service;s.final_message(self.final(),s.cloud_state);await self.finish()
+        self.person=None;s.response_revisions['r']=1
+        await s.tool(self.ws,dict(name='get_robot_status',call_id='status',response_id='r',arguments='{}'))
+        output=json.loads(self.sent[-1]['item']['output'])
+        self.assertFalse(output['identity_verified']);self.assertFalse(output['robot_tasks']['active'])
+        await s.tool(self.ws,dict(name='search_robot_memory',call_id='private',response_id='r',arguments='{"keywords":[]}'))
         self.assertFalse(json.loads(self.sent[-1]['item']['output'])['accepted'])
 
-    async def test_status_uses_the_verified_person_id_instead_of_a_second_identity_read(self):
-        self.service.knowledge.current_person=lambda:dict(person_id='bob',display_name='测试乙')
-        await self.service.tool(self.ws,dict(call_id='status',name='get_robot_status',response_id='r',arguments='{}'))
-        status=json.loads(self.sent[-1]['item']['output'])
-        self.assertTrue(status['identity_verified'])
-        self.assertEqual(status['current_person']['person_id'],'alice')
-        self.assertEqual(status['current_person']['display_name'],'测试甲')
+    async def test_current_database_status_says_saved_pending_not_waiting_for_verification(self):
+        s=self.service;s.final_message(self.final(),s.cloud_state);await self.finish();s.response_revisions['r']=1
+        await s.tool(self.ws,dict(name='get_robot_status',call_id='status',response_id='r',arguments='{}'))
+        output=json.loads(self.sent[-1]['item']['output']);row=output['robot_tasks']['active'][0]
+        self.assertTrue(row['saved']);self.assertEqual(row['delivery_label'],'已保存，等待转告')
+        self.assertEqual(output['message_operation']['operation_status'],'saved')
+
+    async def test_model_receive_loop_waits_for_final_text_and_uses_only_trusted_result_speech(self):
+        from test_managed_voice import FakeAudio
+        s=self.service;s.audio=FakeAudio();s.verify_identity=Mock();s.reception.c=dict(s.reception.c,enabled=False)
+        s.announcement_revision=None;messages=asyncio.Queue()
+        class WS:
+            async def __aenter__(inner):return inner
+            async def __aexit__(inner,*_):pass
+            async def send(inner,text):self.sent.append(json.loads(text))
+            def __aiter__(inner):return inner
+            async def __anext__(inner):return json.dumps(await messages.get())
+        async def connect(_ws,session,_log):return session
+        with patch('vivis.speech.cloud_managed.websocket_connection',return_value=WS()),patch('vivis.speech.cloud_managed.connect_session',side_effect=connect):
+            task=asyncio.create_task(s._connection())
+            async def until(predicate):
+                end=time.monotonic()+2
+                while not predicate():
+                    if task.done():task.result()
+                    if time.monotonic()>end:raise AssertionError('fixed-flow receive timeout')
+                    await asyncio.sleep(.01)
+            try:
+                await until(lambda:s.ws is not None)
+                await messages.put(dict(type='input_audio_buffer.speech_started',item_id='final-only'))
+                await messages.put(dict(type='input_audio_buffer.speech_stopped',item_id='final-only'))
+                await messages.put(dict(type='response.created',response=dict(id='chat-claim')))
+                await messages.put(dict(type='response.audio.delta',response_id='chat-claim',delta=base64.b64encode(b'\1\0'*480).decode()))
+                await asyncio.sleep(.03);self.assertFalse(s.tasks.list('all'));self.assertEqual(s.player.count,0)
+                await messages.put(dict(type='conversation.item.input_audio_transcription.completed',item_id='final-only',transcript='给小乙留言，请准备两份资料。'))
+                await until(lambda:bool(self.spoken))
+                self.assertEqual(len(s.tasks.list('all')),1);self.assertEqual(s.player.count,0)
+                self.assertEqual(self.spoken[0],'已保存，等见到小乙后转告。')
+            finally:task.cancel();await asyncio.gather(task,return_exceptions=True)
+
+    async def test_user_speaking_response_race_is_recoverable_without_replaying(self):
+        s=self.service;s.last_response_request_at=time.monotonic();s.response_request_pending=True
+        event=dict(type='error',error=dict(code='invalid_value',param='response.create',message='Cannot create response while user is speaking.'))
+        self.assertTrue(s.response_busy(event,SimpleNamespace(generating=None)));self.assertTrue(s.response_waiting_user_end)
+        self.assertFalse(s.continue_response);self.assertFalse(s.response_request_pending)
 
 
 if __name__=='__main__':unittest.main()

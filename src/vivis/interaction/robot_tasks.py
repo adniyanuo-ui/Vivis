@@ -12,16 +12,7 @@ STATES=('pending','in_progress','announced','completed','cancelled')
 KINDS=('message','reminder','todo')
 
 
-class ReconciliationRequired(ValueError):
-    def __init__(self,candidates,has_more=False):
-        super().__init__('先按语义核对同一委托：复述或补充用merge_task_id，确为另一件事才用distinct_from；不能直接重复建单。')
-        self.candidates=candidates;self.has_more=has_more
-
-
 class MessageMeaningUncertain(ValueError):pass
-
-
-def normalized_content(value):return re.sub(r'[^\w]','',value).casefold()
 
 
 def validate_config(c):
@@ -74,6 +65,8 @@ class RobotTasks:
                 source_session TEXT NOT NULL,source_utterance TEXT NOT NULL,source_message_id INTEGER,
                 creation_key TEXT UNIQUE NOT NULL,last_announced TEXT,last_attempt TEXT);
                 CREATE INDEX IF NOT EXISTS robot_task_inbox ON robot_tasks(recipient,status,not_before);
+                CREATE TABLE IF NOT EXISTS message_writes(
+                request_id TEXT PRIMARY KEY,actor TEXT NOT NULL,task_id TEXT NOT NULL,action TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS robot_task_events(
                 id INTEGER PRIMARY KEY,task_id TEXT NOT NULL,event TEXT NOT NULL,actor TEXT NOT NULL,
                 details TEXT NOT NULL,created TEXT NOT NULL);''')
@@ -83,10 +76,9 @@ class RobotTasks:
         db.execute('INSERT INTO robot_task_events(task_id,event,actor,details,created) VALUES(?,?,?,?,?)',
             (task_id,kind,actor,json.dumps(details,ensure_ascii=False),now_utc()))
 
-    def create(self,args,creator,session,utterance,message_id,known_people,*,source_text='',clarified=False):
+    def create(self,args,creator,session,utterance,message_id,known_people,*,source_text='',clarified=False,guard=None):
         self.ensure_schema();person_key(creator)
-        allowed={'action','kind','title','content','recipient_id','not_before','due_at','next_action',
-                 'merge_task_id','distinct_from','merge_reason'}
+        allowed={'action','kind','title','content','recipient_id','not_before','due_at','next_action'}
         if not isinstance(args,dict) or not {'action','kind','title','content'}<=args.keys()<=allowed:
             raise ValueError('Task create needs kind,title,content and no unknown fields')
         if args['kind'] not in KINDS:raise ValueError('Unsupported task kind')
@@ -106,62 +98,46 @@ class RobotTasks:
         if not isinstance(utterance,str) or not 1<=len(utterance)<=128:raise ValueError('Task requires a fresh user utterance')
         if message_id is not None and (type(message_id) is not int or message_id<1):raise ValueError('Invalid task source message')
         next_action=text(args.get('next_action','等待收件人出现并转告' if recipient else '等待后续安排'),300)
-        merge=args.get('merge_task_id');distinct=args.get('distinct_from',[])
-        if merge is not None and (not isinstance(merge,str) or not re.fullmatch(r'[a-f0-9]{32}',merge)):
-            raise ValueError('Invalid merge message ID')
-        if (not isinstance(distinct,list) or len(distinct)>25
-                or any(not isinstance(v,str) or not re.fullmatch(r'[a-f0-9]{32}',v) for v in distinct)):
-            raise ValueError('Invalid reviewed message IDs')
-        reason=text(args.get('merge_reason',''),300)
-        if not reason and (merge or distinct):
-            reason='调用方在当前话轮明确选择'+('合并已有留言' if merge else '不同委托另建留言')+'；具体依据保留于源话轮和内容审计。'
-        canonical=[creator,str(session),utterance,args['kind'],content,recipient,start,due]
-        key=hashlib.sha256(json.dumps(canonical,ensure_ascii=False).encode()).hexdigest()
+        key=hashlib.sha256(json.dumps([creator,str(session),utterance],ensure_ascii=False).encode()).hexdigest()
         stamp=now_utc();task_id=uuid.uuid4().hex
         with self.memory.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            prior=db.execute('SELECT * FROM robot_tasks WHERE creation_key=?',(key,)).fetchone()
-            if prior:return dict(prior,effect='unchanged')
-            if args['kind'] in ('message','reminder'):
-                existing_rows=[dict(r) for r in db.execute("SELECT * FROM robot_tasks WHERE creator=? AND recipient=? AND kind=? AND status!='cancelled' ORDER BY created DESC",
-                    (creator,recipient,args['kind']))]
-                for existing in existing_rows:
-                    if (normalized_content(existing['content'])==normalized_content(content)
-                            and existing['not_before']==start and existing['due_at']==due):
-                        return dict(existing,effect='already_acknowledged' if existing['status']=='completed' else 'unchanged')
-                active=[r for r in existing_rows if r['status']!='completed']
-                candidates=active[:20]+[r for r in existing_rows if r['status']=='completed'][:5]
-                if merge:
-                    existing=db.execute('SELECT * FROM robot_tasks WHERE task_id=?',(merge,)).fetchone()
-                    if (not existing or existing['creator']!=creator or existing['recipient']!=recipient
-                            or existing['kind']!=args['kind'] or existing['status']=='cancelled'):
-                        raise ValueError('Can only merge your own message to the same recipient and kind')
-                    if existing['status']=='completed':return dict(existing,effect='already_acknowledged')
-                    changed=(existing['content']!=content or existing['not_before']!=start or existing['due_at']!=due)
-                    db.execute('UPDATE robot_tasks SET title=?,content=?,not_before=?,due_at=?,next_action=?,status=?,last_attempt=?,updated=? WHERE task_id=?',
-                        (title,content,start,due,next_action,'pending' if changed else existing['status'],
-                         None if changed else existing['last_attempt'],stamp,merge))
-                    self.event(db,merge,'message_reconciled',creator,dict(reason=reason,
-                        previous_content=existing['content'],content=content,source_session=str(session),
-                        source_utterance=utterance,source_message_id=message_id))
-                    task_id=merge
-                elif candidates and (len(active)>20 or not {r['task_id'] for r in candidates}<=set(distinct)):
-                    fields=('task_id','title','content','status','not_before','due_at')
-                    raise ReconciliationRequired([{k:r[k] for k in fields} for r in candidates],len(active)>20)
-                if merge:
-                    result=dict(db.execute('SELECT * FROM robot_tasks WHERE task_id=?',(task_id,)).fetchone())
-                    result['effect']='merged'
-                else:result=None
-            else:result=None
-            if result is None:
-                db.execute('INSERT INTO robot_tasks(task_id,kind,title,content,creator,recipient,status,next_action,not_before,due_at,created,updated,source_session,source_utterance,source_message_id,creation_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                    (task_id,args['kind'],title,content,creator,recipient,'pending',next_action,start,due,stamp,stamp,str(session)[:100],utterance,message_id,key))
-                self.event(db,task_id,'created',creator,dict(source_message_id=message_id,source_utterance=utterance,
-                    distinct_from=distinct,semantic_reason=reason))
+            if guard:guard()
+            prior=db.execute('SELECT * FROM robot_tasks WHERE creator=? AND source_session=? AND source_utterance=? ORDER BY created LIMIT 1',
+                (creator,str(session),utterance)).fetchone()
+            if prior:return dict(prior,effect='already_acknowledged' if prior['status']=='completed' else 'unchanged')
+            db.execute('INSERT INTO robot_tasks(task_id,kind,title,content,creator,recipient,status,next_action,not_before,due_at,created,updated,source_session,source_utterance,source_message_id,creation_key) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                (task_id,args['kind'],title,content,creator,recipient,'pending',next_action,start,due,stamp,stamp,str(session)[:100],utterance,message_id,key))
+            self.event(db,task_id,'created',creator,dict(source_message_id=message_id,source_utterance=utterance))
+            db.execute('INSERT INTO message_writes VALUES(?,?,?,?)',(key,creator,task_id,'create'))
+            if guard:guard()
         self.memory.version+=1
         verified=self.get(task_id)
         if verified['content']!=content or verified['recipient']!=recipient:raise RuntimeError('Message readback did not match its write')
-        return dict(verified,effect='merged' if merge else 'created')
+        return dict(verified,effect='created')
+
+    def supplement(self,task_id,actor,session,utterance,message_id,addition,guard=None):
+        """Only append an explicitly requested supplement to an exact owned ID."""
+        self.ensure_schema();person_key(actor);addition=text(addition,300,True)
+        key=hashlib.sha256(json.dumps([actor,str(session),utterance],ensure_ascii=False).encode()).hexdigest()
+        with self.memory.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if guard:guard()
+            prior=db.execute('SELECT task_id FROM message_writes WHERE request_id=?',(key,)).fetchone()
+            if prior:
+                row=db.execute('SELECT * FROM robot_tasks WHERE task_id=?',(prior['task_id'],)).fetchone()
+                return dict(row,effect='unchanged')
+            row=db.execute('SELECT * FROM robot_tasks WHERE task_id=?',(task_id,)).fetchone()
+            if not row or row['creator']!=actor:raise ValueError('只能补充本人明确指定的留言。')
+            if row['status'] not in ('pending','announced'):raise ValueError('该留言已经关闭，请作为新留言交代。')
+            content=row['content']+' 补充：'+addition
+            if len(content)>500:raise ValueError('补充后留言过长，请分成另一条留言。')
+            db.execute("UPDATE robot_tasks SET content=?,status='pending',last_attempt=NULL,updated=? WHERE task_id=?",(content,now_utc(),task_id))
+            self.event(db,task_id,'supplemented',actor,dict(source_session=session,source_utterance=utterance,source_message_id=message_id,addition=addition))
+            db.execute('INSERT INTO message_writes VALUES(?,?,?,?)',(key,actor,task_id,'supplement'))
+            if guard:guard()
+        self.memory.version+=1
+        return dict(self.get(task_id),effect='merged')
 
     def get(self,task_id):
         self.ensure_schema()
@@ -201,7 +177,7 @@ class RobotTasks:
             where=" WHERE kind='todo' OR creator=? OR recipient=?";params=[visible_to,visible_to]
         with self.memory.db() as db:return {r['status']:r['n'] for r in db.execute('SELECT status,COUNT(*) n FROM robot_tasks'+where+' GROUP BY status',params)}
 
-    def update(self,args,actor,utterance):
+    def update(self,args,actor,utterance,guard=None):
         if not isinstance(args,dict) or not {'action','task_id'}<=args.keys()<={'action','task_id','status','next_action'}:
             raise ValueError('Task update fields are invalid')
         task=self.get(args['task_id']);person_key(actor)
@@ -215,15 +191,17 @@ class RobotTasks:
             raise ValueError('Only the recipient can confirm receipt; speaking is not acknowledgement')
         next_action=text(args.get('next_action',task['next_action']),300)
         with self.memory.db() as db:
+            if guard:guard()
             db.execute('UPDATE robot_tasks SET status=?,next_action=?,updated=? WHERE task_id=?',(status,next_action,now_utc(),task['task_id']))
             self.event(db,task['task_id'],'user_update',actor,dict(status=status,source_utterance=utterance,
                 basis='recipient_acknowledgement' if status=='completed' and task['kind']!='todo' else 'user_report'))
+            if guard:guard()
         self.memory.version+=1;return self.get(task['task_id'])
 
-    def acknowledge(self,task_id,recipient,utterance):
+    def acknowledge(self,task_id,recipient,utterance,guard=None):
         task=self.get(task_id)
         if task['kind'] not in ('message','reminder'):raise ValueError('Only message delivery can be acknowledged')
-        result=self.update(dict(action='update',task_id=task_id,status='completed',next_action='收件人已确认收到留言；不跟踪所述事项的实际执行'),recipient,utterance)
+        result=self.update(dict(action='update',task_id=task_id,status='completed',next_action='收件人已确认收到留言；不跟踪所述事项的实际执行'),recipient,utterance,guard=guard)
         if result['status']!='completed':raise RuntimeError('Message acknowledgement readback failed')
         return dict(result,delivery_state='acknowledged',physical_execution_tracked=False)
 
