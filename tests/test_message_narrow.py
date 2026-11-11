@@ -96,4 +96,3 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.lane.run(self.request('bob','补充这条。'))
         self.assertNotIn('未经授权',self.store.get(tid)['content'])
         self.assertFalse(self.lane.result['saved'])
-

@@ -48,4 +48,3 @@ class MessageVoiceTests(unittest.IsolatedAsyncioTestCase):
         await self.wait_for(lambda:player.count>=16*48000)
         player.render(player.count,time.monotonic()-20)
         self.assertTrue(await asyncio.wait_for(task,.5))
-
