@@ -47,6 +47,8 @@ class MessageService:
             raise IdentityVerificationRequired('当前身份尚未核验，请正对摄像头确认身份后再查询或修改留言；口头自报不能替代核验。')
         if action=='list':
             if not set(args)<={'action','status','recipient_id','after_task_id'}:raise ValueError('Unknown message list fields')
+            if args.get('recipient_id') and args['recipient_id'] not in known_people:
+                raise MessageRecipientUnavailable('收件人没有明确匹配，请确认要查询谁的留言。')
             result=self.store.page(args.get('status','active'),args.get('recipient_id') or None,args.get('after_task_id') or None,visible_to=person)
             result=dict(result,tasks=[message_view(r) for r in result['tasks']])
             return MessageOutcome(result,'read')

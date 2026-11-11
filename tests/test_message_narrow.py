@@ -114,3 +114,30 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.lane.result['operation_status'],'read')
         self.assertEqual(self.lane.result['speech_status'],'failed')
         self.assertEqual(len(calls),1);self.assertEqual(len(self.store.list('all')),1)
+
+    async def test_sender_readback_misclassified_as_relay_keeps_requested_recipient(self):
+        await self.save();self.lane.last.clear()
+        self.answer=dict(action='relay',recipient_id='bob')
+        await self.lane.run(self.request(text='给小乙的留言保存了吗？完整说一下。'))
+        self.assertEqual(self.lane.result['operation_status'],'read')
+        self.assertIn('明天买一个USB hub',self.spoken[-1])
+        self.assertEqual(self.store.list('all')[0]['status'],'pending')
+
+    async def test_unknown_query_recipient_asks_instead_of_reporting_empty_or_unsaved(self):
+        await self.save();self.answer=dict(action='query',recipient_id='xiaoer')
+        await self.lane.run(self.request(text='给小儿的留言保存了吗？'))
+        self.assertEqual(self.lane.result['operation_status'],'needs_clarification')
+        self.assertIsNone(self.lane.result['saved'])
+        self.assertIn('给谁',self.spoken[-1]);self.assertNotIn('尚未保存',self.spoken[-1])
+        self.assertEqual(len(self.store.list('all')),1)
+
+    def test_query_target_cannot_be_guessed_as_current_person(self):
+        from vivis.interaction.message_lane import query_recipient_fields
+        people={'he':dict(display_name='何裕德',preferred_address='何工'),
+                'wang':dict(display_name='王润章',preferred_address='小王')}
+        wrong=dict(action='query',recipient_id='he',recipient_reference='我')
+        self.assertEqual(query_recipient_fields(wrong,'给小儿的留言保存了吗？',people,{'current_person_id':'he'}),dict(action='clarify',missing='recipient'))
+        right=dict(action='query',recipient_id='wang',recipient_reference='小王')
+        self.assertEqual(query_recipient_fields(right,'给小王的留言保存了吗？',people,{'current_person_id':'he'}),right)
+        own=dict(action='relay',recipient_reference='我')
+        self.assertEqual(query_recipient_fields(own,'把给我的留言说一下',people,{'current_person_id':'he'})['recipient_id'],'he')
