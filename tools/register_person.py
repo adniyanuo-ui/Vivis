@@ -19,16 +19,21 @@ def main():
     import cv2
     import numpy as np
     from vivis.interaction.knowledge import professional_profile
-    from vivis.vision.familiar import feature
+    from vivis.vision.identity_config import backend_config
+    from vivis.vision.enrollment import extractor,extract,save_gallery
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--id',required=True);p.add_argument('--name',required=True);p.add_argument('--address',required=True)
     p.add_argument('--age-years',type=int);p.add_argument('--role',required=True);p.add_argument('--organization',required=True)
     p.add_argument('--photo',type=Path,required=True);p.add_argument('--resume',type=Path)
+    p.add_argument('--backend',choices=('sface','seeta6'),help='Default: currently selected familiar-face backend')
     p.add_argument('--professional-summary',default='');p.add_argument('--allow-cloud-context',action='store_true')
     args=p.parse_args()
     if not re.fullmatch(r'[a-z][a-z0-9_-]{1,39}',args.id):p.error('Invalid local person ID')
-    c=json.loads((ROOT/'configs/perception/familiar_faces.json').read_text());model=ROOT/c['model']
-    if not model.is_file() or hashlib.sha256(model.read_bytes()).hexdigest()!=c['sha256']:p.error('Run python3 tools/setup_familiar_faces.py first')
+    c=json.loads((ROOT/'configs/perception/familiar_faces.json').read_text())
+    if args.backend:c['backend']=args.backend
+    c=backend_config(c);model=ROOT/c['model']
+    if not model.is_file() or hashlib.sha256(model.read_bytes()).hexdigest()!=c['sha256']:
+        p.error('Prepare the selected backend: tools/setup_seetaface6.py or tools/setup_familiar_faces.py')
     profile=dict(schema_version='vivis-person-1.0',display_name=args.name,preferred_address=args.address,
         organization=args.organization,role=args.role,professional_summary=args.professional_summary,
         allow_cloud_context=args.allow_cloud_context,source='user-supplied labelled photograph and professional context')
@@ -44,7 +49,10 @@ def main():
     detector=cv2.FaceDetectorYN.create(str(ROOT/'assets/models/yunet/face_detection_yunet_2023mar.onnx'),'',(image.shape[1],image.shape[0]),.85,.3,5000)
     _,faces=detector.detect(image)
     if faces is None or len(faces)!=1:p.error('Enrollment requires exactly one visible face; use a single-person photo')
-    recognizer=cv2.FaceRecognizerSF.create(str(model),'');vector=feature(recognizer,image,faces[0])
+    recognizer=extractor(c,ROOT)
+    try:vector,_=extract(recognizer,c,image,faces[0])
+    finally:
+        if c['backend']=='seeta6':recognizer.close()
     base=ROOT/c['people_directory'];base.mkdir(parents=True,exist_ok=True);os.chmod(base,0o700)
     folder=base/args.id;folder.mkdir(exist_ok=True);os.chmod(folder,0o700)
     for source,name in [(args.photo,'photo'+args.photo.suffix.lower()),(args.resume,'resume'+args.resume.suffix.lower() if args.resume else '')]:
@@ -56,14 +64,16 @@ def main():
         text='\n'.join(''.join(t.text or '' for t in row.findall('.//w:t',ns)) for row in root.findall('.//w:p',ns))
         target=folder/'resume.local.txt';target.write_text(text);os.chmod(target,0o600)
     target=folder/'profile.json';target.write_text(json.dumps(profile,ensure_ascii=False,indent=2)+'\n');os.chmod(target,0o600)
-    gallery=ROOT/c['gallery'];vectors=[];ids=[]
+    gallery=ROOT/c['gallery'];vectors=[];ids=[];hashes=[]
     if gallery.exists():
         with np.load(gallery,allow_pickle=False) as old:
-            for pid,v in zip(old['ids'],old['vectors']):
-                if pid!=args.id:ids.append(str(pid));vectors.append(v)
-    vectors.append(vector);ids.append(args.id)
-    temp=gallery.with_suffix('.tmp.npz');np.savez(temp,vectors=np.asarray(vectors,np.float32),ids=np.asarray(ids));os.chmod(temp,0o600);temp.replace(gallery)
-    print(json.dumps(dict(enrolled_id=args.id,visible_faces=1,local_gallery_size=len(ids),raw_files_uploaded=False,cloud_professional_context=args.allow_cloud_context),ensure_ascii=False))
+            if c['backend']=='seeta6' and str(old['model_sha256'])!=c['sha256']:raise ValueError('Existing gallery model differs')
+            for index,(pid,v) in enumerate(zip(old['ids'],old['vectors'])):
+                if pid!=args.id:
+                    ids.append(str(pid));vectors.append(v);hashes.append(str(old['photo_sha256'][index]) if 'photo_sha256' in old else '')
+    vectors.append(vector);ids.append(args.id);hashes.append(hashlib.sha256(args.photo.read_bytes()).hexdigest())
+    save_gallery(gallery,c,vectors,ids,hashes)
+    print(json.dumps(dict(enrolled_id=args.id,backend=c['backend'],visible_faces=1,local_gallery_size=len(ids),raw_files_uploaded=False,cloud_professional_context=args.allow_cloud_context),ensure_ascii=False))
 
 
 if __name__=='__main__':main()

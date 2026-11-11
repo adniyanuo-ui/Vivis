@@ -1,0 +1,17 @@
+diff --git a/QualityAssessor3/QualityAssessor/src/seeta/plugin/QualityOfBrightness.cpp b/QualityAssessor3/QualityAssessor/src/seeta/plugin/QualityOfBrightness.cpp
+index 2cb493d..c264793 100644
+--- a/QualityAssessor3/QualityAssessor/src/seeta/plugin/QualityOfBrightness.cpp
++++ b/QualityAssessor3/QualityAssessor/src/seeta/plugin/QualityOfBrightness.cpp
+@@ -96,10 +96,9 @@ namespace seeta {
+                                        const int32_t N) {
+         
+         seeta::Image img(image);
+-		seeta::Image face_image(face.width, face.height, image.channels);
+-		seeta::fill(img, seeta::Rect(face.x, face.y, face.width, face.width), face_image);
++		seeta::Image face_image = seeta::crop(img, seeta::Rect(face.x, face.y, face.width, face.height));
+ 
+-        auto gray = seeta::gray(img);
++        auto gray = seeta::gray(face_image);
+ 		float bright_value = grid_max_bright(gray, 3, 3);
+ 
+         QualityLevel level;

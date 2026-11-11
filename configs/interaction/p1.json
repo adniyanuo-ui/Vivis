@@ -21,6 +21,7 @@
     "config": "configs/perception/realtime_voice.json",
     "region": "beijing",
     "profile": "voice-preserve",
+    "board_reference_device": "DOV:",
     "lip_sync": {
       "enabled": true,
       "binary": "outputs/a2f/build/a2f_chunk_probe",

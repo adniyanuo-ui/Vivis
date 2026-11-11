@@ -67,7 +67,7 @@ def configuration(args):
                  output_audio=dict(language='zh'),turn_detection=dict(type=config['turn_detection'],threshold=config['vad_threshold']),
                  max_history_turns=config['max_history_turns'],enable_search=False,tools=[])
     from vivis.interaction.knowledge import Knowledge
-    session['instructions']+=Knowledge(robot_path).base_instructions()
+    session['instructions']+=Knowledge(robot_path).base_instructions(include_people=getattr(args,'include_people',True))
     if not getattr(args,'managed',False):
         session['instructions']+=' 你正在做纯语音测试，没有相机、机器人动作或外部工具，不声称执行了动作。'
     return config,speech,speaker,url,session
@@ -141,6 +141,7 @@ class VoiceSession:
     def event(self,event):
         kind=event.get('type','unknown');rid=event.get('response_id');now=time.monotonic()
         if kind=='response.audio.delta':
+            now=event.get('_network_received_monotonic',now)
             if not rid:raise RuntimeError('Audio packet missing response_id; cannot safely reject stale audio')
             if rid in self.blocked:
                 self.late_packets+=1;return
@@ -163,7 +164,8 @@ class VoiceSession:
                 self.log.write('playback_overflow_recovered',**result)
                 return result
             self.log.write('audio_packet',response_id=rid,bytes=len(pcm),buffered_s=self.player.count/48000,
-                           gap_ms=(now-previous)*1000)
+                           gap_ms=(now-previous)*1000,network_received_monotonic=now,
+                           gate_hold_ms=max(0.,(time.monotonic()-now)*1000))
             return
         fields={k:event[k] for k in ('event_id','item_id','response_id','audio_start_ms','audio_end_ms','reason','transcript','text') if k in event}
         if kind=='response.created':

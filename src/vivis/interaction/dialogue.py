@@ -81,6 +81,10 @@ def program_command(program,robot,folder,speech,settings):
                      '--config',str(idle_config)]+(['--overlap-warmup'] if settings.get('overlap_warmup',False) else [])
     if not settings.get('diagnostics',False):common+=['--compact-logs']
     if settings.get('overlap_warmup',False):common+=['--overlap-warmup']
+    voice_options=settings.get('realtime_voice',{})
+    board=voice_options.get('board_reference_device') if voice_options.get('enabled') else None
+    if board and program['kind'] in ('prerecorded','runtime_a2f'):
+        common+=['--board-reference-device',board]
     if program['kind']=='prerecorded':
         if program.get('realtime_response',False):raise ValueError('Prepared programs cannot enable a social expression overlay')
         return base+['vivis.interaction.prerecorded',*common,'--work',program['work'],'--repeat','1',
@@ -141,8 +145,9 @@ class Worker:
 
 
 class PromptPlayer:
-    def __init__(self,robot,speech):
+    def __init__(self,robot,speech,board_reference_device=None):
         self.device=robot.motion_profile()['audio_device'];self.speech=speech
+        self.board_reference_device=board_reference_device
         self.clock=None;self.history=[]
 
     def stop(self):
@@ -158,7 +163,8 @@ class PromptPlayer:
         from vivis.runtime.playback import AudioClock
         path=ROOT/self.speech['prompts']/(name+'.wav')
         self.clock=AudioClock(path,self.device,latency=.1,reference=dict(host='127.0.0.1',
-            port=self.speech['aec']['reference_port'],session_id='prompt-'+str(uuid.uuid4())))
+            port=self.speech['aec']['reference_port'],session_id='prompt-'+str(uuid.uuid4())),
+            board_reference_device=self.board_reference_device)
         self.history.append([time.monotonic(),math.inf]);self.history=self.history[-8:]
         self.clock.start()
 
@@ -231,6 +237,7 @@ def main(argv=None):
     if args.realtime_voice is not None:voice_options['enabled']=args.realtime_voice=='on'
     voice_options['record_audio']=args.record_audio
     voice_enabled=voice_options.get('enabled',False) and not(args.listen_only or args.text_input or args.simulate_text is not None)
+    board_reference_device=voice_options.get('board_reference_device') if voice_enabled else None
     settings['realtime_voice']={**voice_options,'enabled':voice_enabled}
     qwen_only=voice_enabled and voice_options.get('control_backend')=='qwen_realtime'
     reception_enabled=bool(qwen_only and read_json(ROOT/voice_options['reception_config'])['enabled'])
@@ -271,6 +278,7 @@ def main(argv=None):
             programs=[p['title'] for p in catalog['programs']],
             modes=[STANDBY,INTERACTION,'task'],wake_words=wake_words,initial_mode=STANDBY,
             realtime_voice=voice_enabled,voice_control_backend=voice_options.get('control_backend','local'),reception_enabled=reception_enabled,realtime_lip_sync=bool(voice_enabled and voice_options.get('lip_sync',{}).get('enabled')),
+            board_reference_device=board_reference_device,host_aec_enabled=board_reference_device is None,
             missing_dependencies=missing,hardware_opened=False,requires_onsite=['wake ASR at intended distance','speaker double-talk/AEC','smooth mode transitions']),ensure_ascii=False));return 0
     if missing:parser.error('Missing optional P1 assets; run python3 tools/setup_p1.py and setup_p0.py: '+str(missing))
     if not args.listen_only:
@@ -400,9 +408,11 @@ def main(argv=None):
                     events.put(dict(kind='asr_final',utterance_id=number,text=line.strip(),captured_end_monotonic=time.monotonic()))
                 events.put(dict(kind='shutdown'))
             threading.Thread(target=read_text,daemon=True).start()
-        prompt=None if args.listen_only or qwen_only else PromptPlayer(robot,speech)
+        prompt=None if args.listen_only or qwen_only else PromptPlayer(robot,speech,board_reference_device)
         ready=args.text_input
         print('P1三级状态：待机→唤醒交互→任务。停止／退出回交互；待机／自己玩去吧回待机。Ctrl+C退出管理器。',flush=True)
+        if board_reference_device:
+            print('音频回采：'+board_reference_device+'；主机AEC已关闭。',flush=True)
         print('唤醒词：'+'、'.join(wake_words)+'；管理器运行期间持续监听。',flush=True)
         while True:
             now=time.monotonic()

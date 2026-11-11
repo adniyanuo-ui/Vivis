@@ -1,0 +1,49 @@
+{
+  "schema_version": "vivis-seeta-sources-1.0",
+  "repository": "https://github.com/SeetaFace6Open/index.git",
+  "commit": "a32e2faa0694c0f841ace4df9ead0407b78363c6",
+  "submodules": {
+    "SeetaGenderPredictor": "7850aa169e5d0dc031e8a3313f20076fb2114a0c",
+    "PoseEstimator6": "5201fa7ddceacb7ab34fdbc52509fd37bf570dda",
+    "TenniS": "ef6c8332809a021d0eb5842c0f9d32a7f0b07f96",
+    "SeetaAuthorize": "add8911fb4ec0913df9eccf510e3f4266f6e18ff",
+    "FaceRecognizer6": "c3bd558700e35e7a93437d55ebe342e83579ce6a",
+    "Landmarker": "decacad713f6dc39c65ba0b4700988dc12bd6b7a",
+    "OpenRoleZoo": "38a4d6cd5d29248f03cea9bf04769093972107c9",
+    "SeetaEyeStateDetector": "37ffcc0d1babd760f7dae0aef70a8c1f73c39a81",
+    "SeetaAgePredictor": "71f3656c706da9685faa8b4fcdf8d74664edc413",
+    "FaceBoxes": "6e806443a2f4dfbd9b9c446a03bc33250ee254b7",
+    "SeetaMaskDetector": "79a782cb5595de3697a7da2f2eaab99a4bc40dea",
+    "FaceAntiSpoofingX6": "f64b6c2faad79314a659e1e9d066b84938768d35",
+    "FaceTracker6": "41a327918ae64fa56aefe779b439b014584051a1",
+    "QualityAssessor3": "9e21b10b2a2af381bd7673ecd758b151f1118acf"
+  },
+  "archive": {
+    "url": "https://www.dropbox.com/s/julk1f16riu0dyp/sf6.0_models.zip?dl=1",
+    "bytes": 301479618,
+    "sha256": "57d339895915b73f19b986f1def66eed8b51975e8b0e74eeb12c656277230800"
+  },
+  "models": [
+    {
+      "name": "face_detector.csta",
+      "bytes": 4054932,
+      "sha256": "b57171c55f76f343f6f579e1ea1e165d1d4fc0321b7395f6abde155d18fe0082"
+    },
+    {
+      "name": "face_landmarker_pts5.csta",
+      "bytes": 421988,
+      "sha256": "3458dd3c52ae85c4132bcfdd864c86c3b5ba5bd2337a0d8dcb7cb25aa4bff5ac"
+    },
+    {
+      "name": "face_recognizer.csta",
+      "bytes": 102551956,
+      "sha256": "3cefce29d2ceb6fd95153d67c11f24ce08746e1877478bacaa5ae5d333a0a670"
+    },
+    {
+      "name": "age_predictor.csta",
+      "bytes": 32896916,
+      "sha256": "b414fe2c223481a3af693277c38597a83795cc386e7fb6ee9dc487ab95bd00b7",
+      "optional": "age_estimation"
+    }
+  ]
+}

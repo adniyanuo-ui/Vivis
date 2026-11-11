@@ -17,7 +17,7 @@ pre{white-space:pre-wrap;background:#202c3b;padding:16px;border-radius:10px}</st
 <div><span class="eye"><i class="pupil"></i></span><span class="eye"><i class="pupil"></i></span></div>
 <small>下方眼球是图像方向模拟，不代表舵机实测位置。此视觉服务不驱动机器人。</small>
 <p id="robot-control">视觉服务只检测人脸，真机控制状态等待更新。</p>
-<pre id="state">等待检测…</pre><script>
+<p id="identity-status"></p><pre id="state">等待检测…</pre><script>
 const camera=document.querySelector('#camera'),cameraStatus=document.querySelector('#camera-status');
 let displayedImage=null;
 // A restarted service closes MJPEG streams; browsers do not reliably reconnect them.
@@ -39,6 +39,13 @@ finally{clearTimeout(deadline);if(pendingImage)URL.revokeObjectURL(pendingImage)
 async function refreshState(){const controller=new AbortController(),deadline=setTimeout(()=>controller.abort(),2000);
 try{let r=await fetch('/state',{cache:'no-store',signal:controller.signal});if(!r.ok)throw new Error('State unavailable');let s=await r.json();
 document.querySelector('#state').textContent=JSON.stringify(s,null,2);
+const identity=s.familiar_identity,observation=identity&&identity.observation,age=observation&&observation.age_estimate;
+const decision=observation&&observation.decision_reason,reasons={quality_low:'亮度或清晰度不足',no_feature:'未获得特征',below_threshold:'比对分数不足',ambiguous_candidates:'候选差距不足',confirming:'等待连续确认',confirmed:'已确认'};
+document.querySelector('#identity-status').textContent=identity?
+ '身份后端：'+(identity.backend||'未知')+'；状态：'+({recognized:'已确认',reviewing:'复核中',unknown:'未确认'}[identity.state]||identity.state)+
+ (identity.person_id?'；ID：'+identity.person_id:'')+(decision?'；原因：'+(reasons[decision]||decision):'')+
+ (observation&&observation.confirmation_hits!==undefined?'；连续确认：'+observation.confirmation_hits+'/'+observation.confirmation_required:'')+
+ (age?'；外观年龄估计约'+age.years+'岁（不作身份依据）':''):'';
 let control=s.robot_control,expression=control&&control.program==='expression-follow',held=expression&&control.eye_neck_held;
 document.querySelector('#robot-control').textContent=control?(control.active?(expression?(held?'表情跟随：面部＋眼睑；眼球、颈部保持原位。剩余约 ':'表情＋眼球＋颈部联合跟随。剩余约 '):'真机跟踪正在运行，剩余约 ')+Math.ceil(control.remaining_seconds||0)+' 秒':'真机控制未运行；画面仍在检测人脸'):'视觉服务不驱动机器人';
 let xy=held?[0,0]:(s.simulated_xy||[0,0]);document.querySelectorAll('.pupil').forEach(p=>p.style.transform=`translate(${xy[0]*29}px,${xy[1]*14}px)`);
@@ -48,7 +55,7 @@ refreshCamera();refreshState();</script></html>'''
 
 
 class Preview:
-    def __init__(self, host, port):
+    def __init__(self, host, port, page=PAGE):
         self.lock = threading.Lock()
         self.jpeg = None
         self.state = {'status': 'starting'}
@@ -82,7 +89,7 @@ class Preview:
                         elif self.path.split('?', 1)[0] == '/frame.jpg' and owner.jpeg:
                             data, kind = owner.jpeg, 'image/jpeg'
                         elif self.path == '/':
-                            data, kind = PAGE.encode(), 'text/html; charset=utf-8'
+                            data, kind = page.encode(), 'text/html; charset=utf-8'
                         else:
                             self.send_error(404)
                             return

@@ -139,10 +139,13 @@ def main(argv=None):
                 cycle_begin = now
                 packet, jpeg, metrics = vision.detect(sample)
                 if familiar is not None:
-                    recognized=familiar.step(sample,vision.selected_face_row)
+                    recognized=familiar.step(sample,vision.selected_face_row,faces=metrics['faces'])
                     familiar.publish(recognized)
                     metrics['familiar_recognition_available']=familiar.available
                     metrics['familiar_identity']={k:recognized[k] for k in ('state','person_id','similarity','observed_monotonic')}
+                    metrics['familiar_identity']['backend']=familiar.c['backend']
+                    if 'observation' in recognized:metrics['familiar_identity']['observation']=recognized['observation']
+                    if 'confirmed_monotonic' in recognized:metrics['familiar_identity']['confirmed_monotonic']=recognized['confirmed_monotonic']
                     if familiar.error:metrics['familiar_recognition_error']=familiar.error
                 if landmarker is not None:
                     # Expression-follow uses the SAME selected largest-face ROI.

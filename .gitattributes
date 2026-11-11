@@ -12,3 +12,6 @@ src/vivis/hardware/feetech/_vendor/** -whitespace
 
 # Unified patches encode an empty context line as one space; preserve its hash.
 native/speech/voice_preserve/profile.patch whitespace=-blank-at-eol
+
+# Seeta patches retain upstream context, including mixed indentation.
+native/vision/seeta/*.patch -whitespace

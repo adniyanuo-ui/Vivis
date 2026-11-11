@@ -1,6 +1,7 @@
 {
   "schema_version": "vivis-robot-tasks-1.0",
   "enabled": true,
+  "clarification_required_terms": ["uber"],
   "auto_announce": true,
   "refresh_s": 1.0,
   "repeat_after_s": 60,

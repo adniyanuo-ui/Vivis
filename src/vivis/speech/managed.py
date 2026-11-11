@@ -20,15 +20,18 @@ from vivis.paths import ROOT
 from vivis.speech.listen import Decoder
 from vivis.speech.realtime import configuration,VoiceSession,Journal,connect_session,websocket_connection,receive_event
 from vivis.speech.realtime_audio import AudioIO,VoiceBuffer
+from vivis.speech.board_reference import reference_device
 from vivis.interaction.knowledge import Knowledge
 
 
 def voice_configuration(speech,robot):
     options=speech['managed_voice']
+    reference_device(options.get('board_reference_device'))
     if options.get('region','beijing') not in ('beijing','singapore'):raise ValueError('Invalid realtime voice region')
     args=SimpleNamespace(config=ROOT/options['config'],region=options.get('region','beijing'),robot=Path(robot),
         workspace_id=None,voice=None,model=None,seconds=None,speaker=None,mic=None,
-        aec_backend='aec3',aec_profile=options.get('profile','voice-preserve'),managed=True)
+        aec_backend='aec3',aec_profile=options.get('profile','voice-preserve'),managed=True,
+        include_people=options.get('control_backend')!='qwen_realtime')
     config,_,speaker,url,session=configuration(args)
     catalog=json.loads(Path(speech.get('programs',ROOT/'configs/interaction/programs.json')).read_text())
     titles='、'.join(p['title'] for p in catalog['programs'])
@@ -97,7 +100,9 @@ class ManagedVoice:
         if not self.secret or self.secret!=self.secret.strip():raise ValueError('Realtime voice API key missing/invalid')
         self.log=Journal(folder/'cloud_events.jsonl',self.secret)
         self.player=VoiceBuffer(self.config['output_gain'],self.config['fade_ms'],self.config['max_playback_buffer_s'])
-        self.audio=AudioIO(speech,self.speaker,self.player,True,frontend=self.config['frontend'])
+        board=speech['managed_voice'].get('board_reference_device')
+        self.audio=AudioIO(speech,self.speaker,self.player,aec=board is None,
+            frontend=self.config['frontend'],board_reference_device=board)
         self.controls=queue.Queue(maxsize=32);self.local=queue.Queue(maxsize=speech['capture']['queue_frames'])
         self.shutdown=threading.Event();self.asr_fault=None;self.cloud_queue=None
         self.cloud_task=None;self.cloud_state=None;self.ws=None;self.epoch=0;self.enabled=False
@@ -106,6 +111,7 @@ class ManagedVoice:
         self.summary=dict(cloud_connections=0,microphone_opens=0,provisional_pauses=0,invalid_turn_resumes=0,
                           local_cancel_operations=0,frontend=self.config['frontend'],voice=self.config['voice'],
                           output_gain=self.config['output_gain'],realtime_lip_sync=False)
+        self.summary.update(host_aec_enabled=board is None,board_reference_device=board)
         self.recorders=ExitStack();self.writers={};self.frame_log=None;self.recorded_samples=0
         self.mouth=None;self.reported_mouth_error=None
 
@@ -300,7 +306,11 @@ class ManagedVoice:
                             self.emit(dict(kind='cloud_error',epoch=self.epoch,error=('Cloud queue full; no local speech fallback' if self.speech['managed_voice'].get('control_backend')=='qwen_realtime' else 'Cloud queue full; local control continues')))
                             self.enabled=False;self.cloud_task.cancel()
                     if not ready:
-                        ready=True;self.emit(dict(kind='ready',**devices,aec=True,frontend=self.config['frontend'],
+                        ready=True
+                        host_aec=self.summary['host_aec_enabled']
+                        frontend=self.config['frontend'] if host_aec else dict(backend='off')
+                        self.emit(dict(kind='ready',**devices,aec=host_aec,frontend=frontend,
+                            board_reference_device=self.summary['board_reference_device'],
                             asr_backend='qwen_realtime' if self.decoder is None else self.speech['asr'].get('backend'),managed_voice=True))
                 if self.cloud_state:self.cloud_state.poll_playback()
                 while not self.audio.meters.empty():self.log.write(**self.audio.meters.get_nowait())

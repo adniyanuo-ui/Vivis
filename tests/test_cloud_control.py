@@ -24,7 +24,7 @@ def config(path):return json.loads((ROOT/path).read_text())
 class CloudPolicyTests(unittest.TestCase):
     def test_tools_are_limited_to_programme_and_readonly_context(self):
         declared=tools(['song','script'])
-        self.assertEqual({t['name'] for t in declared},{'robot_program','get_robot_status','search_person_memory','set_expression','set_speech_dialect','search_robot_memory','manage_robot_task'})
+        self.assertEqual({t['name'] for t in declared},{'robot_program','get_robot_status','search_person_memory','set_expression','set_speech_dialect','search_robot_memory','manage_robot_task','courier_pickup'})
         self.assertEqual(controller_intent(dict(action='wake',program='song'),{'song'},'standby'),dict(kind='wake',followup=dict(kind='select',program='song')))
         self.assertEqual(controller_intent(dict(action='stop',program=''),{'song'},'task'),dict(kind='interaction'))
         for args in (dict(action='play',program='missing'),dict(action='play',program=''),dict(action='shell',program=''),dict(action='play',program='song',position=0)):
@@ -206,7 +206,11 @@ class ContinuousCloudAudioTests(unittest.IsolatedAsyncioTestCase):
         class WS:
             async def __aenter__(self):return self
             async def __aexit__(self,*_):return False
-            async def send(self,text):sent.append(json.loads(text))
+            async def send(self,text):
+                value=json.loads(text);sent.append(value)
+                item=value.get('item',{})
+                if value.get('type')=='conversation.item.create' and item.get('id','').startswith('controller_'):
+                    await messages.put(dict(type='conversation.item.created',item=item))
             def __aiter__(self):return self
             async def __anext__(self):return json.dumps(await messages.get())
         async def connected(ws,session,log):return session
@@ -248,6 +252,32 @@ class ContinuousCloudAudioTests(unittest.IsolatedAsyncioTestCase):
                 await messages.put(dict(type='response.created',response=dict(id='audible')))
                 await messages.put(dict(type='response.audio.delta',response_id='audible',delta=pcm))
                 await until(lambda:service.player.count>0)
+                self.assertFalse(service.continue_response)
+                # Lose the face beyond the15-second grace while this reply
+                # still streams. Its tail and transcript must survive; the
+                # next answer is silent without a fresh face or explicit wake.
+                before=service.player.count
+                service.presence.wake_until=0
+                service.presence.last_face=time.monotonic()-16
+                service.reception.c=dict(service.reception.c,enabled=True)
+                service.absence_since=time.monotonic()-61
+                await messages.put(dict(type='response.audio.delta',response_id='audible',delta=pcm))
+                await until(lambda:service.player.count>before)
+                self.assertNotIn('audible',service.cloud_state.blocked)
+                await messages.put(dict(type='response.audio_transcript.done',response_id='audible',transcript='当前回答完整结尾。'))
+                await until(lambda:any(e.get('role')=='assistant' and e.get('text')=='当前回答完整结尾。' for e in events))
+                await messages.put(dict(type='response.done',response=dict(id='audible',status='completed')))
+                await until(lambda:service.cloud_state.generating is None)
+                service.player.render(service.player.count,time.monotonic()+.2)
+                service.cloud_state.poll_playback()
+                await asyncio.sleep(.08)
+                self.assertFalse(any(e.get('arguments',{}).get('action')=='standby' for e in events))
+                await until(lambda:not service.finish_responses)
+                await until(lambda:any(e.get('arguments',{}).get('action')=='standby' for e in events))
+                await messages.put(dict(type='response.created',response=dict(id='new-quiet')))
+                await messages.put(dict(type='response.audio.delta',response_id='new-quiet',delta=pcm))
+                await until(lambda:'new-quiet' in service.blocked)
+                await asyncio.sleep(.05);self.assertEqual(service.player.count,0)
                 service.controls.put(dict(kind='voice_context',revision=2,mode='task',target='baigufuren',ready=True))
                 service.controls.put(dict(kind='voice_mode',epoch=2,enabled=False))
                 await until(lambda:service.audio.output_stream is None)
@@ -261,8 +291,11 @@ class ContinuousCloudAudioTests(unittest.IsolatedAsyncioTestCase):
                     service.controls.put(dict(kind='voice_context',revision=3,mode='interaction',target='interaction',ready=True))
                     service.controls.put(dict(kind='voice_mode',epoch=3,enabled=True))
                     await until(lambda:service.conversation_person=='alpha')
-                    person[0]='beta'
+                    # The audible anonymous reply above is conversation history;
+                    # first confirmation must clear it before greeting alpha.
                     await until(lambda:service.summary['cloud_connections']==2)
+                    person[0]='beta'
+                    await until(lambda:service.summary['cloud_connections']==3)
                     self.assertEqual(service.audio.opens,1)
 
             finally:

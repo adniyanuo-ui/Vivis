@@ -15,7 +15,10 @@ from vivis.speech.managed import voice_configuration,refresh_knowledge
 from vivis.vision.familiar import FamiliarFaces,match
 
 
-def config():return json.loads((ROOT/'configs/perception/familiar_faces.json').read_text())
+def config():
+    c=json.loads((ROOT/'configs/perception/familiar_faces.json').read_text())
+    c['backend']='sface' # Existing 128-d mock tests target the retained SFace backend.
+    return c
 def vector(i):
     v=np.zeros(128,dtype=np.float32);v[i]=1.;return v
 
@@ -60,6 +63,16 @@ class KnowledgeTests(unittest.TestCase):
         for value in ('手机号13900000000','me@example.org','病史详细记录'):
             with self.assertRaises(ValueError):professional_profile(dict(self.profile,allow_cloud_context=True,professional_summary=value))
 
+    def test_cloud_control_base_does_not_preload_unverified_person_profiles(self):
+        k=self.knowledge()
+        self.assertNotIn('测试同事',k.base_instructions(include_people=False))
+        self.assertNotIn('喜欢讨论算法验证',k.base_instructions(include_people=False))
+        self.assertIn('青年机器人',k.base_instructions(include_people=False))
+        path=self.root/config()['state_file'];path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(dict(schema_version='vivis-familiar-person-1.0',state='recognized',
+            person_id='testperson',observed_monotonic=20.)))
+        self.assertIn('测试同事',k.person_context(20.)['instructions'])
+
     def test_explicit_business_sections_without_source_notes(self):
         path=self.root/'docs/knowledge/people/business.md';path.parent.mkdir()
         path.write_text('## 1. Facts\nBUSINESS_FACT\n## 2. Program\nPROGRAM_FACT\n## 3. Notes\nNOT_FOR_RUNTIME\n')
@@ -91,6 +104,24 @@ class KnowledgeTests(unittest.TestCase):
         self.assertIn('"state": "unknown", "person": null',unknown['instructions'])
         self.assertIn('unknown应坦诚说暂时没有确认身份',unknown['instructions'])
 
+    def test_review_retains_only_a_social_name_and_never_a_verified_profile(self):
+        k=self.knowledge();path=self.root/config()['state_file'];path.parent.mkdir(parents=True)
+        review=dict(schema_version='vivis-familiar-person-1.0',state='reviewing',person_id='testperson',
+            observed_monotonic=22.,confirmed_monotonic=20.)
+        path.write_text(json.dumps(review))
+        self.assertIsNone(k.current_person(22.))
+        self.assertFalse(k.person_context(22.)['recognized'])
+        social=k.person_context(22.,allow_identification=False,allow_review=True)
+        self.assertTrue(social['reviewing']);self.assertEqual(social['person_id'],'testperson')
+        self.assertIn('测试工',social['instructions'])
+        for private in ('喜欢讨论算法验证','测试公司','工程师'):
+            self.assertNotIn(private,social['instructions'])
+        self.assertEqual(k.current_identity(24.),dict(state='unknown',person=None)) # stale producer
+        for changed in (dict(review,observed_monotonic=25.),dict(review,confirmed_monotonic=23.),
+                        dict(review,confirmed_monotonic=None)):
+            path.write_text(json.dumps(changed))
+            self.assertEqual(k.current_identity(changed['observed_monotonic']),dict(state='unknown',person=None))
+
     def test_paths_and_symlinks_cannot_include_arbitrary_source_files(self):
         for key,value in [('persona_document','private/people/testperson/resume.local.txt'),('people_directory','docs')]:
             c=dict(self.c,**{key:value});(self.root/'configs/knowledge.json').write_text(json.dumps(c))
@@ -107,7 +138,7 @@ class KnowledgeTests(unittest.TestCase):
         for text in ('前台接待兼首席情绪陪伴官','六层仿生皮肤','首钢','魏宇飞','CEO','只介绍能力类别'):
             self.assertIn(text,session['instructions'])
         self.assertEqual(session['voice'],c['voice']);self.assertEqual(session['speech_rate'],c['speech_rate'])
-        self.assertEqual({t['name'] for t in session['tools']},{'robot_program','get_robot_status','search_person_memory','set_expression','set_speech_dialect','search_robot_memory','manage_robot_task'})
+        self.assertEqual({t['name'] for t in session['tools']},{'robot_program','get_robot_status','search_person_memory','set_expression','set_speech_dialect','search_robot_memory','manage_robot_task','courier_pickup'})
         self.assertIsNone(Knowledge(ROOT/'configs/robots/mojia/robot.json').config)
         self.assertEqual(Knowledge(ROOT/'configs/robots/mojia/robot.json').person_instructions(),'')
 
@@ -155,6 +186,69 @@ class FamiliarTests(unittest.TestCase):
         self.f.close()
         for _ in range(4):self.infer()
         self.assertIsNone(self.f.result['person_id'])
+
+    def test_low_score_reviews_same_person_until_three_recovery_samples(self):
+        for _ in range(3):self.infer(stamp=10.)
+        self.infer(2,10.5)
+        self.assertEqual(self.f.result['state'],'reviewing')
+        self.assertEqual(self.f.result['person_id'],'alpha')
+        self.assertEqual(self.f.result['confirmed_monotonic'],10.)
+        for stamp in (11.,11.5):
+            self.infer(0,stamp);self.assertEqual(self.f.result['state'],'reviewing')
+        self.infer(0,12.)
+        self.assertEqual(self.f.result['state'],'recognized')
+        self.assertEqual(self.f.result['confirmed_monotonic'],12.)
+
+    def test_review_has_a_fixed_deadline_not_refreshed_by_intermittent_matches(self):
+        for _ in range(3):self.infer(stamp=10.)
+        for stamp in np.arange(10.5,15.,.5):
+            self.infer(2 if int(stamp*2)%2 else 0,float(stamp))
+            self.assertEqual(self.f.result['state'],'reviewing')
+            self.assertEqual(self.f.result['confirmed_monotonic'],10.)
+        self.infer(2,15.)
+        self.assertEqual(self.f.result['state'],'unknown');self.assertIsNone(self.f.result['person_id'])
+
+    def test_multiple_faces_no_face_or_large_bbox_jump_clears_held_identity(self):
+        row=np.array([0,0,80,80]+[0]*11,dtype=np.float32)
+        self.f.job.offer=Mock(return_value=False)
+        sample=(1,10.5,np.zeros((100,100,3),dtype=np.uint8))
+        for reason in ('many','none','jump'):
+            for _ in range(3):self.infer(stamp=10.)
+            self.infer(2,10.5);self.f.last_bbox=row[:4].copy()
+            changed=row.copy()
+            if reason=='jump':changed[0]=200
+            result=self.f.step(sample,None if reason=='none' else changed,now=10.5,faces=2 if reason=='many' else 1)
+            self.assertEqual(result['state'],'unknown');self.assertIsNone(result['person_id'])
+
+    def test_stale_review_invalidates_pending_old_inference(self):
+        for _ in range(3):self.infer(stamp=10.)
+        self.infer(2,10.5);epoch=self.f.epoch
+        self.f.last_submit=12.1
+        row=np.array([0,0,80,80]+[0]*11,dtype=np.float32)
+        result=self.f.step((1,12.1,None),row,now=12.1)
+        self.assertEqual(result['state'],'unknown')
+        for _ in range(3):self.infer(stamp=12.1,epoch=epoch)
+        self.assertIsNone(self.f.result['person_id'])
+
+    def test_first_pending_inference_is_not_invalidated_by_empty_initial_result(self):
+        self.f.job.offer=Mock(return_value=True)
+        epoch=self.f.epoch
+        sample=(1,10.,np.zeros((100,100,3),dtype=np.uint8))
+        row=np.array([0,0,80,80]+[0]*11,dtype=np.float32)
+        self.f.step(sample,row,now=10.)
+        self.assertEqual(self.f.epoch,epoch)
+        for _ in range(3):self.infer(stamp=10.,epoch=epoch)
+        self.assertEqual(self.f.result['state'],'recognized')
+
+    def test_first_sample_after_stale_camera_must_start_confirmation_again(self):
+        for _ in range(3):self.infer(stamp=10.)
+        def offer(_fn,_image,_row,stamp,epoch):
+            self.infer(stamp=stamp,epoch=epoch);return True
+        self.f.job.offer=offer
+        sample=(1,12.,np.zeros((100,100,3),dtype=np.uint8))
+        row=np.array([0,0,80,80]+[0]*11,dtype=np.float32)
+        result=self.f.step(sample,row,now=12.)
+        self.assertEqual(result['state'],'unknown');self.assertEqual(self.f.hits,1)
 
     def test_missing_or_corrupt_gallery_degrades_optional_recognition(self):
         absent=FamiliarFaces(self.c,self.root);self.addCleanup(absent.close)

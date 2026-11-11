@@ -360,6 +360,7 @@ def main(argv=None,vision_readiness=None):
     parser.add_argument('--check',action='store_true')
     parser.add_argument('--session-stop-file',type=Path,help=argparse.SUPPRESS)
     parser.add_argument('--audio-reference-port',type=int,help=argparse.SUPPRESS)
+    parser.add_argument('--board-reference-device',help=argparse.SUPPRESS)
     parser.add_argument('--session-id',help=argparse.SUPPRESS)
     parser.add_argument('--soft-audio-cancel-ms',type=int,default=0,help=argparse.SUPPRESS)
     parser.add_argument('--compact-logs',action='store_true',help=argparse.SUPPRESS)
@@ -402,6 +403,7 @@ def main(argv=None,vision_readiness=None):
     if args.audio_reference_port is not None:
         if not 1024<=args.audio_reference_port<=65535 or not args.session_id:parser.error('Invalid audio reference session')
         profile['audio_reference']=dict(host='127.0.0.1',port=args.audio_reference_port,session_id=args.session_id)
+    if args.board_reference_device is not None:profile['board_reference_device']=args.board_reference_device
     if args.baud is not None:profile['baud']=args.baud
     home_inventory=robot.home(args.mode)
     if profile.get('exclude_held_axes_from_session') and not args.home_only:

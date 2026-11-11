@@ -1,0 +1,24 @@
+diff --git a/OpenRoleZoo/include/orz/mem/pot.h b/OpenRoleZoo/include/orz/mem/pot.h
+index 4b08c97..86a42b1 100644
+--- a/OpenRoleZoo/include/orz/mem/pot.h
++++ b/OpenRoleZoo/include/orz/mem/pot.h
+@@ -7,6 +7,7 @@
+ 
+ #include <mutex>
+ #include <memory>
++#include <functional>
+ 
+ namespace orz {
+ 
+diff --git a/TenniS/src/memory/orz/pot.cpp b/TenniS/src/memory/orz/pot.cpp
+index 5b062352..52a2540a 100644
+--- a/TenniS/src/memory/orz/pot.cpp
++++ b/TenniS/src/memory/orz/pot.cpp
+@@ -3,6 +3,7 @@
+ //
+ 
+ #include "pot.h"
++#include <cstdlib>
+ #include <cstring>
+ 
+ namespace ts {

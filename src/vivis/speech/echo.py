@@ -59,9 +59,12 @@ class ReferenceBuffer:
                 raise ValueError('Invalid PCM reference')
             pcm=np.frombuffer(body,dtype='<f4').copy()
             if not np.isfinite(pcm).all() or np.max(np.abs(pcm))>1.01:raise ValueError('Invalid DAC samples')
-            self.blocks.append((stamp,rate,pcm,h['session_id']))
-            while self.blocks and self.blocks[0][0]<now-self.seconds:self.blocks.popleft()
+            self.append(stamp,rate,pcm,h['session_id'],now)
         except (ValueError,KeyError,TypeError,AttributeError):self.rejected+=1
+
+    def append(self,stamp,rate,pcm,session,now):
+        self.blocks.append((stamp,rate,pcm,session))
+        while self.blocks and self.blocks[0][0]<now-self.seconds:self.blocks.popleft()
 
     def sample(self,stamp,count,rate):
         times=stamp+np.arange(count)/rate;result=np.zeros(count,np.float32);covered=np.zeros(count,bool)

@@ -1,15 +1,29 @@
 {
   "schema_version": "vivis-familiar-faces-1.0",
   "enabled": true,
-  "model": "outputs/models/sface/face_recognition_sface_2021dec.onnx",
-  "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
-  "gallery": "private/people/gallery.npz",
   "people_directory": "private/people",
   "state_file": "outputs/runtime/familiar_person.json",
-  "cosine_threshold": 0.5,
   "minimum_margin": 0.08,
   "confirmation_samples": 3,
   "hz": 2.0,
   "max_result_age_s": 1.5,
-  "min_face_size_px": 60
+  "review_hold_s": 5.0,
+  "min_face_size_px": 60,
+  "backend": "seeta6",
+  "backends": {
+    "sface": {
+      "model": "outputs/models/sface/face_recognition_sface_2021dec.onnx",
+      "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+      "gallery": "private/people/gallery.npz",
+      "score_threshold": 0.5
+    },
+    "seeta6": {
+      "model": "outputs/face_ab/models/face_recognizer.csta",
+      "sha256": "3cefce29d2ceb6fd95153d67c11f24ce08746e1877478bacaa5ae5d333a0a670",
+      "gallery": "private/people/gallery_seeta6.npz",
+      "score_threshold": 0.6,
+      "quality_gate": true,
+      "age_estimation": true
+    }
+  }
 }

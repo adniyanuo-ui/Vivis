@@ -17,7 +17,7 @@ class SensorReadingError(RuntimeError):pass
 class PositionEdgeReadingError(RuntimeError):pass
 
 class AudioClock:
-    def __init__(self,path,device,latency='low',gain=1.,reference=None):
+    def __init__(self,path,device,latency='low',gain=1.,reference=None,board_reference_device=None):
         if not (isinstance(latency,str) and latency in ('low','high') or
                 type(latency) in (int,float) and math.isfinite(latency) and .01<=latency<=1):
             raise ValueError('Audio latency must be low/high or 0.01..1 seconds')
@@ -36,12 +36,19 @@ class AudioClock:
         self.data=resample_poly(data,self.rate//common,original_rate//common,axis=0).astype(np.float32)*gain
         self.duration=len(data)/original_rate
         self.reference=None;self.reference_clock=None;self.reference_clock_metadata=None
+        self.board_reference_stats=None
         if reference is not None:
             from vivis.speech.echo import ReferencePublisher
             self.reference=ReferencePublisher(reference,self.rate)
         try:
-            self.stream=sd.OutputStream(device=device,samplerate=self.rate,channels=self.data.shape[1],
-                dtype='float32',blocksize=0,latency=latency,callback=self.callback)
+            options=dict(device=device,samplerate=self.rate,channels=self.data.shape[1],
+                         dtype='float32',blocksize=0,latency=latency,callback=self.callback)
+            if board_reference_device is None:
+                self.stream=sd.OutputStream(**options)
+            else:
+                from vivis.speech.board_reference import BoardReferenceOutput
+                self.stream=BoardReferenceOutput(sd,board_reference_device,lambda error:setattr(self,'fault',error),**options)
+                self.board_reference_stats=self.stream.stats
             if self.reference is not None:
                 from vivis.speech.audio_clock import AudioStreamClock
                 self.reference_clock=AudioStreamClock.calibrate(self.stream)
@@ -67,7 +74,9 @@ class AudioClock:
     def start(self):self.stream.start()
     def time(self):return None if self.first_dac is None else self.stream.time-self.first_dac
     def close(self):
-        try:self.stream.abort();self.stream.close()
+        try:
+            try:self.stream.abort()
+            finally:self.stream.close()
         finally:
             if getattr(self,'reference',None) is not None:self.reference.close()
 
@@ -361,9 +370,12 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         audio_latency=profile.get('audio_latency_s',profile.get('audio_latency_seconds','low'))
         audio_options={'gain':profile['audio_gain']} if 'audio_gain' in profile else {}
         if 'audio_reference' in profile:audio_options['reference']=profile['audio_reference']
+        if 'board_reference_device' in profile:audio_options['board_reference_device']=profile['board_reference_device']
         clock=clock_factory() if clock_factory is not None else AudioClock(audio_path,profile['audio_device'],latency=audio_latency,**audio_options)
         reference_clock=getattr(clock,'reference_clock_metadata',None)
         if isinstance(reference_clock,dict):result['audio_reference_clock']=reference_clock
+        board_reference=getattr(clock,'board_reference_stats',None)
+        if isinstance(board_reference,dict):result['board_reference']=board_reference
         result['timeline_clock']='monotonic' if clock_factory is not None else 'audio_dac'
         if clock_factory is None:
             result['audio_requested_latency']=audio_latency

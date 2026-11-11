@@ -12,6 +12,7 @@ from scipy.signal import firwin,lfilter
 from vivis.speech.echo import ReferencePublisher,ReferenceBuffer
 from vivis.speech.voice_frontend import VoiceFrontEnd
 from vivis.speech.audio_clock import AudioStreamClock
+from vivis.speech.board_reference import BoardReferenceOutput
 
 
 class PlaybackBufferFull(RuntimeError):pass
@@ -144,8 +145,9 @@ class VoiceBuffer:
 
 
 class AudioIO:
-    def __init__(self, speech, output_device, player, aec=True,frontend=None):
+    def __init__(self, speech, output_device, player, aec=True,frontend=None,board_reference_device=None):
         self.speech=speech;self.output_device=output_device;self.player=player;self.aec=aec
+        self.board_reference_device=board_reference_device
         self.frontend=frontend or {}
         self.capture=queue.Queue(maxsize=25);self.uplink=queue.Queue(maxsize=25)
         self.stop=threading.Event();self.fault=None;self.stack=None
@@ -169,6 +171,10 @@ class AudioIO:
             return matches[0]
         input_device=unique(c['device'],'max_input_channels',c['channels'])
         output_device=unique(self.output_device,'max_output_channels',1)
+        if self.board_reference_device is not None:
+            board=unique(self.board_reference_device,'max_output_channels',2)
+            if board!=input_device or board==output_device:
+                raise ValueError('Board reference must use the array microphone playback endpoint')
         self.stack=ExitStack()
         try:
             ref=self.speech['aec'];udp=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);self.stack.callback(udp.close)
@@ -212,8 +218,21 @@ class AudioIO:
                 except Exception as exc:self.fault='Input callback: '+str(exc)
             # Open BOTH devices, map their clocks, then start. Callback execution
             # time is a watchdog observation; it must not time-warp the PCM.
-            self._output_factory=lambda:sd.OutputStream(device=output_device,samplerate=48000,
-                channels=min(2,devices[output_device]['max_output_channels']),dtype='float32',blocksize=960,latency='low',callback=output)
+            def output_factory():
+                options=dict(device=output_device,samplerate=48000,
+                    channels=min(2,devices[output_device]['max_output_channels']),dtype='float32',
+                    blocksize=960,latency='low',callback=output)
+                if self.board_reference_device is None:
+                    return sd.OutputStream(**options)
+                def board_warning(message):
+                    warning('board_reference',message)
+                    try:self.meters.put_nowait(dict(kind='board_reference_warning',message=message))
+                    except queue.Full:pass
+                stream=BoardReferenceOutput(sd,board,lambda error:setattr(self,'fault',error),
+                    on_warning=board_warning,**options)
+                self.stats['board_reference']=stream.stats
+                return stream
+            self._output_factory=output_factory
             self._clocks=clocks
             out=self._output_factory() if with_output else None
             self.output_stream=out

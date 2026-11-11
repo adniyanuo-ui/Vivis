@@ -134,6 +134,7 @@ def main(argv=None):
     parser.add_argument('--output',type=Path)
     parser.add_argument('--session-stop-file',type=Path,help=argparse.SUPPRESS)
     parser.add_argument('--audio-reference-port',type=int,help=argparse.SUPPRESS)
+    parser.add_argument('--board-reference-device',help=argparse.SUPPRESS)
     parser.add_argument('--session-id',default='',help=argparse.SUPPRESS)
     parser.add_argument('--soft-audio-cancel-ms',type=int,default=0,help=argparse.SUPPRESS)
     parser.add_argument('--compact-logs',action='store_true',help=argparse.SUPPRESS)
@@ -163,6 +164,7 @@ def main(argv=None):
     if args.audio_reference_port is not None:
         if not 1024<=args.audio_reference_port<=65535 or not args.session_id:parser.error('Invalid audio reference session')
         profile['audio_reference']=dict(host='127.0.0.1',port=args.audio_reference_port,session_id=args.session_id)
+    if args.board_reference_device is not None:profile['board_reference_device']=args.board_reference_device
     inference=args.inference_audio or p['inference_audio']
     n,rate,_=audio_info(inference)
     if abs(n/rate-p['duration'])>1/16000:parser.error('Inference/playback durations differ; need sample-aligned sources')

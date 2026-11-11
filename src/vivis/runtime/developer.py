@@ -144,6 +144,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     parser.add_argument('--parallel-neck',choices=('on','off'),help='ID33/34 coupled pitch and light roll')
     parser.add_argument('--session-stop-file',type=Path,help=argparse.SUPPRESS)
     parser.add_argument('--audio-reference-port',type=int,help=argparse.SUPPRESS)
+    parser.add_argument('--board-reference-device',help=argparse.SUPPRESS)
     parser.add_argument('--session-id',help=argparse.SUPPRESS)
     parser.add_argument('--soft-audio-cancel-ms',type=int,default=0,help=argparse.SUPPRESS)
     parser.add_argument('--compact-logs',action='store_true',help=argparse.SUPPRESS)
@@ -188,7 +189,7 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
     if args.parallel_neck is not None:command+=['--parallel-neck',args.parallel_neck]
     if args.home_only:
         command += ['--home-only']
-    for key in ('session_stop_file','audio_reference_port','session_id','soft_audio_cancel_ms'):
+    for key in ('session_stop_file','audio_reference_port','board_reference_device','session_id','soft_audio_cancel_ms'):
         value=getattr(args,key)
         if value is not None:command+=['--'+key.replace('_','-'),str(value)]
     if args.compact_logs:command+=['--compact-logs']
