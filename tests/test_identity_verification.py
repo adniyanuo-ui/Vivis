@@ -201,6 +201,49 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
             self.service.verify_identity(self.state)
         self.assertEqual(self.service.conversation_person,'alice')
 
+    async def test_initial_identification_preserves_welcome_audio_and_dac_tail(self):
+        service=self.service;service.cloud_state=self.state
+        service.resume_history.append(dict(role='assistant',text='您好！请问怎么称呼您？'))
+        service.speech_responses.append('welcome')
+        service.reply_people['welcome']=service.anonymous
+        service.reception.armed=False
+        original_session=service.memory_session
+        pcm=(np.ones(480,dtype='<i2')*1000).tobytes()
+        service.player.add('welcome',pcm);service.player.finish('welcome')
+        self.state.responses['welcome']=dict(status='completed',received_audio_s=.02,empty_dac=10.12)
+        with patch('vivis.speech.cloud_managed.time.monotonic',return_value=10.) as clock:
+            service.verify_identity(self.state)
+            self.assertEqual(service.player.count,960)
+            self.assertTrue(service.can_play_response('welcome'))
+            service.player.render(960,10.1)
+            service.verify_identity(self.state)
+            self.assertFalse(service.audio_completed(self.state,'welcome'))
+            clock.return_value=10.13
+            self.assertTrue(service.audio_completed(self.state,'welcome'))
+        self.state.interrupt.assert_not_called()
+        self.assertEqual(service.conversation_person,'alice')
+        self.assertFalse(service.reception.armed)
+        self.assertEqual(service.memory_session,original_session)
+        self.assertEqual(service.reply_people['welcome'],service.anonymous)
+
+    async def test_initial_identification_preserves_generating_public_welcome(self):
+        service=self.service;self.state.generating='welcome'
+        service.speech_responses.append('welcome')
+        service.verify_identity(self.state)
+        self.state.interrupt.assert_not_called()
+        self.assertEqual(self.state.generating,'welcome')
+        self.assertEqual(service.conversation_person,'alice')
+
+    async def test_anonymous_turn_without_final_transcript_still_resets_on_identification(self):
+        self.service.turn_item_id='unfinished-anonymous-user-turn'
+        with self.assertRaisesRegex(ConversationReset,'confirmed_person_changed'):
+            self.service.verify_identity(self.state)
+
+    async def test_initial_identification_does_not_preserve_recipient_bound_audio(self):
+        self.service.relay_recipients['private']='bob'
+        with self.assertRaisesRegex(ConversationReset,'confirmed_person_changed'):
+            self.service.verify_identity(self.state)
+
     async def test_reset_clears_previous_history_and_task_turn_without_restarting_hardware(self):
         service=self.service;service.conversation_person='alice';self.person='bob'
         service.turn_item_id='old-turn';service.turn_ended_at=time.monotonic()

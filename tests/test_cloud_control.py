@@ -291,11 +291,11 @@ class ContinuousCloudAudioTests(unittest.IsolatedAsyncioTestCase):
                     service.controls.put(dict(kind='voice_context',revision=3,mode='interaction',target='interaction',ready=True))
                     service.controls.put(dict(kind='voice_mode',epoch=3,enabled=True))
                     await until(lambda:service.conversation_person=='alpha')
-                    # The audible anonymous reply above is conversation history;
-                    # first confirmation must clear it before greeting alpha.
-                    await until(lambda:service.summary['cloud_connections']==2)
+                    # No user turn was received: a public assistant greeting
+                    # must not reconnect just because its visitor gains a name.
+                    self.assertEqual(service.summary['cloud_connections'],1)
                     person[0]='beta'
-                    await until(lambda:service.summary['cloud_connections']==3)
+                    await until(lambda:service.summary['cloud_connections']==2)
                     self.assertEqual(service.audio.opens,1)
 
             finally:

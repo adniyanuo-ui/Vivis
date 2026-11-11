@@ -354,8 +354,18 @@ class CloudManagedVoice(ManagedVoice):
         if person:
             previous=self.conversation_person
             self.conversation_person=person;self.identity_missing_since=None;self.identity_reset_pending=False
-            if previous!=person and (previous is not None or self.resume_history or self.turn_item_id):
-                reason='confirmed_person_changed'
+            if previous!=person:
+                # An initial anonymous welcome is public, not a conversation
+                # with a different speaker. Enrich the live context without
+                # clearing its queued audio or welcoming the same visitor twice.
+                # Anonymous USER turns still require isolation, as do all
+                # confirmed-person changes and recipient-bound messages.
+                has_user_history=any(item.get('role')=='user' for item in self.resume_history)
+                if previous is not None or self.turn_item_id or has_user_history or self.relay_recipients:
+                    reason='confirmed_person_changed'
+                else:
+                    self.log.write('identity_context_enriched',person_id=person,
+                        audio_preserved=True,prior_turns_reassigned=False)
         elif reviewing_person and reviewing_person==self.conversation_person:
             # Same tracked face, bounded visual review: keep conversational
             # continuity, but identified_person() remains None for task authority.
