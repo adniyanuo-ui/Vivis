@@ -34,7 +34,7 @@
   "defaults": {
     "control_hz": 60,
     "face_hz": 60,
-    "mouth_gain": 1.0,
+    "mouth_gain": 1.2,
     "mouth_command_mode": "lips-direct",
     "direct_mouth_scope": "all",
     "repeat": 1,

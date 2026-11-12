@@ -28,6 +28,26 @@ def packet(now,strength=1.,target=True):
 
 
 class StandbySocialTests(unittest.TestCase):
+    def test_robot_mouth_gain_scales_speech_only_and_preserves_bounds(self):
+        outputs={}
+        for gain in (1.,1.3):
+            r=robot();r.definition['defaults']['mouth_gain']=gain
+            p,ids,_,mapper,source,_=plan(r,settings(),2.)
+            source.publish=Mock();source.next_blink=source.next_look=100.
+            weights=[0.]*52;weights[mapper.order.index('JawOpen')]=.3
+            source.mouth=SimpleNamespace(sample=lambda now:weights)
+            spoken=source.sample(0.,0.)
+            source.mouth=None;idle=source.sample(.1,.1)
+            outputs[gain]=(spoken,idle)
+            for j,sid in enumerate(ids):
+                motor=next(m for m in p['motors'] if m['id']==sid)
+                self.assertLessEqual(spoken[j],min(motor['safe_max'],motor['device_max']))
+                self.assertGreaterEqual(spoken[j],max(motor['safe_min'],motor['device_min']))
+        j=ids.index(31);neutral=mapper.neutral[j]
+        self.assertNotEqual(outputs[1.][0][j],neutral)
+        self.assertAlmostEqual(outputs[1.3][0][j]-neutral,1.3*(outputs[1.][0][j]-neutral))
+        np.testing.assert_allclose(outputs[1.][1],outputs[1.3][1])
+
     def test_sustained_smile_stays_up_until_relax_then_holds_and_releases(self):
         from vivis.interaction.smile import SmileGate
         gate=SmileGate(settings()['social_response']['gate'])
@@ -177,8 +197,21 @@ class StandbySocialTests(unittest.TestCase):
         gaze=StandbyGaze(source.tracking,profile,ids,SimpleNamespace(max_age=.3,poll=lambda _:None),source)
         invalid=mapper.neutral.copy();invalid[ids.index(32)]=9999
         with patch('vivis.motion.ownership.MojiaPlaybackGaze.apply',return_value=invalid):
-            with self.assertRaisesRegex(ValueError,'exceeds command limits'):
+            with self.assertRaisesRegex(ValueError,'exceeds command limits: ID32 target=9999 limits='):
                 gaze.apply(mapper.neutral,mapper.neutral,1/60,1.)
+
+    def test_onsite_pitch_endpoint_passes_strict_standby_validation(self):
+        profile,ids,_,mapper,source,neutral=plan(robot(),settings(),1.)
+        receiver=SimpleNamespace(max_age=.3,poll=lambda now:packet(now))
+        gaze=StandbyGaze(source.tracking,profile,ids,receiver,source)
+        gaze.prepare(neutral,mapper.neutral,[],0.);gaze.set_audio_time(0.,None)
+        pitch=gaze.platform.reference.planners[33]
+        self.assertEqual(pitch.high,2347.)
+        pitch.position=2346.999985258145;pitch.velocity=.019851908465916807;pitch.acceleration=-17.822192217982376
+        with patch.object(source.attention,'step',return_value=dict(pause=True,started=False,blend=0.,state='averting')):
+            result=gaze.apply(mapper.neutral,mapper.neutral,1/60,1/60)
+        self.assertEqual(result[ids.index(33)],2347.)
+        self.assertTrue(np.all(result>=gaze.low));self.assertTrue(np.all(result<=gaze.high))
 
     def test_camera_servo_preparation_and_cancel_cleanup_use_one_receiver(self):
         from vivis.motion.ownership import MojiaPlaybackGaze

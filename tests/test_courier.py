@@ -17,6 +17,27 @@ def config(path):return json.loads((ROOT/path).read_text())
 
 
 class CourierStoreTests(unittest.TestCase):
+    def test_phone_suffix_matches_local_contact_without_face_or_full_phone(self):
+        self.store.phone_last4={'alice':'8244'}
+        for text in ('我要取尾号8244的快递。','我来取手机后四位八二四四的快递。'):
+            self.assertEqual(self.store.lookup('',text)['code'],'4321')
+        self.assertNotIn('code',self.store.lookup('','取尾号9999的快递'))
+        self.assertNotIn('code',self.store.lookup('','我的取件码8244'))
+        self.assertNotIn('code',self.store.lookup('','尾号8244的私人留言'))
+
+    def test_ambiguous_suffix_never_releases_a_code(self):
+        mid=self.memory.append('bob','owner','user','退件码5678')
+        self.store.register('bob','乙工',['乙工'],'5678',[mid],source_reason='test')
+        self.store.phone_last4={'alice':'8244','bob':'8244'}
+        self.assertEqual(self.store.lookup('','取尾号8244的快递')['status'],'ambiguous_owner')
+
+    def test_visit_query_uses_playback_evidence_not_assistant_claims(self):
+        self.assertEqual(self.store.visit_query('alice')['status'],'no_spoken_record')
+        self.store.mark_announced(self.row['id'],self.row['version'],'test')
+        self.assertEqual(self.store.visit_query('alice')['status'],'spoken_record')
+        self.assertNotIn('等待快递员确认',self.store.owner_query('alice')['spoken_receipt'])
+        self.assertNotIn('收到',self.store.lookup('甲工','我来取甲工的快递')['spoken_receipt'])
+
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.memory=PersonMemory(config('configs/interaction/memory.json'),self.tmp.name)
@@ -79,6 +100,73 @@ class CourierStoreTests(unittest.TestCase):
 
 
 class CourierRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_final_phone_query_cannot_be_stolen_by_private_message_lane(self):
+        from unittest.mock import Mock
+        s=self.service;s.courier.phone_last4={'alice':'8244'}
+        s.pending_user_text='我要取尾号8244的快递。';s.speak_message=AsyncMock(return_value=True)
+        s.speak_message_notice=AsyncMock(return_value=True);state=SimpleNamespace(interrupt=Mock(),generating=None)
+        s.final_message(dict(type='conversation.item.input_audio_transcription.completed',item_id=s.turn_item_id),state)
+        await s.message_lane.task
+        self.assertIn('4、3、2、1',s.speak_message.call_args.args[0]);s.speak_message_notice.assert_not_called()
+        self.assertEqual(s.courier.get(self.row['id'])['status'],'announced')
+        s.final_message(dict(type='conversation.item.input_audio_transcription.completed',item_id=s.turn_item_id),state)
+        s.speak_message.assert_awaited_once()
+
+    async def test_public_lookup_clarifies_then_accepts_suffix_without_face(self):
+        from unittest.mock import Mock
+        s=self.service;s.courier.phone_last4={'alice':'8244'};s.speak_message=AsyncMock(return_value=True)
+        state=SimpleNamespace(interrupt=Mock(),generating=None)
+        self.assertTrue(s.final_courier_read('我是快递员，我来取快递。',state));await s.message_lane.task
+        self.assertIn('后四位',s.speak_message.call_args.args[0])
+        s.input_generation+=1;s.turn_item_id='suffix';s.pending_user_text='尾号8244'
+        self.assertTrue(s.final_courier_read(s.pending_user_text,state));await s.message_lane.task
+        self.assertIn('4、3、2、1',s.speak_message.call_args.args[0])
+
+    async def test_interrupted_lookup_does_not_mark_delivery_or_modify_code(self):
+        from unittest.mock import Mock
+        s=self.service;s.speak_message=AsyncMock(return_value=False)
+        s.final_courier_read(s.pending_user_text,SimpleNamespace(interrupt=Mock(),generating=None));await s.message_lane.task
+        self.assertEqual(s.courier.get(self.row['id'])['status'],'pending')
+        self.assertEqual(s.courier.get(self.row['id'])['code'],'4321')
+
+    async def test_pickup_clarification_cannot_follow_another_speaker(self):
+        from unittest.mock import Mock
+        s=self.service;s.speak_message=AsyncMock(return_value=True)
+        state=SimpleNamespace(interrupt=Mock(),generating=None)
+        s.final_courier_read('我是快递员，我来取快递。',state);await s.message_lane.task
+        s.input_generation+=1;s.turn_person='bob'
+        self.assertFalse(s.final_courier_read('甲工',state))
+        self.assertEqual(s.courier.get(self.row['id'])['status'],'pending')
+
+    async def test_owner_visit_question_has_read_receipt_not_register_failure(self):
+        from unittest.mock import Mock
+        s=self.service;s.identified_person=lambda:'alice';s.turn_person='alice'
+        s.pending_user_text='小帅，快递员快递员刚才来来过没。';s.speak_message=AsyncMock(return_value=True)
+        state=SimpleNamespace(interrupt=Mock(),generating=None)
+        s.final_message(dict(type='conversation.item.input_audio_transcription.completed',item_id=s.turn_item_id),state)
+        await s.message_lane.task
+        text=s.speak_message.call_args.args[0]
+        self.assertIn('不能据此断定',text);self.assertNotIn('保存',text)
+        self.assertEqual(s.courier.get(self.row['id'])['status'],'pending')
+
+    async def test_model_lookup_waiting_for_final_is_superseded_once_by_public_read(self):
+        from unittest.mock import Mock
+        s=self.service;s.courier.phone_last4={'alice':'8244'};s.pending_user_text=None
+        s.speak_message=AsyncMock(return_value=True)
+        event=dict(name='courier_pickup',response_id='r',call_id='early-public',arguments=json.dumps(dict(action='lookup',owner_name='')))
+        await s.tool(self.ws,event)
+        self.assertIn('early-public',s.courier_waiters)
+        s.pending_user_text='我要取尾号8244的快递。'
+        s.final_message(dict(type='conversation.item.input_audio_transcription.completed',item_id=s.turn_item_id),SimpleNamespace(interrupt=Mock(),generating=None))
+        await s.resume_courier_calls(self.ws);await s.message_lane.task
+        s.speak_message.assert_awaited_once();self.assertIn('4、3、2、1',s.speak_message.call_args.args[0])
+        self.assertEqual(s.courier.get(self.row['id'])['status'],'announced')
+
+    def test_registration_never_enters_public_read_route(self):
+        from vivis.interaction.courier import courier_read_intent
+        for text in ('我有个快递，你见到快递员来了，告诉他取件码是3366。','把取件码改成4466','取消给快递员的转告'):
+            self.assertIsNone(courier_read_intent(text))
+
     def setUp(self):
         from test_cloud_control import CloudBackendTests
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
@@ -135,7 +223,8 @@ class CourierRuntimeTests(unittest.IsolatedAsyncioTestCase):
         s=self.service;s.unattributed_source_notice=True;s.speak_message_notice=AsyncMock(return_value=True)
         s.receipt_failure_notice();await s.message_lane.task
         text=s.speak_message_notice.call_args.args[0]
-        self.assertIn('尚未确认保存',text);self.assertNotIn('已保存',text)
+        self.assertIn('请求尚未完成',text);self.assertNotIn('已保存',text)
+        self.assertNotIn('取件码尚未确认保存',text)
         self.assertIsNone(s.message_receipts.pending);self.assertFalse(s.continue_response)
         self.assertEqual(s.courier.get(self.row['id'])['code'],'4321')
 

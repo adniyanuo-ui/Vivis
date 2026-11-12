@@ -8,6 +8,8 @@ robot's configured position envelope, including future braking distance.
 import importlib
 import math
 
+POSITION_ROUNDOFF_COUNTS=1e-7
+
 
 def settings(neck):
     value=neck.get('upstream_trajectory',{'enabled':False})
@@ -94,7 +96,7 @@ class UpstreamTrajectory:
 
     def _bounded(self,trajectory,margin=0.):
         low,high=position_extrema(trajectory)
-        return self.low+margin-1e-7<=low and high<=self.high-margin+1e-7
+        return self.low+margin-POSITION_ROUNDOFF_COUNTS<=low and high<=self.high-margin+POSITION_ROUNDOFF_COUNTS
 
     @staticmethod
     def _sample(trajectory,elapsed):
@@ -147,14 +149,20 @@ class UpstreamTrajectory:
             else:
                 state=candidate;mode='velocity'
         p,v,a=state
-        if (not all(math.isfinite(x) for x in state) or not self.low-1e-7<=p<=self.high+1e-7
+        if (not all(math.isfinite(x) for x in state) or not self.low-POSITION_ROUNDOFF_COUNTS<=p<=self.high+POSITION_ROUNDOFF_COUNTS
                 or abs(v)>self.maximum_speed+1e-6 or abs(a)>self.maximum_acceleration+1e-6
                 or abs(a-old_acceleration)>self.maximum_jerk*dt+1e-5):
             raise RuntimeError('Upstream trajectory reference exceeds motion limits')
-        self.position,self.velocity,self.acceleration=state
+        # The validated native profile may end a few floating-point ulps beyond
+        # the endpoint. Return/store an exact in-envelope position, so stricter
+        # downstream checks do not mistake numerical roundoff for real motion.
+        # Reject real overshoot above BEFORE this normalization; preserve v/a.
+        bounded_p=max(self.low,min(self.high,p));correction=bounded_p-p;p=bounded_p
+        self.position,self.velocity,self.acceleration=p,v,a
         self.last_diagnostic=dict(enabled=True,mode=mode,position=p,velocity=v,acceleration=a,
             jerk_average=(a-old_acceleration)/dt,dt=dt,requested_velocity=requested,
             return_duration_s=self.return_profile.duration if self.return_profile is not None else None)
+        if correction:self.last_diagnostic['position_roundoff_correction_counts']=correction
         return p
 
 

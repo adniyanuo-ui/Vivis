@@ -18,7 +18,7 @@ from vivis.speech.managed import ManagedVoice,session_with_program_context
 from vivis.speech.realtime import VoiceSession,connect_session,websocket_connection,receive_event
 from vivis.speech.service_recovery import ServiceRecovery,TransientServiceError,transient_error
 from vivis.interaction.robot_tasks import RobotTasks,relay_matches,MessageMeaningUncertain
-from vivis.interaction.courier import CourierHandoffs,pickup_request
+from vivis.interaction.courier import CourierHandoffs,pickup_request,courier_read_intent
 from vivis.interaction.message_delivery import (MessageService,MessageRequest,IdentityVerificationRequired,
     MessageRecipientUnavailable,MessageSourcePending)
 from vivis.interaction.message_status import message_view,operation_failure
@@ -37,12 +37,12 @@ CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负�
     '用户本句明确呼唤唤醒词时explicit_wake必须为true，否则为false；同句点播可用play加explicit_wake=true，或wake中填写program。仅唤醒时program填空字符串。'
     '你认识我吗、我是谁、我的年龄或职业等问题必须先调用get_robot_status，按当前身份回答；未知时不猜。'
     '个人记忆只按稳定单人身份归属；记忆关闭或身份未确认时，不承诺已经建立可跨次找回的个人记录。'
-    '询问某人来过没有，先查search_robot_memory或相关留言账本的实际记录；当前画面无人、没有待转达留言或查询无结果，都不能证明他没来过。没有可核验到访依据时明确说暂时无法确认；转达记录只能证明记录中的转达，不证明物品已经买好。'
+    '询问某人来过没有或留言转达状态，由最终识别文字触发本地记录查询和准确播报；不能把历史assistant回答当作到访证据。当前画面无人、没有待转达留言或查询无结果，都不能证明他没来过。没有可核验依据时只能说暂时无法确认；转达记录不证明物品已经买好。'
     '用户自报姓名或称呼不等于视觉核验。current_person为空时不能宣称认出了某位熟人，不能补全其姓名岗位或转述其任务。'
     'identity_state=reviewing表示控制器在身份保持窗口内，可能是低分、不同候选或暂时丢脸；不说突然忘记，也不声称刚刚重新核验成功。若identity_retained或identity_verified为true，沿用当前会话身份和业务权限。窗口到期后以新控制器状态为准。'
     '工具返回pending仅表示请求收到，不代表已经播放；准备完成后控制器才更新状态。'
     '工具accepted=false表示没有执行，必须依据error纠正工具调用，禁止说已经退出/已经完成。'
-    'controller_state.unattributed_source_notice=true表示识别片段没有可靠的话轮归属，不能据此宣称已记录；请用户将退件取件码连成一句再说，只问缺项，不假装没有疑问。'
+    'controller_state.unattributed_source_notice=true表示识别片段没有可靠的话轮归属，不能据此办理业务或宣称已记录；请用户完整表达当前请求，只问缺项，不把查询误说成登记取件码失败。'
     '交互态用户说笑一个/别笑了/认真一点/恢复自然时，调用set_expression，source=command；不能只口头答应。'
     '聊天自动回应使用同一个set_expression，source=social，结合当前话语、上下文和可观察表情；不要机械模仿。'
     '用户苦笑、抱怨、表达难过或谈严肃事情时，优先attentive或neutral收起笑容；愉快交流可温和smile，不每句都调用。'
@@ -120,6 +120,12 @@ class CloudManagedVoice(ManagedVoice):
         self.next_identity_verification=0.;self.relay_identity_hold=False;self.relay_recipients={}
         self.identity_display=None
         self.question_onset=None;self.invalid_question=None;self.recovered_query_generation=None
+        self.recovered_expression=None
+        robot_definition=json.loads(self.robot_path.read_text())
+        self.wake_words=(self.speech.get('wake_words') or robot_definition.get('identity',{}).get('wake_words')
+            or [robot_definition.get('identity',{}).get('display_name',robot_definition['name'])])
+        self.explicit_wake_pending=None;self.explicit_wake_seen=deque(maxlen=128)
+        self.cloud_audio_enabled=False
         self.identity_reset_pending=False;self.finish_responses=set();self.speech_responses=deque(maxlen=128)
         self.input_generation=0;self.response_inputs={};self.message_receipts=MessageReceipts()
         self.message_lane=None;self.message_claimed=None;self.message_speaker=None;self.courier_waiters={};self.unattributed_source_notice=False;self.message_connection=object()
@@ -201,7 +207,7 @@ class CloudManagedVoice(ManagedVoice):
 
     def can_speak(self):
         """Permission to start a NEW reply, independent of finishing its audio."""
-        return self.output_ready() and self.presence.allowed()
+        return self.explicit_wake_pending is None and self.output_ready() and self.presence.allowed()
 
     def can_play_response(self,rid):
         if not self.output_ready() or rid in self.blocked:return False
@@ -279,6 +285,10 @@ class CloudManagedVoice(ManagedVoice):
                 elif previous['ready'] and not command['ready']:self.announcement_kind='quiet'
             if mode!='standby' and self.memory_task and not self.memory_task.done():self.memory_task.cancel()
             self.context={k:command[k] for k in ('revision','mode','target','ready')}
+            if self.explicit_wake_pending:
+                if mode=='interaction' and previous['mode'] in ('standby','interaction'):
+                    self.explicit_wake_pending['revision']=revision
+                else:self.explicit_wake_pending=None
             self.tool_repair=None;self.control_pending=False
             if mode!='interaction' or not command['ready']:
                 self.expression.clear();self.expression_pending=None;self.expression_outcome=None
@@ -291,7 +301,7 @@ class CloudManagedVoice(ManagedVoice):
                 self.courier_query_pending=None
                 if self.cloud_state:self.cloud_state.interrupt(source='controller_context_changed')
             if mode=='interaction' and self.context['ready'] and (previous['mode']!='interaction' or not previous['ready']):
-                self.announcement_revision=None if self.announcement_kind=='quiet' else revision
+                self.announcement_revision=None if self.announcement_kind=='quiet' or self.explicit_wake_pending else revision
             return
         if command.get('kind')=='voice_mode':
             epoch=command.get('epoch');enabled=command.get('enabled')
@@ -464,8 +474,13 @@ class CloudManagedVoice(ManagedVoice):
         def guard():
             notice_guard()
             if self.identified_person()!=person:raise StaleMessageTurn()
+        recent=tuple(t['text'] for item,t in self.memory_turns.items()
+            if item!=self.turn_item_id and t['person']==actor and t['session']==self.memory_session
+            and t.get('connection') is connection and t.get('revision')==revision
+            and t.get('valid') and t.get('engaged') and isinstance(t.get('text'),str) and 0<len(t['text'])<=500)[-4:]
         return MessageRequest(actor,self.memory_session,None if automatic else self.turn_item_id,
-            None if automatic else self.turn_message_id,None if automatic else self.pending_user_text,person,guard=guard,notice_guard=notice_guard,read_only=self.recovered_query_generation==self.input_generation)
+            None if automatic else self.turn_message_id,None if automatic else self.pending_user_text,person,guard=guard,notice_guard=notice_guard,read_only=self.recovered_query_generation==self.input_generation,
+            recent_user_turns=() if automatic else recent)
 
     def message_valid(self,request):
         try:request.guard();return True
@@ -514,6 +529,7 @@ class CloudManagedVoice(ManagedVoice):
                 or event.get('item_id')!=self.turn_item_id or not self.pending_user_text
                 or not self.tasks or not self.memory or not self.can_speak()):return
         text=self.pending_user_text
+        if self.final_courier_read(text,state):return
         if re.search(r'取件码|快递员|(?:我来|上门).{0,6}取.{0,8}(?:快递|退件)',text):return
         lane=self.messages();person=self.identified_person()
         followup=bool(lane.last.get(person,{}).get('draft_source')) or lane.has_continuation(person,self.memory_session)
@@ -527,6 +543,57 @@ class CloudManagedVoice(ManagedVoice):
         for rid,generation in self.response_inputs.items():
             if generation==self.input_generation and rid not in self.blocked:self.blocked.append(rid)
         if state.generating:asyncio.create_task(self.cancel_inference(self.ws,state.generating))
+
+    def final_courier_read(self,text,state):
+        """Public pickup reads and owner visit queries have one final-ASR executor."""
+        intent=courier_read_intent(text);previous=self.courier_query_pending
+        if intent is None and previous and previous.get('generation',-2)+1==self.input_generation:
+            if (previous.get('connection') is self.message_connection and previous.get('actor')==self.turn_person
+                    and previous.get('revision')==self.context['revision']):
+                from vivis.interaction.courier import phone_suffixes
+                aliases=[a for p in self.knowledge.people.values() for a in (p['display_name'],p.get('preferred_address','')) if a]
+                if phone_suffixes(text) or any(a in text for a in aliases):
+                    intent='lookup';text=previous['source']+'。'+text
+        if intent is None or not self.courier:return False
+        if self.message_claimed==self.input_generation:return True
+        request=self.message_request();lane=self.messages();lane.cancel()
+        self.message_claimed=self.input_generation;self.continue_response=False
+        self.message_receipts.pending=None;self.courier_query_pending=None
+        state.interrupt(source='fixed_courier_read')
+        for rid,generation in self.response_inputs.items():
+            if generation==self.input_generation and rid not in self.blocked:self.blocked.append(rid)
+        if state.generating:asyncio.create_task(self.cancel_inference(self.ws,state.generating))
+        generation=self.input_generation
+        async def read_and_speak():
+            try:
+                request.guard()
+                if intent=='visit':
+                    if not request.verified_person or request.verified_person!=request.actor:
+                        await self.speak_message_notice('查询您委托的退件转告记录需要确认本人。来取码的快递员不需要认脸，只需提供委托人称呼或手机尾号。',request);return
+                    result=self.courier.visit_query(request.actor)
+                else:
+                    result=self.courier.lookup('',text)
+                request.guard()
+                prompts=dict(need_owner='您来取谁的退件？请说委托人姓名、称呼，或手机后四位。',
+                    not_found='没有找到与您提供信息匹配的有效退件码，请核对委托人称呼或手机后四位。',
+                    ambiguous_owner='提供的信息对应多位委托人，请补充具体姓名。')
+                spoken=result.get('spoken_receipt') or prompts[result['status']]
+                if intent=='lookup' and result['status'] in ('need_owner','ambiguous_owner'):
+                    self.courier_query_pending=dict(source=text,generation=generation,actor=request.actor,
+                        connection=self.message_connection,revision=self.context['revision'])
+                lane.result=dict(operation_status='read',saved=None,result=result);lane.result_actor=request.actor
+                self.log.write('courier_fixed_read',action=intent,status=result['status'],source_item=request.source_item)
+                complete=await self.speak_message(spoken,request)
+                request.guard()
+                if complete and result['status']=='available':
+                    self.courier.mark_announced(result['handoff_id'],result['version'],'fixed-read:'+str(request.source_item))
+            except (asyncio.CancelledError,StaleMessageTurn):pass
+            except Exception as exc:
+                self.log.write('courier_fixed_read_failed',error_type=type(exc).__name__)
+                try:await self.speak_message_notice('这次退件查询或播报没有完成，已有取件码记录保持不变。',request)
+                except (Exception,asyncio.CancelledError):pass
+        lane.task=asyncio.create_task(read_and_speak())
+        return True
 
     async def cancel_inference(self,ws,response_id):
         # The cancel is response-scoped locally; never cancel a newer answer
@@ -630,9 +697,73 @@ class CloudManagedVoice(ManagedVoice):
         outputs=set(self.player.response_ids(state.generating))
         outputs.update(rid for rid,r in state.responses.items() if now-r.get('empty_dac',-float('inf'))<1.)
         self.invalid_question=None
+        self.recovered_expression=None
         self.question_onset=dict(item=item_id,generation=self.input_generation,revision=self.context['revision'],
             connection=self.message_connection,person=self.turn_person,quiet=quiet,outputs=outputs,
             eligible=self.context['mode']=='interaction' and self.context['ready'] and self.presence.visible() and self.can_speak())
+
+    def admit_explicit_wake(self,event,state):
+        from vivis.speech.explicit_wake import addressed_wake
+        from vivis.speech.invalid_question import distinct_from_playback
+        item=event.get('item_id');text=event.get('transcript');source=self.question_onset
+        if (not addressed_wake(text,self.wake_words) or item in self.explicit_wake_seen
+                or not source or item!=source['item'] or self.context['mode'] not in ('standby','interaction')
+                or source['generation']!=self.input_generation or source['revision']!=self.context['revision']
+                or source['connection'] is not self.message_connection
+                or source['person']!=(self.identified_person() or self.anonymous) or self.in_speech):return False
+        turn=self.memory_turns.get(item);ended=self.turn_ended_at
+        if not ended and self.invalid_question and self.invalid_question['item']==item:ended=self.invalid_question['ended']
+        if not turn or ended is None or time.monotonic()-ended>policy()['message_extract_s']:return False
+        outputs=source.get('outputs',set())
+        if not source['quiet'] and not distinct_from_playback(text,[state.responses.get(r,{}).get('transcript') for r in outputs]):return False
+        if set(self.player.response_ids(state.generating))-outputs and any(
+                self.response_inputs.get(r)!=self.input_generation for r in self.player.response_ids(state.generating)):return False
+        self.explicit_wake_seen.append(item)
+        already_audible=self.can_speak() and self.cloud_audio_enabled and turn['valid']
+        self.presence.wake();self.turn_engaged=True;turn['engaged']=True;turn['valid']=True
+        self.turn_item_id=item;self.turn_person=source['person'];self.turn_ended_at=ended;self.pending_user_text=text
+        self.invalid_question=None
+        self.log.write('explicit_wake_permission',item_id=item,mode=self.context['mode'],
+            audio_recovery_required=not already_audible,face_visible=self.presence.visible())
+        if already_audible:return False
+        self.explicit_wake_pending=dict(source,text=text,ended=ended)
+        self.announcement_revision=None;self.continue_response=False
+        for rid,generation in self.response_inputs.items():
+            if generation==self.input_generation:
+                state.interrupt(rid,source='explicit_wake_replace_silent_reply')
+                if rid not in self.blocked:self.blocked.append(rid)
+        if self.context['mode']=='standby':
+            self.emit(dict(kind='cloud_action',revision=self.context['revision'],
+                arguments=dict(action='wake',program='',explicit_wake=True),text='明确唤醒词：'+text))
+        return True
+
+    def explicit_wake_current(self,source):
+        return (self.explicit_wake_pending is source and source['generation']==self.input_generation
+            and source['connection'] is self.message_connection and source['revision']==self.context['revision']
+            and source['person']==(self.identified_person() or self.anonymous)
+            and self.turn_item_id==source['item'])
+
+    async def complete_explicit_wake(self,ws,state,controller_events,audio_gate,instructions):
+        source=self.explicit_wake_pending
+        if source is None:return False
+        if not self.explicit_wake_current(source):
+            self.explicit_wake_pending=None;return False
+        if not self.output_ready() or self.in_speech:return False
+        self.presence.wake()
+        if state.generating:await self.cancel_inference(ws,state.generating)
+        await audio_gate.enable(ws,instructions)
+        if not self.explicit_wake_current(source) or self.in_speech:return False
+        self.cloud_audio_enabled=True
+        directive=('控制器已根据本话轮明确唤醒词授予说话许可，云端已确认开启语音。原话：'+source['text']+
+            '。请回答这个原问题或理解原请求；无需再次唤醒，不重复自我介绍。不得把唤醒视为熟人身份核验。')
+        await controller_events.append(ws,self.context,'explicit_wake',directive)
+        if not self.explicit_wake_current(source) or self.in_speech:return False
+        self.explicit_wake_pending=None;self.announcement_revision=None
+        self.final_message(dict(type='conversation.item.input_audio_transcription.completed',item_id=source['item']),state)
+        self.continue_response=self.message_claimed!=self.input_generation
+        self.log.write('explicit_wake_audio_ready',item_id=source['item'],original_question_preserved=True)
+        self.emit(dict(kind='voice_warning',epoch=self.epoch,message='已收到明确唤醒，说话许可和云端语音输出已恢复。'))
+        return True
 
     def question_invalidated(self,event):
         source=self.question_onset
@@ -640,16 +771,21 @@ class CloudManagedVoice(ManagedVoice):
             self.invalid_question=dict(source,ended=time.monotonic())
 
     def recover_invalid_question(self,event,state):
-        from vivis.speech.invalid_question import complete_question,distinct_from_playback
+        from vivis.speech.invalid_question import complete_question,distinct_from_playback,explicit_expression_request
         source=self.invalid_question
         if not source or source['item']!=event.get('item_id'):return False
         self.invalid_question=None  # One decision per final item; duplicates never replay it.
+        expression=explicit_expression_request(event.get('transcript'))
+        self.log.write('invalid_final_transcript',item_id=source['item'],
+            expression_candidate=expression,question_candidate=complete_question(event.get('transcript')))
         person=self.identified_person() or self.anonymous
         active=set(self.player.response_ids(state.generating))
         outputs=source.get('outputs',set())
         barge_in=(not source['quiet'] and not active-outputs and
             distinct_from_playback(event.get('transcript',''),[state.responses.get(rid,{}).get('transcript') for rid in outputs]))
-        if (not source['eligible'] or not (source['quiet'] or barge_in) or not complete_question(event.get('transcript'))
+        if (not source['eligible'] or not (source['quiet'] or barge_in)
+                or not (complete_question(event.get('transcript')) or expression)
+                or (expression and not source['quiet'])
                 or source['generation']!=self.input_generation or source['revision']!=self.context['revision']
                 or source['connection'] is not self.message_connection or source['person']!=person
                 or time.monotonic()-source['ended']>policy()['message_extract_s']
@@ -664,12 +800,15 @@ class CloudManagedVoice(ManagedVoice):
         turn['valid']=True
         self.turn_item_id=source['item'];self.turn_person=source['person'];self.turn_ended_at=source['ended']
         self.recovered_query_generation=self.input_generation
+        if expression:self.recovered_expression=dict(source,consumed=False)
         self.pending_user_text=event['transcript']
         state.current_user_turn=dict(item_id=source['item'],confirmed_end_monotonic=source['ended'])
         state.speech_stopped_at=source['ended']
         self.announcement_revision=None;self.continue_response=False
-        self.log.write('invalid_question_recovered',item_id=source['item'],read_only=True,
-            reason='final_question_barge_in' if barge_in else 'final_question_while_robot_quiet',person_id=person)
+        self.log.write('invalid_expression_recovered' if expression else 'invalid_question_recovered',
+            item_id=source['item'],read_only=not expression,allowed_action='set_expression_once' if expression else None,
+            reason='explicit_expression_while_robot_quiet' if expression else
+                'final_question_barge_in' if barge_in else 'final_question_while_robot_quiet',person_id=person)
         return True
 
     async def ask_recovered_question(self,ws,controller_events,state,request):
@@ -679,16 +818,22 @@ class CloudManagedVoice(ManagedVoice):
             if state.generating in state.blocked:await self.cancel_inference(ws,state.generating)
             directive=('云端最终识别到当前访客的完整问句，但语义轮次检测误判为无效。原话：'+request.source_text+
                 '。这是原话轮的只读恢复，不是新授权。请回答或调用只读查询；不保存、修改、取消留言，不启动节目或动作。')
-            await controller_events.append(ws,self.context,'recovered_question',directive)
+            expression=self.recovered_expression
+            if expression:
+                directive=('云端最终识别到当前访客的明确表情请求，但语义轮次检测误判为无效。原话：'+request.source_text+
+                    '。请理解该请求，只通过set_expression执行一次对应表情，再依据执行结果简短回答。'
+                    '仍使用现有标定表情及强度、时长限制；不要办理留言、切换节目或调用其他动作。纯笑声不是动作指令。')
+            await controller_events.append(ws,self.context,'recovered_expression' if expression else 'recovered_question',directive)
             request.notice_guard()
             if not self.in_speech and (state.generating is None or state.generating in state.blocked) and self.message_claimed!=self.input_generation:
                 self.continue_response=True
         except (asyncio.CancelledError,StaleMessageTurn):pass
         except Exception as exc:
             self.log.write('invalid_question_recovery_failed',error_type=type(exc).__name__)
-            self.emit(dict(kind='voice_warning',epoch=self.epoch,message='这句提问未能恢复，请再问一次。'))
+            self.emit(dict(kind='voice_warning',epoch=self.epoch,message='这句请求未能恢复，请再说一次。'))
 
     def begin_user_turn(self,item_id):
+        self.explicit_wake_pending=None
         if self.message_lane:
             actor=self.identified_person() or self.anonymous
             self.message_lane.next_turn(actor,self.memory_session)
@@ -699,7 +844,7 @@ class CloudManagedVoice(ManagedVoice):
         self.turn_saved=False;self.pending_user_text=None;self.turn_engaged=self.can_speak()
         if isinstance(item_id,str) and item_id:
             self.memory_turns[item_id]=dict(person=self.turn_person,session=self.memory_session,
-                engaged=self.turn_engaged,valid=True,text=None,message_id=None)
+                engaged=self.turn_engaged,valid=True,text=None,message_id=None,connection=self.message_connection,revision=self.context['revision'])
             while len(self.memory_turns)>128:self.memory_turns.pop(next(iter(self.memory_turns)))
 
     def remember(self,event):
@@ -715,6 +860,10 @@ class CloudManagedVoice(ManagedVoice):
                 if item_id==self.turn_item_id:self.pending_user_text=turn['text'];self.unattributed_source_notice=False
             else:
                 self.log.write('memory_transcript_unattributed',item_id=item_id,reason='unknown_user_turn')
+                # An orphaned short acknowledgement is not a business request.
+                # Keep it unattributed without asking for an unrelated pickup code.
+                from vivis.speech.message_receipts import normalized
+                if normalized(event.get('transcript','')) in ('是','嗯','啊','对','好','好的','哦','噢','呃','这','这这'):return
                 self.unattributed_source_notice=True
                 self.emit(dict(kind='voice_warning',epoch=self.epoch,
                     message='收到语音片段，但无法核验它属于哪个话轮；未据此办理业务。请将取件码或留言连成一句再说。'))
@@ -790,25 +939,28 @@ class CloudManagedVoice(ManagedVoice):
             raise MessageSourcePending('等待本轮识别文字；没有读取或修改退件记录。')
         self.turn_engaged=True;self.remember({})
         action=args.get('action')
-        if action=='owner_query':
+        if action in ('owner_query','owner_visit'):
             owner=self.identified_person()
             if not owner or self.turn_person!=owner:raise IdentityVerificationRequired('查询本人退件留言需要确认委托人身份。')
             self.fresh_task_source()
-            result=self.courier.owner_query(owner);text=result['spoken_receipt']
+            result=(self.courier.visit_query(owner) if action=='owner_visit' else self.courier.owner_query(owner));text=result['spoken_receipt']
             self.courier_offer=None
         elif action=='lookup':
             source=self.pending_user_text;previous=self.courier_query_pending
-            if previous and previous['generation']+1==self.input_generation:
+            if (previous and previous['generation']+1==self.input_generation
+                    and previous.get('actor')==self.turn_person and previous.get('connection') is self.message_connection
+                    and previous.get('revision')==self.context['revision']):
                 source=previous['source']+'。'+source
             result=self.courier.lookup(args.get('owner_name',''),source)
             self.courier_offer=None
-            prompts=dict(need_owner='您来取谁的退件？请说一下委托人的称呼。',
+            prompts=dict(need_owner='您来取谁的退件？请说委托人姓名、称呼，或手机后四位。',
                 not_found='目前没有这位委托人授权转告的退件取件码，请让本人先登记。',
                 ambiguous_owner='这个称呼对应不止一位委托人，请说具体姓名。')
             text=result.get('spoken_receipt') or prompts[result['status']]
             if result['status']=='available':
                 self.courier_offer=dict(result,response_id=None)
-            self.courier_query_pending=(dict(source=source,generation=self.input_generation)
+            self.courier_query_pending=(dict(source=source,generation=self.input_generation,actor=self.turn_person,
+                connection=self.message_connection,revision=self.context['revision'])
                 if result['status'] in ('need_owner','ambiguous_owner') and pickup_request(source) else None)
         elif action=='register':
             owner=self.identified_person()
@@ -864,7 +1016,7 @@ class CloudManagedVoice(ManagedVoice):
         lane=self.messages()
         if lane.task and not lane.task.done():return  # Never cancel a real DB operation.
         request=self.message_request()
-        text=('刚才的语音片段无法可靠关联，这次取件码尚未确认保存。请连起来说退件取件码，再加上数字。'
+        text=('刚才的语音片段无法可靠关联，这次请求尚未完成；已有记录没有改变，请完整说一下要查询或办理什么。'
               if self.unattributed_source_notice else
               '刚才的操作回执未能核验，我不能确认这次操作成功。可以查询账本核对；已有记录不会因此删除。')
         self.message_receipts.pending=None;self.continue_response=False
@@ -901,16 +1053,24 @@ class CloudManagedVoice(ManagedVoice):
         call=event.get('call_id');name=event.get('name');raw=event.get('arguments','')
         if not isinstance(call,str) or not 1<=len(call)<=128 or (call in self.calls and not _resuming):return
         if not _resuming:self.calls.append(call)
-        output=dict(accepted=False);args=None;switch_request=None;dialect_rollback=None
+        output=dict(accepted=False);args=None;switch_request=None;dialect_rollback=None;expression_recovery=False
         try:
             if not isinstance(raw,str) or len(raw)>4096:raise ValueError('Invalid tool arguments')
             args=json.loads(raw)
             revision=self.response_revisions.get(event.get('response_id'))
             if revision!=self.context['revision']:raise ValueError('Stale tool result after state change')
             if self.recovered_query_generation==self.input_generation:
+                source=self.recovered_expression
+                expression_recovery=(name=='set_expression' and source is not None and not source['consumed']
+                    and source['generation']==self.input_generation and source['revision']==self.context['revision']
+                    and source['connection'] is self.message_connection
+                    and source['person']==(self.identified_person() or self.anonymous)
+                    and source['item']==self.turn_item_id and not self.in_speech and self.presence.visible()
+                    and self.response_inputs.get(event.get('response_id'))==self.input_generation
+                    and time.monotonic()-source['ended']<=policy()['message_extract_s'])
                 read_tool=name in ('get_robot_status','search_person_memory','search_robot_memory')
-                read_tool|=name=='courier_pickup' and isinstance(args,dict) and args.get('action') in ('owner_query','lookup')
-                if not read_tool:raise ValueError('Recovered question is read-only; request a fresh explicit action.')
+                read_tool|=name=='courier_pickup' and isinstance(args,dict) and args.get('action') in ('owner_query','owner_visit','lookup')
+                if not (read_tool or expression_recovery):raise ValueError('Recovered turn does not authorize this action; request a fresh explicit action.')
             if name in ('search_person_memory','search_robot_memory'):
                 speaker=self.reply_people.get(event.get('response_id'))
                 if speaker and not speaker.startswith('anonymous:') and speaker!=self.identified_person():
@@ -964,6 +1124,7 @@ class CloudManagedVoice(ManagedVoice):
                 if self.context['mode']!='interaction' or not self.context['ready'] or not self.presence.allowed():
                     raise ValueError('Expression is only available in ready interaction; stop the current programme first if user requested it')
                 result=self.expression.publish(args,revision)
+                if expression_recovery:self.recovered_expression['consumed']=True
                 output=dict(accepted=True,**result)
                 self.tool_repair=None
                 if result['status']=='pending_expression_target':
@@ -1095,10 +1256,15 @@ class CloudManagedVoice(ManagedVoice):
                     self.log.write('cloud_service_recovery_exhausted',code=exc.code,event_id=exc.event_id)
                     retry=dict(attempt=0,maximum=self.config['service_recovery']['max_reconnects'],
                         delay_s=policy()['recovery_cooldown_s'],window_s=self.config['service_recovery']['window_s'])
-                self.log.write('cloud_service_recovery',code=exc.code,event_id=exc.event_id,**retry,
+                detail=str(exc)
+                if self.secret:detail=detail.replace(self.secret,'[redacted]')
+                detail=' '.join(detail.split())[:600]
+                self.log.write('cloud_service_recovery',code=exc.code,event_id=exc.event_id,error=detail,**retry,
                     microphone_reopened=False,hardware_restarted=False,commands_replayed=False)
+                progress=(f'快速重试已达上限，等待{retry["delay_s"]:g}秒后再尝试'
+                    if retry['attempt']==0 else f'将在{retry["delay_s"]:g}秒后重连 {retry["attempt"]}/{retry["maximum"]}')
                 self.emit(dict(kind='voice_warning',epoch=self.epoch,
-                    message='Qwen临时服务错误（'+exc.code+'），正在重连 '+str(retry['attempt'])+'/'+str(retry['maximum'])+'；不重放节目指令。'))
+                    message=f'Qwen语音连接暂不可用：{detail}；{progress}；不重放节目指令。'))
                 self.response_revisions.clear();self.reply_people.clear();self.pending_memories.clear()
                 self.continue_response=False;self.tool_repair=None;self.in_speech=False
                 self.turn_item_id=None;self.turn_message_id=None;self.pending_user_text=None;self.turn_ended_at=None
@@ -1142,6 +1308,9 @@ class CloudManagedVoice(ManagedVoice):
         try:
             self.message_connection=object();self.courier_waiters.clear()
             self.invalid_question=None;self.question_onset=None;self.recovered_query_generation=None
+            self.recovered_expression=None
+            self.explicit_wake_pending=None
+            self.cloud_audio_enabled=False
             self.message_claimed=None
             self.relay_recipients.clear()
             self.finish_responses.clear();self.speech_responses.clear()
@@ -1184,6 +1353,8 @@ class CloudManagedVoice(ManagedVoice):
                 state=VoiceSession(self.player,self.log,on_transcript=transcript,interruption_hold_ms=self.config['interruption_hold_ms']);self.cloud_state=state
                 suppressed=deque(maxlen=128)
                 controller_events=ControllerEventGate()
+                from vivis.speech.explicit_wake import AudioPermissionGate
+                audio_gate=AudioPermissionGate()
                 uplink=asyncio.Queue(maxsize=max(1,round(policy()['uplink_max_age_s']/.02)));self.cloud_queue=uplink
                 self.transport_fault=None
                 async def send():
@@ -1235,6 +1406,9 @@ class CloudManagedVoice(ManagedVoice):
                         if kind=='response.audio.delta':event['_network_received_monotonic']=time.monotonic()
                         transcript_response_id=rid
                         controller_events.observe(event)
+                        audio_gate.observe(event)
+                        if kind=='session.updated' and 'modalities' in event.get('session',{}):
+                            self.cloud_audio_enabled='audio' in event['session']['modalities']
                         if self.response_busy(event,state):continue
                         if kind=='error' and event.get('error',{}).get('code')=='response_idle_timeout':
                             self.log.write('cloud_idle_timeout',code='response_idle_timeout')
@@ -1283,7 +1457,8 @@ class CloudManagedVoice(ManagedVoice):
                             else:self.turn_ended_at=time.monotonic()
                         if kind=='input_audio_buffer.speech_stopped':self.response_waiting_user_end=False
                         if kind=='response.function_call_arguments.done':await self.tool(ws,event);continue
-                        recovered=(kind=='conversation.item.input_audio_transcription.completed' and self.recover_invalid_question(event,state))
+                        waking=(kind=='conversation.item.input_audio_transcription.completed' and self.admit_explicit_wake(event,state))
+                        recovered=(not waking and kind=='conversation.item.input_audio_transcription.completed' and self.recover_invalid_question(event,state))
                         try:events=self.message_receipts.filter(event)
                         except ReceiptRejected as exc:
                             await reject_receipt(exc.response_id,str(exc));continue
@@ -1342,6 +1517,10 @@ class CloudManagedVoice(ManagedVoice):
                             self.memory_retry_at=time.monotonic()+60
                             self.memory_task=asyncio.create_task(self.compact_memory())
                         self.update_speech_permission(state,permission)
+                        if self.explicit_wake_pending:
+                            if await self.complete_explicit_wake(ws,state,controller_events,audio_gate,instructions):
+                                previous=instructions;previous_modalities=['text','audio']
+                            if self.explicit_wake_pending:continue
                         modalities=['text','audio'] if self.can_speak() or self.finish_responses else ['text']
                         if instructions!=previous or modalities!=previous_modalities:
                             await asyncio.wait_for(ws.send(json.dumps(dict(type='session.update',session=dict(instructions=instructions,modalities=modalities)),ensure_ascii=False)),timeout=policy()['send_timeout_s'])
@@ -1411,6 +1590,9 @@ class CloudManagedVoice(ManagedVoice):
                 self.memory_task.cancel();await asyncio.gather(self.memory_task,return_exceptions=True)
             self.message_connection=object();self.courier_waiters.clear()
             self.invalid_question=None;self.question_onset=None;self.recovered_query_generation=None
+            self.recovered_expression=None
+            self.explicit_wake_pending=None
+            self.cloud_audio_enabled=False
             self.cloud_queue=None;self.ws=None;self.message_lane.cancel() if self.message_lane else None
             if state:
                 state.interrupt(source='cloud_closed');state.poll_playback()

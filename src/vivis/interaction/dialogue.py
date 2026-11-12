@@ -24,6 +24,7 @@ from vivis.interaction.voice_bridge import VoiceBridge
 from vivis.motion.mapping import read_json
 from vivis.hardware.feetech.sdk import check_serial_access
 from vivis.hardware.feetech.protocol import ProtocolError
+from vivis.interaction.failure_report import describe_failure,failure_lines
 
 
 def dependencies(config,listener_only=False):
@@ -605,11 +606,16 @@ def main(argv=None):
                         if voice:voice.last_program=dict(last_program)
                         record('program_result',**last_program)
                     failed_log=worker.folder.with_suffix('.log') if code not in (0,130) else None
+                    failure=describe_failure(worker.folder,code,active_program or active_target) if failed_log is not None else None
                     session.completed(active_target,cancelled)
                     worker=None;active_target=None;active_program=None
                     if failed_log is not None:
-                        fault='Program failed; see '+str(failed_log);phase='fault';session.pending_prompt=None
-                        print('节目故障，已停止；管理器将退出，处理后请重新启动。日志：'+str(failed_log),flush=True)
+                        lines=failure_lines(failure)
+                        fault='；'.join(lines);phase='fault';session.pending_prompt=None
+                        record('worker_failure',**failure)
+                        try:failed_log.with_suffix('.failure.json').write_text(json.dumps(failure,ensure_ascii=False,indent=2)+'\n')
+                        except OSError as exc:record('failure_report_write_error',error=str(exc))
+                        for line in lines:print(line,flush=True)
                         publish(True)
                         if prompt and not quitting and (voice is None or voice.released):
                             try:

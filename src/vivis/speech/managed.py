@@ -41,7 +41,9 @@ def voice_configuration(speech,robot):
     prepared='、'.join(p['title'] for p in catalog['programs'] if p['kind']=='prerecorded')
     session['instructions']+=' 你代表真实机器人小帅，本体有眼睛和摄像头，但云端没有收到视频帧；视觉观察与跟随由本地控制器负责。你当前处于交互态。可用本地节目为'+titles+'；其中'+prepared+'是已经准备好的静态作品。用户点播时由本地控制器切换，你不要自行编造、演唱或讲述替代内容，不声称已开始播放或已进入待机。用户只笼统要求表演节目时，请询问选择哪个。节目名称听不清或不在列表时，请确认完整名称，不要口头答应开始播放。'
     session['instructions']+=' 介绍你会什么时，只介绍能力类别：'+abilities+'；不要默认报具体作品名。用户询问有哪些歌曲或剧本、或者明确选作品时，才介绍当前节目库。未来规划包括'+planned+'，必须明确它们尚在规划中，不能说已经能执行。实际执行结果没有返回给你时，不要声称已经安排、已经播放或已经停止；只可简短确认收到请求。'
-    library=[dict(id=p['id'],title=p['title'],category=p.get('category',p['kind'])) for p in catalog['programs']]
+    library=[dict(id=p['id'],title=p['title'],category=p.get('category',p['kind']),
+                  aliases=p.get('aliases',[]),**({'artist':p['artist']} if p.get('artist') else {}))
+             for p in catalog['programs']]
     session['instructions']+=' 当前本地节目库是以下完整事实，不是举例：'+json.dumps(library,ensure_ascii=False)+'。song是歌曲、script是剧本、expression是表情跟随。询问歌曲或剧本列表时，只按对应类别列出这里的名称；不要说没有清单，不要虚构其他流行歌曲，也不要把剧本当歌曲。用户点播库外作品时说明暂未收录。'
     if options.get('control_backend')=='qwen_realtime':
         interval=options.get('control_poll_interval_s',.05)

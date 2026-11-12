@@ -68,6 +68,209 @@
         "模仿我的表情"
       ],
       "category": "expression"
+    },
+    {
+      "id": "james_blunt_youre_beautiful",
+      "title": "You're Beautiful",
+      "artist": "James Blunt",
+      "kind": "prerecorded",
+      "work": "james_blunt_youre_beautiful",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "You're Beautiful",
+        "You Are Beautiful",
+        "你是如此美丽",
+        "James Blunt You're Beautiful",
+        "James Blunt的You're Beautiful"
+      ]
+    },
+    {
+      "id": "james_blunt_1973",
+      "title": "1973",
+      "artist": "James Blunt",
+      "kind": "prerecorded",
+      "work": "james_blunt_1973",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "1973",
+        "James Blunt 1973",
+        "James Blunt的1973"
+      ]
+    },
+    {
+      "id": "james_blunt_carry_you_home",
+      "title": "Carry You Home",
+      "artist": "James Blunt",
+      "kind": "prerecorded",
+      "work": "james_blunt_carry_you_home",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "Carry You Home",
+        "James Blunt Carry You Home",
+        "James Blunt的Carry You Home"
+      ]
+    },
+    {
+      "id": "james_blunt_same_mistake",
+      "title": "Same Mistake",
+      "artist": "James Blunt",
+      "kind": "prerecorded",
+      "work": "james_blunt_same_mistake",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "Same Mistake",
+        "James Blunt Same Mistake",
+        "James Blunt的Same Mistake"
+      ]
+    },
+    {
+      "id": "james_blunt_bonfire_heart",
+      "title": "Bonfire Heart",
+      "artist": "James Blunt",
+      "kind": "prerecorded",
+      "work": "james_blunt_bonfire_heart",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "Bonfire Heart",
+        "James Blunt Bonfire Heart",
+        "James Blunt的Bonfire Heart"
+      ]
+    },
+    {
+      "id": "li_jian_gei_ni",
+      "title": "给你",
+      "artist": "李健",
+      "kind": "prerecorded",
+      "work": "li_jian_gei_ni",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "给你",
+        "想要什么给你",
+        "想要什么都给你",
+        "李健 给你",
+        "李健的给你"
+      ]
+    },
+    {
+      "id": "li_jian_beijiaer_hupan",
+      "title": "贝加尔湖畔",
+      "artist": "李健",
+      "kind": "prerecorded",
+      "work": "li_jian_beijiaer_hupan",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "贝加尔湖畔",
+        "李健 贝加尔湖畔",
+        "李健的贝加尔湖畔"
+      ]
+    },
+    {
+      "id": "li_jian_chuan_qi",
+      "title": "传奇",
+      "artist": "李健",
+      "kind": "prerecorded",
+      "work": "li_jian_chuan_qi",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "传奇",
+        "李健 传奇",
+        "李健的传奇"
+      ]
+    },
+    {
+      "id": "li_jian_yi_xiang_ren",
+      "title": "异乡人",
+      "artist": "李健",
+      "kind": "prerecorded",
+      "work": "li_jian_yi_xiang_ren",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "异乡人",
+        "李健 异乡人",
+        "李健的异乡人"
+      ]
+    },
+    {
+      "id": "li_jian_si_shui_liu_nian",
+      "title": "似水流年",
+      "artist": "李健",
+      "kind": "prerecorded",
+      "work": "li_jian_si_shui_liu_nian",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "似水流年",
+        "李健 似水流年",
+        "李健的似水流年"
+      ]
+    },
+    {
+      "id": "li_jian_jia_ru_ai_you_tian_yi",
+      "title": "假如爱有天意",
+      "artist": "李健",
+      "kind": "prerecorded",
+      "work": "li_jian_jia_ru_ai_you_tian_yi",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "假如爱有天意",
+        "李健 假如爱有天意",
+        "李健的假如爱有天意"
+      ]
+    },
+    {
+      "id": "jay_chou_dao_xiang",
+      "title": "稻香",
+      "artist": "周杰伦",
+      "kind": "prerecorded",
+      "work": "jay_chou_dao_xiang",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "稻香",
+        "周杰伦 稻香",
+        "周杰伦的稻香"
+      ]
+    },
+    {
+      "id": "jvke_golden_hour",
+      "title": "golden hour",
+      "artist": "JVKE",
+      "kind": "prerecorded",
+      "work": "jvke_golden_hour",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "golden hour",
+        "JVKE golden hour",
+        "JVKE的golden hour"
+      ]
+    },
+    {
+      "id": "ai_ren_i_live",
+      "title": "哀人i (Live)",
+      "artist": "余文乐 / 艾热 AIR / 王以太",
+      "kind": "prerecorded",
+      "work": "ai_ren_i_live",
+      "category": "song",
+      "realtime_response": false,
+      "aliases": [
+        "哀人i (Live)",
+        "哀人i",
+        "哀人",
+        "哀人现场版",
+        "余文乐 / 艾热 AIR / 王以太 哀人i (Live)",
+        "余文乐 / 艾热 AIR / 王以太的哀人i (Live)"
+      ]
     }
   ],
   "standby_phrases": [

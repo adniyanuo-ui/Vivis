@@ -28,7 +28,8 @@ class PreparedProgramTests(unittest.TestCase):
 
     def test_both_artistic_tasks_use_static_backend_without_social_or_a2f_flags(self):
         tasks=[p for p in self.catalog['programs'] if p['kind']=='prerecorded']
-        self.assertEqual({p['work'] for p in tasks},{'0001','wz2'})
+        self.assertTrue({'0001','wz2'}<={p['work'] for p in tasks})
+        self.assertTrue(all(p['work'] in self.robot.works['works'] for p in tasks))
         for p in tasks:
             self.assertFalse(p['realtime_response'])
             command=program_command(p,self.robot,Path('/tmp/round1'),self.speech,self.settings)
@@ -66,9 +67,13 @@ class PreparedProgramTests(unittest.TestCase):
     def test_generic_song_and_script_requests_resolve_by_catalog_category(self):
         import copy
         router=IntentRouter(self.catalog)
-        for phrase,program in [('呃播放剧本','wz2'),('播放预设剧本','wz2'),('给我表演一段剧本吧','wz2'),
-                               ('播放歌曲','baigufuren'),('唱唱唱唱首歌','baigufuren')]:
+        for phrase,program in [('呃播放剧本','wz2'),('播放预设剧本','wz2'),('给我表演一段剧本吧','wz2')]:
             self.assertEqual(router.parse(phrase,state='interaction'),dict(kind='select',program=program),phrase)
+        for phrase in ('播放歌曲','唱唱唱唱首歌'):
+            self.assertEqual(router.parse(phrase,state='interaction'),dict(kind='prompt',name='clarify'))
+        single=copy.deepcopy(self.catalog)
+        single['programs']=[p for p in single['programs'] if p.get('category')!='song' or p['id']=='baigufuren']
+        self.assertEqual(IntentRouter(single).parse('播放歌曲',state='interaction'),dict(kind='select',program='baigufuren'))
         multiple=copy.deepcopy(self.catalog)
         multiple['programs'].append(dict(id='another-script',title='另一个剧本',kind='prerecorded',category='script',aliases=['另一个剧本']))
         router=IntentRouter(multiple)

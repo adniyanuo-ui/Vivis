@@ -17,15 +17,35 @@ def code_digits(text):
 
 
 def public_receipt(owner,code):
-    return owner+'这件退件的取件码是'+ '、'.join(code)+'。您收到取件码了吗？'
+    return owner+'这件退件的取件码是'+ '、'.join(code)+'。'
+
+
+def courier_read_intent(text):
+    """Narrow read-only routing; never infer authorization to register a code."""
+    if not isinstance(text,str):return None
+    if re.search(r'快递员.*(?:来.*(?:没|吗|？|\?)|到过|见过|转告.*(?:没|吗))',text):return 'visit'
+    if (re.search(r'(?:我是|我们是|我就是).{0,3}快递员',text)
+            or (pickup_request(text) and re.search(r'(?:我|我们).{0,4}(?:来|要|想|上门).{0,5}(?:取|拿|收)',text))):return 'lookup'
+    return None
+
+
+def phone_suffixes(text):
+    if not isinstance(text,str):return set()
+    value=text.translate(str.maketrans('零〇一二两三四五六七八九幺','0012234567891'))
+    return set(re.findall(r'(?:尾号|后四位|后4位)\s*(?:是|为)?\s*([0-9]{4})(?!\d)',value))
 
 
 def pickup_request(text):
-    return isinstance(text,str) and bool(re.search(r'(?:取|拿|收).{0,20}(?:快递|退件|包裹|件)|(?:取件|退件|退货)码',text))
+    return isinstance(text,str) and bool(re.search(r'(?:取|拿|收).{0,20}(?:快递|退件|包裹|件)|(?:取件|退件|退货)码|(?:我是|我就是)快递员',text))
 
 
 class CourierHandoffs:
-    def __init__(self,memory):self.memory=memory;self.ready=False
+    def __init__(self,memory):
+        self.memory=memory;self.ready=False;self.phone_last4={}
+        # Local only: contact suffixes are not part of the cloud professional roster.
+        for path in (memory.root/'private/people').glob('*/profile.json'):
+            data=json.loads(path.read_text());suffix=data.get('phone_last4')
+            if isinstance(suffix,str) and re.fullmatch(r'[0-9]{4}',suffix):self.phone_last4[path.parent.name]=suffix
 
     def ensure_schema(self):
         if self.ready:return
@@ -85,14 +105,18 @@ class CourierHandoffs:
 
     def lookup(self,owner_name,source_text):
         self.ensure_schema()
-        if not isinstance(owner_name,str) or not 1<=len(owner_name.strip())<=40:return dict(status='need_owner')
+        if not isinstance(owner_name,str) or len(owner_name.strip())>40:return dict(status='need_owner')
+        if not isinstance(source_text,str) or not pickup_request(source_text):return dict(status='need_owner')
         with self.memory.db() as db:rows=[dict(r) for r in db.execute("SELECT * FROM courier_handoffs WHERE status IN ('pending','announced','completed')")]
-        selected=[r for r in rows if owner_name.strip() in json.loads(r['aliases'])]
-        if not selected:return dict(status='not_found')
+        suffixes=phone_suffixes(source_text)
+        named=[r for r in rows if any(a in source_text for a in json.loads(r['aliases']))]
+        by_phone=[r for r in rows if self.phone_last4.get(r['owner']) in suffixes]
+        # Resolve supplied evidence, not a model-invented owner. Conflicting owners ask for clarification.
+        selected=list({r['id']:r for r in named+by_phone}.values())
+        if not selected:return dict(status='not_found' if owner_name.strip() or suffixes else 'need_owner')
         if len(selected)!=1:return dict(status='ambiguous_owner')
-        record=selected[0];aliases=json.loads(record['aliases'])
-        if not isinstance(source_text,str) or not any(a in source_text for a in aliases) or not pickup_request(source_text):
-            return dict(status='need_owner')
+        record=selected[0]
+        if owner_name.strip() and owner_name.strip() not in json.loads(record['aliases']):return dict(status='need_owner')
         # Return only the explicitly released handoff, never source chats or a
         # directory of other owners. Spoken code is checked before playback.
         return dict(status='available',handoff_id=record['id'],version=record['version'],
@@ -104,11 +128,25 @@ class CourierHandoffs:
         with self.memory.db() as db:
             row=db.execute('SELECT status,code FROM courier_handoffs WHERE owner=?',(owner,)).fetchone()
         if not row:return dict(status='not_found',spoken_receipt='没有查到您本人登记的退件取件码留言。')
-        labels={'pending':'已保存，等待转告快递员','announced':'已完整转告，等待快递员确认收到',
+        labels={'pending':'已保存，等待转告快递员','announced':'已完整转告快递员，无需另外确认',
             'completed':'快递员已确认收到取件码，不代表包裹已取走','cancelled':'已取消，不再转告'}
         text='您本人的退件留言'+labels[row['status']]+'。'
         if row['status']!='cancelled':text+='取件码是'+'、'.join(row['code'])+'。'
         return dict(status=row['status'],spoken_receipt=text,physical_collection_verified=False)
+
+    def visit_query(self,owner):
+        """Owner-only evidence of code playback, not proof of physical collection or identity."""
+        person_key(owner);self.ensure_schema()
+        with self.memory.db() as db:
+            row=db.execute("SELECT e.created FROM courier_handoff_events e JOIN courier_handoffs h ON h.id=e.handoff_id "
+                "WHERE h.owner=? AND e.event='pickup_code_spoken' ORDER BY e.id DESC LIMIT 1",(owner,)).fetchone()
+        if row:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            stamp=datetime.fromisoformat(row['created']).astimezone(ZoneInfo('Asia/Shanghai')).strftime('%m月%d日%H点%M分')
+            text=stamp+'，有人以取件人身份核对委托信息后，我完整播报过您的取件码。这不代表包裹已经取走。'
+        else:text='没有查到您的取件码已完整转告快递员的记录；不能据此断定快递员没有来过。'
+        return dict(status='spoken_record' if row else 'no_spoken_record',spoken_receipt=text,physical_collection_verified=False)
 
     def acknowledge(self,hid,version,source_message_id):
         self.ensure_schema()

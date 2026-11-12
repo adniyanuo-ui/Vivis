@@ -90,6 +90,24 @@ class RecoveryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(e['kind']=='voice_warning' for e in self.events),4)
         self.assertEqual(sum(e['kind']=='cloud_error' for e in self.events),0)
         self.assertEqual(sum(e['kind']=='voice_health' and not e['available'] for e in self.events),1)
+        warning=[e['message'] for e in self.events if e['kind']=='voice_warning'][-1]
+        self.assertIn('等待30秒后再尝试',warning)
+        self.assertIn('persistent',warning)
+        self.assertNotIn('0/3',warning)
+
+    async def test_retry_diagnostic_redacts_key_and_flattens_lines(self):
+        service=self.service;service.secret='synthetic-secret';calls=0
+        async def connection():
+            nonlocal calls
+            calls+=1
+            if calls==1:raise TransientServiceError('TransportUnavailable','closed\nsynthetic-secret')
+            service.shutdown.set()
+        async def no_delay(_):pass
+        with patch.object(service,'_connection',side_effect=connection),patch('vivis.speech.cloud_managed.asyncio.sleep',side_effect=no_delay):
+            await service.cloud(0)
+        warning=next(e['message'] for e in self.events if e['kind']=='voice_warning')
+        self.assertNotIn('synthetic-secret',warning);self.assertNotIn('\n',warning)
+        self.assertIn('[redacted]',warning);self.assertIn('closed',warning)
 
     async def test_audio_failure_closes_old_owner_before_reopening_and_keeps_manager(self):
         from test_managed_voice import FakeAudio

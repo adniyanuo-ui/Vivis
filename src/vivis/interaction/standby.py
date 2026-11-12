@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import numpy as np
 from vivis.paths import ROOT
 from vivis.runtime.robot import Robot
-from vivis.runtime.show import prepare,prepare_round,recovery_clearance_plan,unload_tongue
+from vivis.runtime.show import prepare,prepare_round,recovery_clearance_plan,unload_tongue,mouth_gain_targets
 from vivis.runtime.developer import check_competitors,vision_service
 from vivis.runtime.homing import recovery_policy
 from vivis.runtime.playback import play
@@ -115,6 +115,9 @@ class IdleFrames:
                 if name.startswith(('Mouth','Jaw','Tongue')):weights[i]=speech[i]
         self.mapper.speech_owned_ids=self.speech_owned_ids if speech is not None else []
         target=self.mapper.map_weights(weights,self.smile)
+        if speech is not None and self.mapper.profile.get('mouth_motion_gain',1.)!=1.:
+            target=mouth_gain_targets(self.mapper.profile,self.mapper.ids,target[None,:],
+                self.mapper.profile['mouth_motion_gain'])[0][0]
         envelope=getattr(self,'expression_intent',None)
         if envelope is not None:
             target=self.mapper.apply_expression(target,weights,envelope.channel_weights,envelope.channel_blend,envelope.channel_source)
@@ -174,8 +177,11 @@ class StandbyGaze(MojiaPlaybackGaze):
         attention=self.source.attention.step(visible,now,self.source.smile>.1)
         options={'attention_hold':True} if attention['pause'] else {}
         result=super().apply(base,last,dt,now,**options)
-        if not np.isfinite(result).all() or np.any(result<self.low) or np.any(result>self.high):
-            raise ValueError('Standby pursuit target exceeds command limits')
+        invalid=~np.isfinite(result)|(result<self.low)|(result>self.high)
+        if np.any(invalid):
+            details='; '.join(f'ID{self.ids[i]} target={result[i]:.17g} limits=[{self.low[i]:g},{self.high[i]:g}]'
+                             for i in np.flatnonzero(invalid))
+            raise ValueError('Standby pursuit target exceeds command limits: '+details)
         d=self.last_diagnostic
         if attention['started']:
             axis=next(a for a in self.config['control']['axes'] if a['id']==self.camera_eye_id)
@@ -260,8 +266,11 @@ def plan(robot,settings,seconds):
         home['axes']=[a for a in home['axes'] if a['id'] in ids]
     if set(ids)!={a['id'] for a in home['axes']}:raise ValueError('Standby home ownership mismatch')
     live_preflight(profile,ids,audio_required=False)
+    profile['mouth_motion_gain']=robot.definition.get('defaults',{}).get('mouth_gain',1.)
     mapper=FrameMapper(order,shapes,profile,ids,smile_strength=response.get('strength',0.) if response.get('enabled') else 0.,
         social_channels=response.get('channels'),scope='face',reserve_speech_resources=False)
+    # Validate before opening hardware; gain affects speech, never startup or idle poses.
+    mouth_gain_targets(profile,ids,mapper.neutral[None,:],profile['mouth_motion_gain'])
     source=IdleFrames(mapper,settings,tracking=config,perception=perception)
     neutral=np.repeat(mapper.neutral[None,:],math.ceil(seconds*60),axis=0)
     return profile,ids,home,mapper,source,neutral

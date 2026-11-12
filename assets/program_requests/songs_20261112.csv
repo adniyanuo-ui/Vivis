@@ -1,24 +1,27 @@
-artist,title,work_id,aliases,version_preference,status,audio_path,download_url
-James Blunt,You're Beautiful,james_blunt_youre_beautiful,You Are Beautiful|你是如此美丽,本人演唱完整版，优先录音室版,awaiting_audio,,
-James Blunt,Goodbye My Lover,james_blunt_goodbye_my_lover,,本人演唱完整版，优先录音室版,awaiting_audio,,
-James Blunt,1973,james_blunt_1973,,本人演唱完整版，优先录音室版,awaiting_audio,,
-James Blunt,Carry You Home,james_blunt_carry_you_home,,本人演唱完整版，优先录音室版,awaiting_audio,,
-James Blunt,Same Mistake,james_blunt_same_mistake,,本人演唱完整版，优先录音室版,awaiting_audio,,
-James Blunt,Stay the Night,james_blunt_stay_the_night,,本人演唱完整版，优先录音室版,awaiting_audio,,
-James Blunt,Bonfire Heart,james_blunt_bonfire_heart,,本人演唱完整版，优先录音室版,awaiting_audio,,
-James Blunt,Heart to Heart,james_blunt_heart_to_heart,,本人演唱完整版，优先录音室版,awaiting_audio,,
-James Blunt,Monsters,james_blunt_monsters,,本人演唱完整版，优先录音室版,awaiting_audio,,
-James Blunt,High,james_blunt_high,,本人演唱完整版，优先录音室版,awaiting_audio,,
-李健,给你,li_jian_gei_ni,想要什么给你|想要什么都给你,李健演唱的完整现场版，具体场次待素材确认,awaiting_audio,,
-李健,贝加尔湖畔,li_jian_beijiaer_hupan,,本人演唱完整版，优先录音室版,awaiting_audio,,
-李健,风吹麦浪,li_jian_feng_chui_mai_lang,,本人演唱完整版，优先录音室版,awaiting_audio,,
-李健,传奇,li_jian_chuan_qi,,本人演唱完整版，优先录音室版,awaiting_audio,,
-李健,异乡人,li_jian_yi_xiang_ren,,本人演唱完整版，优先录音室版,awaiting_audio,,
-李健,向往,li_jian_xiang_wang,,本人演唱完整版，优先录音室版,awaiting_audio,,
-李健,似水流年,li_jian_si_shui_liu_nian,,本人演唱完整版，优先录音室版,awaiting_audio,,
-李健,抚仙湖,li_jian_fu_xian_hu,,本人演唱完整版，优先录音室版,awaiting_audio,,
-李健,假如爱有天意,li_jian_jia_ru_ai_you_tian_yi,,本人演唱完整版，优先录音室版,awaiting_audio,,
-李健,父亲写的散文诗,li_jian_fu_qin_xie_de_san_wen_shi,,李健演唱的完整现场版，具体场次待素材确认,awaiting_audio,,
-周杰伦,晴天,jay_chou_qing_tian,,本人演唱完整版，优先录音室版,awaiting_audio,,
-周杰伦,稻香,jay_chou_dao_xiang,,本人演唱完整版，优先录音室版,awaiting_audio,,
-周杰伦,青花瓷,jay_chou_qing_hua_ci,,本人演唱完整版，优先录音室版,awaiting_audio,,
+artist,title,work_id,aliases,version_preference,status,audio_path,download_url,source_title,duration_s,audio_sha256,note
+James Blunt,You're Beautiful,james_blunt_youre_beautiful,You Are Beautiful|你是如此美丽,本人演唱完整版，优先录音室版,ready,incoming/songs/james_blunt_youre_beautiful.wav,https://www.bilibili.com/video/av1160356,[4K] James Blunt - You're Beautiful,202.176,5679ba77d89e313dc0336e5b68ee7e16e4f7655d7664348f95751fe73ae3d3e3,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+James Blunt,Goodbye My Lover,james_blunt_goodbye_my_lover,,本人演唱完整版，优先录音室版,awaiting_audio,,,,,,
+James Blunt,1973,james_blunt_1973,,本人演唱完整版，优先录音室版,ready,incoming/songs/james_blunt_1973.wav,https://www.bilibili.com/video/av288512709,James Blunt - 1973 (Official Video)【中英字幕】,243.41333333333333,cf46cb313e32b292d2c455abbe58a22ac14604a8e6e7c3f0b567615ace0a0852,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+James Blunt,Carry You Home,james_blunt_carry_you_home,,本人演唱完整版，优先录音室版,ready,incoming/songs/james_blunt_carry_you_home.wav,https://www.bilibili.com/video/av1950109715,James Blunt-Carry You Home 中英字幕,231.73516666666666,0ea29bab4b43a0e84997d22efeca7516d94601646fcdc3d8ac47b7860c45aea8,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+James Blunt,Same Mistake,james_blunt_same_mistake,,本人演唱完整版，优先录音室版,ready,incoming/songs/james_blunt_same_mistake.wav,https://www.bilibili.com/video/av768590035,上尉诗人James Blunt的《same mistake》来啦！乐队配合的好好!,303.2061875,6128acec02f6d44778a1848cc70b473556b2b7cf05ebca8f416a8f2692167507,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+James Blunt,Stay the Night,james_blunt_stay_the_night,,本人演唱完整版，优先录音室版,awaiting_audio,,,,,,
+James Blunt,Bonfire Heart,james_blunt_bonfire_heart,,本人演唱完整版，优先录音室版,ready,incoming/songs/james_blunt_bonfire_heart.wav,https://www.bilibili.com/video/av114435981054785,Bonfire_Heart_James_Blunt,225.69797916666667,767412a8a0a77937a7747a1d8d363b4c130ca830ebfaad9a13977ac544bc18ed,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+James Blunt,Heart to Heart,james_blunt_heart_to_heart,,本人演唱完整版，优先录音室版,awaiting_audio,,,,,,
+James Blunt,Monsters,james_blunt_monsters,,本人演唱完整版，优先录音室版,awaiting_audio,,,,,,
+James Blunt,High,james_blunt_high,,本人演唱完整版，优先录音室版,awaiting_audio,,,,,,
+李健,给你,li_jian_gei_ni,想要什么给你|想要什么都给你,李健演唱的完整现场版，具体场次待素材确认,ready,incoming/songs/li_jian_gei_ni.wav,https://www.bilibili.com/video/BV14P4y1G72x/,【𝐋𝐢𝐯𝐞|𝟒𝐊纯享版】给你 - 李健/茶季杨,258.4746666666667,a93b8469ddf5fb060cfec51d9111df96a3552ed8ff7d03308e8e211e76ece92c,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+李健,贝加尔湖畔,li_jian_beijiaer_hupan,,本人演唱完整版，优先录音室版,ready,incoming/songs/li_jian_beijiaer_hupan.wav,https://www.bilibili.com/video/av654867494,在百万豪装录音棚大声听 李健《贝加尔湖畔》【Hi-res】,247.38133333333334,806f411679b813f5c485a8f5c90af45d4df18885f2af5b8cf6adc76c751d1274,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+李健,风吹麦浪,li_jian_feng_chui_mai_lang,,本人演唱完整版，优先录音室版,awaiting_audio,,,,,,
+李健,传奇,li_jian_chuan_qi,,本人演唱完整版，优先录音室版,ready,incoming/songs/li_jian_chuan_qi.wav,https://www.bilibili.com/video/av1901016881,李健《传奇》百万豪装录音棚大声听【Hi-res】,292.928,96767ee08ffbd83ab3471168fc704de245356904bb5a0da72b67fcd982120c88,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+李健,异乡人,li_jian_yi_xiang_ren,,本人演唱完整版，优先录音室版,ready,incoming/songs/li_jian_yi_xiang_ren.wav,https://www.bilibili.com/video/av117569965002814,李健《异乡人》,585.6072708333334,2332bffe4a9e6c8334847a045e99b2e6bcdbc064c461b3477454e6a131ae2380,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+李健,向往,li_jian_xiang_wang,,本人演唱完整版，优先录音室版,awaiting_audio,,,,,,
+李健,似水流年,li_jian_si_shui_liu_nian,,本人演唱完整版，优先录音室版,ready,incoming/songs/li_jian_si_shui_liu_nian.wav,https://www.bilibili.com/video/av1456136805,【HiRes无损音质】《似水流年》李健,216.85333333333332,042d941495cd19e7ee633d9870d72410b45dba6078cd19843e9be255deeab4a1,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+李健,抚仙湖,li_jian_fu_xian_hu,,本人演唱完整版，优先录音室版,awaiting_audio,,,,,,
+李健,假如爱有天意,li_jian_jia_ru_ai_you_tian_yi,,本人演唱完整版，优先录音室版,ready,incoming/songs/li_jian_jia_ru_ai_you_tian_yi.wav,https://www.bilibili.com/video/av321701325,在百万豪装录音棚大声听 李健《假如爱有天意》【Hi-res】,303.7013333333333,b88ab5158e262df816edd00a62c078ee037e815f4cc35178500cb388c2868e64,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+李健,父亲写的散文诗,li_jian_fu_qin_xie_de_san_wen_shi,,李健演唱的完整现场版，具体场次待素材确认,awaiting_audio,,,,,,
+周杰伦,晴天,jay_chou_qing_tian,,本人演唱完整版，优先录音室版,awaiting_audio,,,,,,
+周杰伦,稻香,jay_chou_dao_xiang,,本人演唱完整版，优先录音室版,ready,incoming/songs/jay_chou_dao_xiang.wav,https://www.bilibili.com/video/av552315351,【私藏馆】周杰伦《稻香》超治愈神作！希望疫情早点过去,222.50666666666666,3a84e840913e87ef7b3af83eedcadf67475f4509e8dce119b6ba37238e9f5758,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+周杰伦,青花瓷,jay_chou_qing_hua_ci,,本人演唱完整版，优先录音室版,awaiting_audio,,,,,,
+JVKE,golden hour,jvke_golden_hour,JVKE golden hour,JVKE演唱完整版，优先录音室版,ready,incoming/songs/jvke_golden_hour.wav,https://www.bilibili.com/video/av945388547,用百万级豪华装备试听《Golden hour》JVKE【Hi-Res】,212.992,23f3ecb08fcec5a2c9967233b36c847657dbf2b1230044c42f3c47c704fc78c9,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。
+凤凰传奇,山河图,fenghuang_shan_he_tu,凤凰传奇山河图,用户提供网易云链接指定版本,awaiting_audio,,https://music.163.com/song?id=1350658663,,226.973,,公开音频入口返回不可解码内容；需要完整音频，不能用试听或其他版本冒充。
+余文乐 / 艾热 AIR / 王以太,哀人i (Live),ai_ren_i_live,哀人i|哀人|哀人现场版,用户提供网易云链接指定Live版本,ready,incoming/songs/ai_ren_i_live.wav,https://music.163.com/song?id=3424357533,哀人i (Live),252.0,acdf68ea69e205392bf6277b4c269c76bba0aa44c612f035b3b4f0af63e394c8,用户已采用；完整音频、离线A2F及小帅标定目标已生成，现场口型待验收。

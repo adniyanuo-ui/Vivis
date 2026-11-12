@@ -5,6 +5,12 @@ from vivis.speech.message_receipts import MessageReceipts,ReceiptRejected,RECEIP
 
 
 class MessageReceiptTests(unittest.TestCase):
+    def test_courier_smalltalk_does_not_demand_a_database_write_receipt(self):
+        gate=MessageReceipts();gate.bind('chat',1,'user')
+        gate.filter(dict(type='conversation.item.input_audio_transcription.completed',item_id='user',transcript='快递员今天很忙。'))
+        event=dict(type='response.audio_transcript.done',response_id='chat',transcript='是啊，送件也挺辛苦。')
+        self.assertEqual(gate.filter(event),[event])
+
     def setUp(self):
         self.g=MessageReceipts();self.g.set('failed',1);self.g.bind('r',1)
         self.audio=dict(type='response.audio.delta',response_id='r',delta=base64.b64encode(b'\0'*480).decode())

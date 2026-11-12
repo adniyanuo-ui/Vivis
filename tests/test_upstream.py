@@ -101,6 +101,29 @@ class TrajectoryTests(unittest.TestCase):
         self.assertAlmostEqual(p.velocity,100.)
         self.assertEqual(p.last_diagnostic['mode'],'velocity')
 
+    def test_onsite_id33_stop_at_upper_endpoint_has_no_roundoff_outside_envelope(self):
+        # Last transmitted-frame planner state from 20261112_164023/0002,
+        # before stopping at2347 produced2347.0000000000005 in native Ruckig.
+        for dt in (.016,1/60,.017,.02):
+            p=self.planner(low=1500,high=2347)
+            p.position=2346.999985258145;p.velocity=.019851908465916807;p.acceleration=-17.822192217982376
+            result=p.step(0.,dt)
+            self.assertEqual(result,2347.);self.assertEqual(p.position,result)
+            self.assertLessEqual(abs(p.last_diagnostic.get('position_roundoff_correction_counts',0)),1e-7)
+            for _ in range(60):self.assertLessEqual(p.step(0.,dt),2347.)
+
+    def test_only_roundoff_is_normalized_real_overshoot_and_nonfinite_still_fail(self):
+        for value in (1600.-5e-8,2600.+5e-8):
+            p=self.planner()
+            with patch.object(p,'_sample',return_value=(value,0.,0.)):
+                result=p.step(0.,1/60,returning=True)
+            self.assertEqual(result,max(p.low,min(p.high,value)))
+        for value in (1600.-1e-5,2600.+1e-5,float('nan'),float('inf')):
+            p=self.planner();before=p.state
+            with patch.object(p,'_sample',return_value=(value,0.,0.)):
+                with self.assertRaisesRegex(RuntimeError,'exceeds motion limits'):p.step(0.,1/60,returning=True)
+            self.assertEqual(p.state,before)
+
     def test_start_reversal_stop_and_irregular_control_periods_preserve_state_and_limits(self):
         p=self.planner()
         for tick in range(1200):

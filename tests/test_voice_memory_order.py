@@ -62,5 +62,21 @@ class VoiceMemoryOrderTests(unittest.TestCase):
         self.assertFalse(service.turn_saved)
         self.assertTrue(service.unattributed_source_notice)
 
+    def test_orphan_yes_is_logged_without_unrelated_business_notice(self):
+        self.transcript('unknown','是')
+        self.assertFalse(self.service.unattributed_source_notice)
+        self.assertFalse(self.service.memory.search_all([])['matches'])
+
+    def test_recent_user_context_does_not_cross_person_connection_or_revision(self):
+        s=self.service;s.begin_user_turn('first');self.transcript('first','小王来过没？')
+        s.begin_user_turn('second');self.transcript('second','他的留言转告了吗？')
+        self.assertEqual(s.message_request().recent_user_turns,('小王来过没？',))
+        s.message_connection=object();self.assertEqual(s.message_request().recent_user_turns,())
+        s.begin_user_turn('third');self.transcript('third','小王来过没？')
+        s.context['revision']+=1;s.begin_user_turn('fourth')
+        self.assertEqual(s.message_request().recent_user_turns,())
+        self.person='bob';s.begin_user_turn('fifth')
+        self.assertEqual(s.message_request().recent_user_turns,())
+
 
 if __name__=='__main__':unittest.main()

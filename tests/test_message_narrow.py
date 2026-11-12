@@ -237,3 +237,41 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(query_recipient_fields(right,'给小王的留言保存了吗？',people,{'current_person_id':'he'}),right)
         own=dict(action='relay',recipient_reference='我')
         self.assertEqual(query_recipient_fields(own,'把给我的留言说一下',people,{'current_person_id':'he'})['recipient_id'],'he')
+
+    def test_pronoun_query_uses_nearest_unique_user_topic_only(self):
+        from vivis.interaction.message_lane import query_recipient_fields
+        people={'he':dict(display_name='何裕德',preferred_address='何工'),'wang':dict(display_name='王润章',preferred_address='小王')}
+        query=dict(action='query',recipient_reference='他',recipient_id='wang',content_keyword='冰淇淋')
+        source='我让你转告的，让他买冰淇淋的事儿，你转告了吗？'
+        hint=dict(current_person_id='he',recent_user_turns=['小王来过没？','王润章来过没？'])
+        self.assertEqual(query_recipient_fields(query,source,people,hint),query)
+        for turns in ([],['小王和何工来过没？'],['小王来过没？','何工来过没？']):
+            self.assertEqual(query_recipient_fields(query,source,people,dict(hint,recent_user_turns=turns)),dict(action='clarify',missing='recipient'))
+        self.assertEqual(query_recipient_fields(dict(query,action='relay'),source,people,hint),dict(action='clarify',missing='recipient'))
+
+    def test_visit_question_gate_does_not_capture_ordinary_statement(self):
+        from vivis.speech.message_receipts import MESSAGE_REQUEST
+        for text in ('小王来过没？','王润章来过没有','小王来了没？'):
+            self.assertTrue(MESSAGE_REQUEST.search(text))
+        for text in ('我来过北京。','我没有见过这么大的雨。'):
+            self.assertFalse(MESSAGE_REQUEST.search(text))
+
+    async def test_visit_query_uses_delivery_event_not_assistant_claim(self):
+        await self.save();tid=self.store.list('all')[0]['task_id']
+        self.memory.append('alice','visit','assistant','小乙还没来过呢。')
+        self.store.mark_announced(tid,'bob','finished-audio')
+        self.answer=dict(action='visit_query',recipient_id='bob')
+        await self.lane.run(self.request(text='小乙来过没？'))
+        self.assertIn('向小乙完整转达过留言',self.spoken[-1])
+        self.assertNotIn('还没来过',self.spoken[-1])
+        self.assertEqual(self.store.get(tid)['status'],'announced')
+
+    async def test_no_visit_evidence_means_unknown_not_absence(self):
+        self.memory.append('bob','old','assistant','欢迎小乙，您又来了。')
+        self.answer=dict(action='visit_query',recipient_id='bob')
+        await self.lane.run(self.request(text='小乙来过没？'))
+        self.assertIn('不能据此说没有来过',self.spoken[-1])
+        self.assertIsNone(self.lane.result['result']['last_interaction'])
+        self.memory.append('bob','actual','user','你好。')
+        await self.lane.run(self.request(text='小乙来过没？'))
+        self.assertIn('有与小乙的交流记录',self.spoken[-1])

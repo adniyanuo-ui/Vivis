@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock,Mock,patch
 
 from test_cloud_control import CloudBackendTests
 from vivis.speech.realtime import VoiceSession
-from vivis.speech.invalid_question import complete_question,distinct_from_playback
+from vivis.speech.invalid_question import complete_question,distinct_from_playback,explicit_expression_request
 
 
 class InvalidQuestionTests(unittest.IsolatedAsyncioTestCase):
@@ -37,6 +37,52 @@ class InvalidQuestionTests(unittest.IsolatedAsyncioTestCase):
     async def test_backchannels_and_short_name_are_not_forced_into_responses(self):
         for text in ('嗯','对','好的','啊？','王瑞章。','收到','哈哈哈','今天阳光很好。'):
             self.assertFalse(complete_question(text),text)
+
+    async def test_expression_admission_rejects_laughter_echo_narration_and_business(self):
+        for text in ('哈哈哈哈的大笑。','小帅，你笑一个。','请你给我大笑一下吧','做一个悲伤一下'):
+            self.assertTrue(explicit_expression_request(text),text)
+        for text in ('哈哈哈','哈哈哈哈。','不要笑一个','他让我笑一个','小帅说笑一个','笑一个然后给小王留言','大笑','笑话真好笑'):
+            self.assertFalse(explicit_expression_request(text),text)
+        self.state.generating='r';self.state.responses['r']=dict(transcript='您今天想聊什么？')
+        event=self.invalid();event['transcript']='哈哈哈哈的大笑。'
+        self.state.generating=None
+        self.assertFalse(self.s.recover_invalid_question(event,self.state))
+
+    async def test_recovered_expression_uses_existing_tool_once_and_keeps_business_read_only(self):
+        s=self.s;event=self.invalid();event['transcript']='哈哈哈哈的大笑。'
+        self.assertTrue(s.recover_invalid_question(event,self.state));self.assertTrue(s.message_request().read_only)
+        s.expression.publish=Mock(return_value=dict(status='pending_expression_target',intent_id='test'))
+        s.response_revisions['r']=1;s.response_inputs['r']=s.input_generation
+        sent=[]
+        async def send(text):sent.append(json.loads(text))
+        async def invoke(name,args,call):
+            await s.tool(SimpleNamespace(send=send),dict(call_id=call,response_id='r',name=name,arguments=json.dumps(args)))
+            return json.loads(sent[-1]['item']['output'])
+        self.assertFalse((await invoke('robot_program',dict(action='play',program='baigufuren'),'program'))['accepted'])
+        self.assertFalse((await invoke('courier_pickup',dict(action='register',code='9999'),'write'))['accepted'])
+        self.assertTrue((await invoke('set_expression',dict(expression='smile'),'first'))['accepted'])
+        self.assertFalse((await invoke('set_expression',dict(expression='smile'),'duplicate'))['accepted'])
+        s.expression.publish.assert_called_once()
+
+    async def test_expression_recovery_cannot_act_after_guard_changes(self):
+        for change in ('person','connection','face','response_generation','expired','in_speech'):
+            self.setUp()
+            event=self.invalid();event['transcript']='哈哈哈哈的大笑。'
+            self.assertTrue(self.s.recover_invalid_question(event,self.state))
+            s=self.s;s.response_revisions['r']=1;s.response_inputs['r']=s.input_generation
+            source=s.recovered_expression
+            if change=='person':source['person']='someone-else'
+            if change=='connection':source['connection']=object()
+            if change=='face':s.presence.visible.return_value=False
+            if change=='response_generation':s.response_inputs['r']-=1
+            if change=='expired':source['ended']-=60
+            if change=='in_speech':s.in_speech=True
+            s.expression.publish=Mock();sent=[]
+            async def send(text):sent.append(json.loads(text))
+            await s.tool(SimpleNamespace(send=send),dict(call_id=change,response_id='r',name='set_expression',arguments='{"expression":"smile"}'))
+            self.assertFalse(json.loads(sent[-1]['item']['output'])['accepted'],change)
+            s.expression.publish.assert_not_called()
+            s.presence.visible.return_value=True;s.in_speech=False
 
     async def test_no_recovery_during_speaker_output_or_acoustic_tail(self):
         self.state.generating='robot';event=self.invalid()
@@ -110,7 +156,10 @@ class InvalidQuestionTests(unittest.IsolatedAsyncioTestCase):
     async def test_receive_loop_welcome_interruption_recovers_without_replaying_welcome(self):
         await self.receive_case(True)
 
-    async def receive_case(self,playing):
+    async def test_receive_loop_recovers_actual_laugh_request_without_direct_motor_commands(self):
+        await self.receive_case(False,expression=True)
+
+    async def receive_case(self,playing,expression=False):
         from test_managed_voice import FakeAudio
         s=self.s;s.audio=FakeAudio();s.conversation_person='alice'
         s.reception.c=dict(s.reception.c,enabled=False);s.memory=None
@@ -139,16 +188,18 @@ class InvalidQuestionTests(unittest.IsolatedAsyncioTestCase):
                     s.player.add('welcome',b'\0'*48000);s.player.finish('welcome')
                 await messages.put(dict(type='input_audio_buffer.speech_started',item_id='real-question'))
                 await messages.put(dict(type='input_audio_buffer.speech_stopped',item_id='real-question',reason='turn_invalid'))
-                await messages.put(dict(type='conversation.item.input_audio_transcription.completed',item_id='real-question',transcript='王润章来过没？'))
+                transcript='哈哈哈哈的大笑。' if expression else '王润章来过没？'
+                await messages.put(dict(type='conversation.item.input_audio_transcription.completed',item_id='real-question',transcript=transcript))
                 await until(lambda:any(x.get('type')=='response.create' for x in sent))
                 controller=[x for x in sent if x.get('item',{}).get('id','').startswith('controller_')]
                 self.assertEqual(len(controller),1)
-                self.assertIn('王润章来过没',controller[0]['item']['content'][0]['text'])
+                self.assertIn(transcript,controller[0]['item']['content'][0]['text'])
+                if expression:self.assertIn('set_expression',controller[0]['item']['content'][0]['text'])
                 self.assertTrue(s.message_request().read_only)
                 if playing:
                     self.assertIn('welcome',s.cloud_state.blocked)
                     self.assertNotIn('welcome',s.player.response_ids())
-                await messages.put(dict(type='conversation.item.input_audio_transcription.completed',item_id='real-question',transcript='王润章来过没？'))
+                await messages.put(dict(type='conversation.item.input_audio_transcription.completed',item_id='real-question',transcript=transcript))
                 await asyncio.sleep(.1)
                 self.assertEqual(len([x for x in sent if x.get('type')=='response.create']),1)
             finally:

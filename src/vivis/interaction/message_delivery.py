@@ -21,6 +21,7 @@ class MessageRequest:
     guard:object=None
     notice_guard:object=None
     read_only:bool=False
+    recent_user_turns:tuple=()
 
 
 @dataclass(frozen=True)

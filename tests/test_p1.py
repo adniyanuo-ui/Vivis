@@ -31,7 +31,7 @@ class IntentTests(unittest.TestCase):
         self.assertEqual(self.router.parse('排骨夫人',state='interaction')['kind'],'ignore')
     def test_onsite_natural_controls_and_cloud_user_phrases(self):
         cases={'停止停止':'interaction','停止停止停止':'interaction','你自己玩会儿吧':'standby',
-               '自己玩会':'standby','唱首歌':'select','来一首歌吧':'select',
+               '自己玩会':'standby','唱首歌':'prompt','来一首歌吧':'prompt',
                '好呀，你给我唱一首歌《白骨夫人》':'select','你播放白骨夫人吧':'select',
                '播放魏总的剧本':'select','魏总的剧本':'select','表演个剧本吧':'select',
                '表演一段剧本吧':'select'}
