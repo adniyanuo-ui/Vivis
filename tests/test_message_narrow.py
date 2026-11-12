@@ -59,6 +59,76 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.lane.run(r);self.lane.next_turn('alice','visit')
         self.assertFalse(self.lane.continuation)
 
+    async def test_three_uncommitted_parts_preserve_recipient_and_source_items(self):
+        hints=[]
+        async def extract(text,people,hint):
+            hints.append(dict(hint))
+            if len(hints)<3:return dict(action='clarify',missing='content')
+            return dict(action='create',recipient_id='bob',content='打火机买好了。')
+        self.lane.extract=extract
+        await self.lane.run(self.request(text='帮我带句话。'))
+        await self.lane.run(self.request(text='给小乙。'))
+        last=self.request(text='打火机买好了。');await self.lane.run(last)
+        self.assertEqual(hints[-1]['draft_source'],'帮我带句话。\n给小乙。')
+        self.assertEqual(hints[-1]['draft_items'],['1','2'])
+        self.assertEqual(len(self.store.list('all')),1)
+        self.assertEqual(self.store.list('all')[0]['content'],'打火机买好了。')
+        await self.lane.run(last)
+        self.assertEqual(len(self.store.list('all')),1)
+
+    async def test_new_speech_during_second_extraction_keeps_first_fragment(self):
+        entered=asyncio.Event();finish=asyncio.Event();hints=[]
+        async def extract(text,people,hint):
+            hints.append(dict(hint))
+            if len(hints)==1:return dict(action='clarify',missing='recipient')
+            if len(hints)==2:entered.set();await finish.wait()
+            return dict(action='create',recipient_id='bob',content='打火机买好了。')
+        self.lane.extract=extract
+        await self.lane.run(self.request(text='帮我带句话。'))
+        self.lane.start(self.request(text='给小乙。'));await entered.wait()
+        self.lane.next_turn('alice','visit');third=self.request(text='打火机买好了。')
+        finish.set();await self.lane.task
+        self.assertFalse(self.store.list('all'))
+        self.lane.start(third);await self.lane.task
+        self.assertEqual(hints[-1]['draft_source'],'帮我带句话。\n给小乙。')
+        self.assertEqual(len(self.store.list('all')),1)
+
+    async def test_unrelated_chat_discards_clarification_without_creating(self):
+        self.answer=dict(action='clarify',missing='content')
+        await self.lane.run(self.request(text='见到小乙帮我带句话。'))
+        self.answer=dict(action='none')
+        await self.lane.run(self.request(text='不留了，讲个笑话。'))
+        self.assertNotIn('alice',self.lane.last);self.assertFalse(self.store.list('all'))
+
+    async def test_clarification_draft_does_not_cross_session(self):
+        self.answer=dict(action='clarify',missing='content')
+        await self.lane.run(self.request(text='见到小乙帮我带句话。'))
+        hints=[]
+        async def extract(text,people,hint):hints.append(hint);return dict(action='none')
+        self.lane.extract=extract
+        req=replace(self.request(text='买好了。'),session='new-visit');self.current=req
+        await self.lane.run(req)
+        self.assertNotIn('draft_source',hints[0]);self.assertFalse(self.store.list('all'))
+
+    async def test_context_reset_discards_inflight_draft(self):
+        req=self.request();self.lane.extracting=req
+        self.lane.extracting_draft=dict(draft_source=req.source_text,draft_items=[req.source_item],draft_session=req.session)
+        self.lane.next_turn('alice','visit');self.lane.reset_context()
+        self.assertIsNone(self.lane.continuation);self.assertIsNone(self.lane.extracting_draft)
+
+    async def test_draft_overflow_does_not_truncate_or_commit(self):
+        self.lane.last['alice']=dict(draft_source='甲'*2000,draft_items=['earlier'],draft_session='visit')
+        await self.lane.run(self.request())
+        self.assertFalse(self.store.list('all'));self.assertIn('尚未保存',self.spoken[-1])
+        self.assertNotIn('alice',self.lane.last)
+
+    def test_extraction_input_separates_pending_data_from_current_fragment(self):
+        from vivis.interaction.message_lane import extraction_input
+        self.assertEqual(extraction_input('天气真好。',{}),'天气真好。')
+        value=extraction_input('买好了。',dict(draft_source='给小乙带句话。'))
+        data=json.loads(value.split('\n',1)[1])
+        self.assertEqual(data,dict(未提交交代='给小乙带句话。',当前补充='买好了。'))
+
     async def test_recovered_query_cannot_write_but_can_read_ledger(self):
         request=replace(self.request(),read_only=True);self.current=request
         await self.lane.run(request);self.assertFalse(self.store.list('all'))

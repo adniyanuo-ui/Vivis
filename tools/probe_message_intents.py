@@ -34,12 +34,26 @@ async def main():
         ('小帅，停止播放。','alpha',dict(action='none')),
         ('请给我讲个笑话。','alpha',dict(action='none')),
     ]
+    cases=[(text,actor,expected,{}) for text,actor,expected in cases]
+    cases += [
+        ('打火机买好了。','beta',dict(action='create',recipient_id='alpha'),
+            dict(draft_source='见到甲工，帮我给他带句话。')),
+        ('明天早上9点到。','beta',dict(action='create',recipient_id='alpha'),
+            dict(draft_source='帮我给甲工留个言。',missing='content')),
+        ('小乙。','alpha',dict(action='create',recipient_id='beta'),
+            dict(draft_source='帮我带句话，明天准备两份资料。',missing='recipient')),
+        ('打火机买好了。','beta',dict(action='create',recipient_id='alpha'),
+            dict(draft_source='帮我带句话。\n给甲工。',missing='content')),
+        ('先不留言了，给我讲个笑话。','beta',dict(action='none'),dict(draft_source='见到甲工帮我带句话。')),
+        ('算了，不留言了。','beta',dict(action='none'),dict(draft_source='见到甲工帮我带句话。')),
+        ('打火机买好了。','beta',dict(action='none'),{}),
+    ]
     reports=[]
     try:
-        for text,actor,expected in cases:
+        for text,actor,expected,hint in cases:
             start=time.monotonic()
             try:
-                result=await extract_qwen(url,secret,session,log,text,people,dict(current_person_id=actor))
+                result=await extract_qwen(url,secret,session,log,text,people,dict(hint,current_person_id=actor))
                 passed=all(result.get(k)==v for k,v in expected.items())
                 report=dict(text=text,result=result,expected=expected,passed=passed,elapsed_s=round(time.monotonic()-start,3))
             except Exception as exc:report=dict(text=text,passed=False,error_type=type(exc).__name__)

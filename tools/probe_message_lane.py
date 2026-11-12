@@ -78,6 +78,35 @@ async def main():
             assert courier.get(row['id'])['status']=='pending'
             reports.append(dict(case='courier_owner_query',status='pending',last_spoken=spoken[-1]))
             print('PASS courier owner query',spoken[-1],flush=True)
+            # Reproduce ASR splitting one new message while the first extraction
+            # is still returning. Only the final current request may commit.
+            lane.reset_context();ready=asyncio.Event();release=asyncio.Event()
+            async def draft_extract(text,people,hint):
+                result=await extract(text,people,hint)
+                if text=='见到甲工，帮我给他带句话。':
+                    ready.set();await release.wait()
+                return result
+            lane.extract=draft_extract
+            text='见到甲工，帮我给他带句话。'
+            mid=memory.append('beta','synthetic','user',text)
+            current=MessageRequest('beta','synthetic','draft-head',mid,text,'beta')
+            lane.start(current);await asyncio.wait_for(ready.wait(),20)
+            lane.next_turn('beta','synthetic')
+            text='打火机买好了。';mid=memory.append('beta','synthetic','user',text)
+            current=MessageRequest('beta','synthetic','draft-body',mid,text,'beta')
+            release.set();await lane.task
+            assert len(store.list('all'))==1
+            lane.start(current);await lane.task
+            assert lane.result['saved'] is True,lane.result
+            rows=store.list('all');assert len(rows)==2
+            draft_row=next(row for row in rows if row['recipient']=='alpha')
+            assert draft_row['creator']=='beta' and draft_row['content'].rstrip('。')=='打火机买好了'
+            assert draft_row['status']=='pending'
+            assert lane.start(current) is False  # duplicate final event
+            assert len(store.list('all'))==2
+            assert '已保存，等见到甲工后转告' in spoken[-1]
+            reports.append(dict(case='split_draft_save_once',result=lane.result,last_spoken=spoken[-1]))
+            print('PASS split draft save once',spoken[-1],flush=True)
         (folder/'summary.json').write_text(json.dumps(dict(passed=True,synthetic_only=True,physical_devices_opened=False,
             virtual_dac=True,reports=reports),ensure_ascii=False,indent=2)+'\n')
         print('Evidence:',folder)
