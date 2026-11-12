@@ -69,6 +69,9 @@ class VoiceBuffer:
             if response_id:ids.add(response_id)
             return sorted(ids-set(self.cancelled))
 
+    def has_started(self,response_ids):
+        with self.lock:return bool(self.started_responses.intersection(response_ids))
+
     def resume(self,response_ids):
         with self.lock:
             ids=set(response_ids)&self.paused

@@ -1363,6 +1363,8 @@ class CloudManagedVoice(ManagedVoice):
                 state=VoiceSession(self.player,self.log,on_transcript=transcript,interruption_hold_ms=self.config['interruption_hold_ms']);self.cloud_state=state
                 suppressed=deque(maxlen=128)
                 controller_events=ControllerEventGate()
+                from vivis.speech.welcome import WelcomeTurnGate
+                welcome_gate=WelcomeTurnGate()
                 from vivis.speech.explicit_wake import AudioPermissionGate
                 audio_gate=AudioPermissionGate()
                 uplink=asyncio.Queue(maxsize=max(1,round(policy()['uplink_max_age_s']/.02)));self.cloud_queue=uplink
@@ -1409,6 +1411,18 @@ class CloudManagedVoice(ManagedVoice):
                         await self.resume_courier_calls(ws)
                     warning=await receive_event(ws,state,event)
                     if warning:self.emit(dict(kind='voice_warning',epoch=self.epoch,**warning))
+                async def cancel_welcome(rids,reason):
+                    self.continue_response=False;self.announcement_revision=None;self.tool_repair=None
+                    for response_id in rids:
+                        if response_id not in self.blocked:self.blocked.append(response_id)
+                        state.interrupt(response_id,source='welcome_yields_to_user')
+                    # Cancel generation only for a known welcome response, never
+                    # globally cancel a new user answer or a fixed DB receipt.
+                    if rids and (state.generating in rids or self.response_request_pending):
+                        await bounded_send(ws,json.dumps(dict(type='response.cancel')))
+                    self.log.write('welcome_yielded_before_playback',reason=reason,response_ids=list(rids),
+                        user_turn_preserved=True)
+
                 async def receive():
                     nonlocal transcript_response_id
                     async for message in ws:
@@ -1417,6 +1431,19 @@ class CloudManagedVoice(ManagedVoice):
                         transcript_response_id=rid
                         controller_events.observe(event)
                         audio_gate.observe(event)
+                        if welcome_gate.user_event(event,self.player):
+                            await cancel_welcome(welcome_gate.responses,event['type'])
+                        if kind=='response.created' and welcome_gate.created(event['response']['id']):
+                            # The user may speak before response.created reaches
+                            # us; quarantine this late welcome and its output.
+                            await cancel_welcome([event['response']['id']],'late_welcome_response')
+                        if kind=='response.function_call_arguments.done' and rid in self.blocked and rid in welcome_gate.responses:
+                            self.log.write('welcome_tool_discarded',response_id=rid,name=event.get('name'))
+                            if isinstance(event.get('call_id'),str):
+                                await bounded_send(ws,json.dumps(dict(type='conversation.item.create',item=dict(
+                                    type='function_call_output',call_id=event['call_id'],output=json.dumps(dict(
+                                        accepted=False,status='welcome_cancelled',instruction='欢迎已让给真实用户；不续播欢迎，不执行该工具。'),ensure_ascii=False))),ensure_ascii=False))
+                            continue
                         if kind=='session.updated' and 'modalities' in event.get('session',{}):
                             self.cloud_audio_enabled='audio' in event['session']['modalities']
                         if self.response_busy(event,state):continue
@@ -1552,6 +1579,10 @@ class CloudManagedVoice(ManagedVoice):
                                 instruction=self.message_receipts.instruction()
                                 request['response']=dict(instructions=instruction)
                             elif announce:
+                                if self.announcement_kind!='welcome':welcome_gate.active=False
+                                if self.announcement_kind=='welcome' and not welcome_gate.arm():
+                                    self.log.write('controller_announcement_skipped',reason='user_turn_already_seen',announcement='welcome')
+                                    continue
                                 state.mark_proactive()
                                 if self.announcement_kind=='welcome':
                                     directive='控制器已完成准备，当前为前台交互态。先查询get_robot_status确认当前身份，有确认称呼就用该称呼自然欢迎/问候；身份未知只说您好。留言正文只由本地固定流程播报；欢迎语不读留言、不承诺转告、不询问是否收到。不重复长篇介绍。若唤醒时有问题，简短问候后回答。'
@@ -1568,7 +1599,9 @@ class CloudManagedVoice(ManagedVoice):
                             elif self.tool_repair:
                                 request['response']=dict(instructions='上一次工具调用没有执行。根据以下错误纠正工具调用，不能只口头宣称完成；不要执行无关操作：'+json.dumps(self.tool_repair,ensure_ascii=False)+self.dialect.instructions())
                             if (self.in_speech or state.generating is not None or self.context['revision']!=request_revision or self.turn_item_id!=request_turn
-                                    or (announce and not self.can_speak())):continue
+                                    or (announce and not self.can_speak())
+                                    or (announce and self.announcement_kind=='welcome' and welcome_gate.cancelled)):continue
+                            welcome_gate.sent()
                             self.response_request_pending=True;self.last_response_request_at=time.monotonic()
                             await bounded_send(ws,json.dumps(request,ensure_ascii=False))
                 async def fault_watch():
