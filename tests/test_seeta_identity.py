@@ -11,7 +11,7 @@ import numpy as np
 from vivis.paths import ROOT
 from vivis.vision.familiar import FamiliarFaces
 from vivis.vision.identity_config import backend_config
-from vivis.vision.enrollment import save_gallery,SEETA_CONTRACT
+from vivis.vision.enrollment import save_gallery,registration_photos,SEETA_CONTRACT
 
 
 def config():return json.loads((ROOT/'configs/perception/familiar_faces.json').read_text())
@@ -157,3 +157,33 @@ class SeetaIdentityTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class MultiPhotoGalleryTests(unittest.TestCase):
+    def test_same_person_templates_do_not_compete_in_margin(self):
+        from vivis.vision.familiar import match_scores
+        details={}
+        pid,score=match_scores(np.array([.82,.81,.35]),np.array(['alpha','alpha','beta']),.6,.08,details)
+        self.assertEqual(pid,'alpha');self.assertAlmostEqual(details['score_margin'],.47)
+
+    def test_multiple_templates_persist_and_runtime_loads_all(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);c=config();path=root/backend_config(c)['gallery']
+            save_gallery(path,c,[vector(0),vector(1),vector(2)],['alpha','alpha','beta'],['a','b','c'])
+            model=FakeSeeta();f=FamiliarFaces(c,root,model=model)
+            try:
+                self.assertTrue(f.available);self.assertEqual(f.ids.tolist(),['alpha','alpha','beta'])
+                model.index=1
+                for i in range(c['confirmation_samples']):f.infer(None,np.array([0,0,100,100]),10.+i*.5,f.epoch)
+                self.assertEqual(f.result['person_id'],'alpha')
+            finally:f.close()
+            with self.assertRaises(ValueError):
+                save_gallery(path,c,[vector(0),vector(1)],['alpha','alpha'],['a','a'])
+            with np.load(path,allow_pickle=False) as data:self.assertEqual(len(data['ids']),3)
+
+    def test_all_primary_reference_and_additional_sources_deduplicate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp);(folder/'photos').mkdir()
+            for name,data in [('photo.jpg',b'first'),('reference.png',b'second'),('photos/third.JPG',b'third'),('photos/copy.png',b'first'),('resume.md',b'ignored')]:
+                (folder/name).write_bytes(data)
+            self.assertEqual([p.name for p in registration_photos(folder)],['photo.jpg','reference.png','third.JPG'])

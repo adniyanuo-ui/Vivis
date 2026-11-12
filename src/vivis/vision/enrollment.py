@@ -11,6 +11,18 @@ from vivis.vision.identity_config import backend_config
 
 SEETA_CONTRACT='seeta6-yunet-roi-pts5-v1'
 
+def registration_photos(folder):
+    """Original primary/reference and additional photos, deduplicated by bytes."""
+    folder=Path(folder);seen=set();photos=[]
+    candidates=[*sorted(folder.glob('photo.*')),*sorted(folder.glob('reference.*')),
+        *sorted((folder/'photos').glob('*'))]
+    for path in candidates:
+        if not path.is_file() or path.suffix.lower() not in ('.jpg','.jpeg','.png'):continue
+        digest=hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest in seen:continue
+        seen.add(digest);photos.append(path)
+    return photos
+
 def registration_image(path,root):
     import cv2
     image=cv2.imread(str(path))
@@ -46,7 +58,7 @@ def extract(model,config,image,row):
 def save_gallery(path,config,vectors,ids,photo_hashes):
     c=backend_config(config);path=Path(path)
     if not ids or len(vectors)!=len(ids) or len(photo_hashes)!=len(ids):raise ValueError('Invalid gallery rows')
-    if len(set(ids))!=len(ids) or any(not re.fullmatch(r'[a-z][a-z0-9_-]{1,39}',pid) for pid in ids):raise ValueError('Invalid gallery IDs')
+    if len(set(zip(ids,photo_hashes)))!=len(ids) or any(not re.fullmatch(r'[a-z][a-z0-9_-]{1,39}',pid) for pid in ids):raise ValueError('Invalid gallery IDs/photo pairs')
     vectors=np.asarray(vectors,np.float32);dimension=1024 if c['backend']=='seeta6' else 128
     if vectors.shape!=(len(ids),dimension) or not np.isfinite(vectors).all():raise ValueError('Invalid gallery dimensions')
     path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
