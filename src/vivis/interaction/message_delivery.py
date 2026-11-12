@@ -43,6 +43,16 @@ class MessageOutcome:
 class MessageService:
     def __init__(self,store):self.store=store
 
+    def write_confirmed(self,action,request,write):
+        try:return write()
+        except ValueError:raise  # Validation/identity rejection is not an uncertain commit.
+        except Exception:
+            if request.guard:request.guard()
+            row=self.store.committed_request(request.actor,request.session,request.source_item,action)
+            if row is None:raise
+            self.store.memory.version+=1
+            return dict(row,effect='unchanged',commit_reconciled=True)
+
     def execute(self,args,request,known_people):
         if not isinstance(args,dict):raise ValueError('Invalid message request')
         action=args.get('action');person=request.verified_person
@@ -51,13 +61,15 @@ class MessageService:
         if not person and action!='clarify':
             raise IdentityVerificationRequired('当前身份尚未核验，请正对摄像头确认身份后再查询或修改留言；口头自报不能替代核验。')
         if action=='list':
-            if not set(args)<={'action','status','recipient_id','after_task_id','content_keyword'}:raise ValueError('Unknown message list fields')
+            if not set(args)<={'action','status','recipient_id','creator_id','after_task_id','content_keyword'}:raise ValueError('Unknown message list fields')
             if args.get('recipient_id') and args['recipient_id'] not in known_people:
                 raise MessageRecipientUnavailable('收件人没有明确匹配，请确认要查询谁的留言。')
+            if args.get('creator_id') and args['creator_id'] not in known_people:
+                raise MessageRecipientUnavailable('发件人没有明确匹配，请确认要查询谁的留言。')
             keyword=args.get('content_keyword')
-            if keyword and (not isinstance(keyword,str) or not 2<=len(keyword)<=40 or keyword not in (request.source_text or '')):
+            if keyword and (not isinstance(keyword,str) or not 1<=len(keyword)<=40 or keyword not in (request.source_text or '')):
                 raise ValueError('查询关键词必须摘自本轮原话，不能猜测。')
-            result=self.store.page(args.get('status','active'),args.get('recipient_id') or None,args.get('after_task_id') or None,visible_to=person,content_keyword=keyword)
+            result=self.store.page(args.get('status','active'),args.get('recipient_id') or None,args.get('after_task_id') or None,visible_to=person,content_keyword=keyword,creator=args.get('creator_id'))
             result=dict(result,tasks=[message_view(r) for r in result['tasks']])
             return MessageOutcome(result,'read')
         if action=='prepare_relay':
@@ -79,12 +91,12 @@ class MessageService:
             if ((isinstance(recipient,str) and recipient and recipient not in known_people)
                     or (not recipient and '快递员' in request.source_text)):
                 raise MessageRecipientUnavailable('收件人未登记，目前不能自动向该访客投递留言。')
-            result=self.store.create(args,request.actor,request.session,request.source_item,request.source_message_id,
-                known_people,source_text=request.source_text,clarified=request.clarified,guard=request.guard)
+            result=self.write_confirmed('create',request,lambda:self.store.create(args,request.actor,request.session,request.source_item,request.source_message_id,
+                known_people,source_text=request.source_text,clarified=request.clarified,guard=request.guard))
             return MessageOutcome(message_view(result),'saved',result.get('effect','created'))
         if action=='supplement':
             if '补充' not in request.source_text:raise ValueError('请明确说明是否补充刚才那条留言。')
-            result=self.store.supplement(args['task_id'],request.actor,request.session,request.source_item,request.source_message_id,args['content'],guard=request.guard)
+            result=self.write_confirmed('supplement',request,lambda:self.store.supplement(args['task_id'],request.actor,request.session,request.source_item,request.source_message_id,args['content'],guard=request.guard))
             return MessageOutcome(message_view(result),'updated',result['effect'])
         if action=='acknowledge' or (action=='update' and args.get('status')=='completed'):
             result=self.store.acknowledge(args['task_id'],request.actor,request.source_item,guard=request.guard)

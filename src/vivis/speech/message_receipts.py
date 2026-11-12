@@ -32,7 +32,7 @@ class MessageReceipts:
         self.pending=None;self.responses=OrderedDict();self.sources=OrderedDict();self.awaiting_details=False
         self.source_turns={};self.details_after_turn=-1
         self.details_effect=None;self.clarification_completed=False
-        self.rejected=[]
+        self.rejected=[];self.intents=OrderedDict();self.released=[]
 
     def set(self,effect,turn):
         self.pending=dict(text=RECEIPTS[effect],turn=turn,attempt=0,kind='receipt')
@@ -66,9 +66,41 @@ class MessageReceipts:
 
     def resolve_source(self,response):
         if response['kind']=='await_source' and response['source_item'] in self.sources:
-            _,candidate=self.sources[response['source_item']]
+            item=response['source_item'];_,candidate=self.sources[item]
+            decision=self.intents.get(item)
+            if decision is not None:
+                response['kind']={'waiting':'await_intent','chat':'no_claim','business':'discard'}[decision]
+                response['deadline']=time.monotonic()+self.intent_timeout()
+                return
             response['kind']='needs_tool' if candidate else 'ordinary'
             if not candidate:response['verified']=True
+
+    @staticmethod
+    def intent_timeout():
+        from vivis.speech.runtime_policy import policy
+        return policy()['message_extract_s']+policy()['send_timeout_s']
+
+    def expect_intent(self,item):
+        self.intents.setdefault(item,'waiting')
+        while len(self.intents)>128:self.intents.popitem(last=False)
+
+    def decide_intent(self,item,business):
+        self.intents[item]='business' if business else 'chat'
+        for rid,response in list(self.responses.items()):
+            if response.get('source_item')!=item:continue
+            held=response['events'];response['events']=[];response['bytes']=0
+            response['kind']='discard' if business else 'no_claim'
+            if business:
+                self.released.extend(e for e in held if e.get('type')=='response.done')
+                response['verified']=True
+                continue
+            try:
+                for event in held:self.released.extend(self.filter(event))
+            except ReceiptRejected as exc:self.rejected.append((rid,str(exc)))
+
+    def drain_released(self):
+        events=self.released;self.released=[]
+        return events
 
     def allow_chat(self,rid,source_item,turn):
         self.pending=dict(text=None,kind='no_claim',turn=turn,attempt=0)
@@ -110,7 +142,7 @@ class MessageReceipts:
                 self.resolve_source(response)
                 if response['kind']=='ordinary':
                     released.extend(response['events']);response['events']=[]
-                elif any(e.get('type') in ('response.audio_transcript.done','response.text.done') for e in response['events']):
+                elif response['kind']=='needs_tool' and any(e.get('type') in ('response.audio_transcript.done','response.text.done') for e in response['events']):
                     self.rejected.append((rid,'Message request has no database tool result'))
             return released
         rid=event.get('response_id') or event.get('response',{}).get('id')
@@ -118,14 +150,18 @@ class MessageReceipts:
         if response is None:return [event]
         kind=event.get('type')
         if response['kind']=='ordinary':return [event]
+        if response['kind']=='discard':return [event] if kind=='response.done' else []
+        if response['kind']=='no_claim' and kind in ('response.audio.delta','response.audio_transcript.delta'):
+            from vivis.speech.runtime_policy import policy
+            response['deadline']=time.monotonic()+policy()['playback_stall_s']
         if kind=='response.audio.delta':
             response['bytes']+=len(base64.b64decode(event['delta'],validate=True))
-            limit=60 if response['kind']=='read_only' else 15
+            limit=60 if response['kind'] in ('read_only','no_claim','await_intent') else 15
             if response['bytes']>48000*limit:raise ReceiptRejected(rid,f'Receipt audio exceeded{limit}seconds')
             if not response['verified']:
                 response['events'].append(event);return []
         if kind in ('response.audio_transcript.done','response.text.done'):
-            if response['kind']=='await_source':response['events'].append(event);return []
+            if response['kind'] in ('await_source','await_intent'):response['events'].append(event);return []
             if response['kind']=='needs_tool':raise ReceiptRejected(rid,'Message request has no database tool result')
             transcript=event.get('transcript',event.get('text',''))
             if ((response['kind']=='no_claim' and MESSAGE_PROMISE.search(transcript))
@@ -143,7 +179,7 @@ class MessageReceipts:
         if (kind=='response.done' and response['kind']=='await_source'
                 and any(item.get('type')=='function_call' for item in event.get('response',{}).get('output',[]))):
             return [event]
-        if kind=='response.done' and response['kind']=='await_source':
+        if kind=='response.done' and response['kind'] in ('await_source','await_intent'):
             response['events'].append(event);return []
         if kind=='response.done' and not response['verified'] and not response['bytes']:
             calls=any(item.get('type')=='function_call' for item in event.get('response',{}).get('output',[]))

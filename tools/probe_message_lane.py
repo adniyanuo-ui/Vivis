@@ -52,14 +52,21 @@ async def main():
                 mid=memory.append(actor,'synthetic','user',text)
                 current=MessageRequest(actor,'synthetic',str(index),mid,text,actor)
                 await lane.run(current);assert len(store.list('all'))==1
+                expected=('saved','read','read','read','read')[index]
+                assert lane.result and lane.result['operation_status']==expected,(index,lane.result,spoken[-1:])
+                if index>=3:
+                    assert store.list('all')[0]['status']=='announced'
+                    assert '给您留言：' in spoken[-1]
                 reports.append(dict(case=index,result=lane.result,last_spoken=spoken[-1]));print('PASS',index,spoken[-1],flush=True)
             tid=store.list('all')[0]['task_id']
             assert store.get(tid)['status']=='announced'
             mid=memory.append('beta','synthetic','user','收到了，谢谢。')
             current=MessageRequest('beta','synthetic','ack',mid,'收到了，谢谢。','beta')
-            await lane.run(current);assert store.get(tid)['status']=='completed';assert not store.due('beta')
-            fresh=RobotTasks(PersonMemory(memory.c,tmp),policy);assert fresh.get(tid)['status']=='completed'
-            reports.append(dict(case='delivery_ack_reload',status='completed',last_spoken=spoken[-1]))
+            count=len(spoken);await lane.run(current)
+            assert lane.result['operation_status']=='chat' and len(spoken)==count
+            assert store.get(tid)['status']=='announced';assert not store.due('beta')
+            fresh=RobotTasks(PersonMemory(memory.c,tmp),policy);assert fresh.get(tid)['status']=='announced'
+            reports.append(dict(case='delivery_reload',status='announced',last_spoken=spoken[-1]))
             print('PASS delivery/ack/reload',spoken[-1],flush=True)
             mid=memory.append('alpha','synthetic','user','我的退件取件码4321。')
             row=courier.register('alpha','甲工',['甲工'],'4321',[mid],source_reason='synthetic')

@@ -139,6 +139,14 @@ class RobotTasks:
         self.memory.version+=1
         return dict(self.get(task_id),effect='merged')
 
+    def committed_request(self,actor,session,utterance,action):
+        self.ensure_schema()
+        key=hashlib.sha256(json.dumps([actor,str(session),utterance],ensure_ascii=False).encode()).hexdigest()
+        with self.memory.db() as db:
+            row=db.execute('SELECT task_id FROM message_writes WHERE request_id=? AND actor=? AND action=?',
+                (key,actor,action)).fetchone()
+        return self.get(row['task_id']) if row else None
+
     def get(self,task_id):
         self.ensure_schema()
         if not isinstance(task_id,str) or not re.fullmatch(r'[a-f0-9]{32}',task_id):raise ValueError('Invalid task ID')
@@ -146,7 +154,7 @@ class RobotTasks:
         if not row:raise ValueError('Unknown task')
         return dict(row)
 
-    def list(self,status='active',recipient=None,after_task_id=None,limit=None,visible_to=None,content_keyword=None):
+    def list(self,status='active',recipient=None,after_task_id=None,limit=None,visible_to=None,content_keyword=None,creator=None):
         self.ensure_schema()
         if status not in (*STATES,'active','all'):raise ValueError('Unknown task status')
         if recipient:person_key(recipient)
@@ -158,8 +166,10 @@ class RobotTasks:
         elif status=='announced':clauses.append("(status='announced' OR (kind IN ('message','reminder') AND status='completed'))")
         elif status!='all':clauses.append('status=?');params.append(status)
         if recipient:clauses.append('recipient=?');params.append(recipient)
+        if creator:
+            person_key(creator);clauses.append('creator=?');params.append(creator)
         if content_keyword:
-            if not isinstance(content_keyword,str) or not 2<=len(content_keyword)<=40:raise ValueError('Invalid message keyword')
+            if not isinstance(content_keyword,str) or not 1<=len(content_keyword)<=40:raise ValueError('Invalid message keyword')
             clauses.append('instr(content,?)>0');params.append(content_keyword)
         if after_task_id:
             cursor=self.get(after_task_id)
@@ -169,8 +179,8 @@ class RobotTasks:
             rows=[dict(r) for r in db.execute('SELECT * FROM robot_tasks'+where+' ORDER BY created,task_id LIMIT?',[*params,limit or self.c['list_limit']])]
         return rows
 
-    def page(self,status='active',recipient=None,after_task_id=None,visible_to=None,content_keyword=None):
-        rows=self.list(status,recipient,after_task_id,self.c['list_limit']+1,visible_to,content_keyword);more=len(rows)>self.c['list_limit'];rows=rows[:self.c['list_limit']]
+    def page(self,status='active',recipient=None,after_task_id=None,visible_to=None,content_keyword=None,creator=None):
+        rows=self.list(status,recipient,after_task_id,self.c['list_limit']+1,visible_to,content_keyword,creator);more=len(rows)>self.c['list_limit'];rows=rows[:self.c['list_limit']]
         return dict(tasks=rows,has_more=more,next_after_task_id=rows[-1]['task_id'] if rows and more else None,counts=self.counts(visible_to))
 
     def counts(self,visible_to=None):
