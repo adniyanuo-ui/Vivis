@@ -11,6 +11,9 @@ from vivis.speech.realtime import connect_session,websocket_connection
 from vivis.speech.runtime_policy import policy,bounded_send
 
 
+class ReadingMismatch(ValueError):pass
+
+
 class RealtimeReader:
     def __init__(self,url,secret,session,log):
         self.url=url;self.secret=secret;self.log=log
@@ -22,7 +25,14 @@ class RealtimeReader:
 
     async def generate(self,text):
         if not isinstance(text,str) or not text.strip() or len(text)>400:raise ValueError('Invalid bounded reading text')
-        return await asyncio.wait_for(self._generate(text),policy()['message_tts_operation_s'])
+        async def verified():
+            try:return await self._generate(text)
+            except ReadingMismatch:
+                # No rejected PCM has left this reader. Retry synthesis once,
+                # not the database operation, within the SAME total deadline.
+                self.log.write('trusted_reading_retry',attempt=2,characters=len(text))
+                return await self._generate(text)
+        return await asyncio.wait_for(verified(),policy()['message_tts_operation_s'])
 
     async def _generate(self,text):
         audio=bytearray();transcript=None;rid=None
@@ -49,8 +59,9 @@ class RealtimeReader:
                     response=event.get('response',{})
                     if response.get('id')!=rid or response.get('status')!='completed':raise ValueError('Reading did not complete')
                     if not audio or not isinstance(transcript,str) or code_normalized(transcript)!=code_normalized(text):
-                        self.log.write('trusted_reading_rejected',reason='text_or_audio_mismatch')
-                        raise ValueError('Reading differs from trusted text; audio not played')
+                        self.log.write('trusted_reading_rejected',reason='text_or_audio_mismatch',
+                            expected_text=text,generated_text=transcript,audio_bytes=len(audio))
+                        raise ReadingMismatch('Reading differs from trusted text; audio not played')
                     self.log.write('trusted_reading_verified',voice=self.session['voice'],characters=len(text),audio_s=len(audio)/48000)
                     return SimpleNamespace(samples=np.frombuffer(audio,dtype='<i2').astype(np.float32)/32768,sample_rate=24000)
         raise RuntimeError('Trusted reading disconnected')

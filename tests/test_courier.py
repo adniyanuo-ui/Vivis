@@ -5,6 +5,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 import unittest
+from unittest.mock import AsyncMock
 
 from vivis.paths import ROOT
 from vivis.interaction.memory import PersonMemory
@@ -96,6 +97,47 @@ class CourierRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def call(self,args,call_id='courier'):
         await self.service.tool(self.ws,dict(name='courier_pickup',response_id='r',call_id=call_id,arguments=json.dumps(args)))
         return json.loads(self.sent[-1]['item']['output'])
+
+    async def test_early_tool_waits_for_same_final_source_and_commits_once(self):
+        s=self.service;s.identified_person=lambda:'alice';s.turn_person='alice'
+        s.begin_user_turn('final-code');s.turn_ended_at=time.monotonic();s.pending_user_text=None
+        s.speak_message=AsyncMock(return_value=True)
+        event=dict(name='courier_pickup',response_id='r',call_id='early',arguments=json.dumps(dict(action='register',code='4466')))
+        await s.tool(self.ws,event)
+        self.assertFalse(self.sent);self.assertEqual(s.courier.get(self.row['id'])['code'],'4321')
+        s.remember(dict(type='conversation.item.input_audio_transcription.completed',item_id='final-code',transcript='退件取件码4466。'))
+        await s.resume_courier_calls(self.ws);await s.message_lane.task
+        self.assertTrue(json.loads(self.sent[-1]['item']['output'])['accepted'])
+        row=s.courier.get(self.row['id']);self.assertEqual(row['code'],'4466')
+        await s.tool(self.ws,event);await s.resume_courier_calls(self.ws)
+        self.assertEqual(s.courier.get(self.row['id'])['version'],row['version'])
+        s.speak_message.assert_awaited_once();self.assertFalse(s.courier_waiters)
+
+    async def test_deferred_courier_call_never_crosses_a_new_turn(self):
+        s=self.service;s.pending_user_text=None
+        event=dict(name='courier_pickup',response_id='r',call_id='early',arguments=json.dumps(dict(action='lookup',owner_name='甲工')))
+        await s.tool(self.ws,event);self.assertFalse(self.sent)
+        s.input_generation+=1;s.pending_user_text='另一句话。'
+        await s.resume_courier_calls(self.ws)
+        self.assertEqual(json.loads(self.sent[-1]['item']['output'])['status'],'stale_user_turn')
+        self.assertIsNone(s.message_lane);self.assertFalse(s.courier_waiters)
+
+    async def test_deferred_courier_source_timeout_does_not_write_or_claim_success(self):
+        s=self.service;s.pending_user_text=None;s.speak_message=AsyncMock(return_value=True)
+        event=dict(name='courier_pickup',response_id='r',call_id='early',arguments=json.dumps(dict(action='register',code='4466')))
+        await s.tool(self.ws,event);s.courier_waiters['early']['deadline']=0
+        await s.resume_courier_calls(self.ws);await s.message_lane.task
+        self.assertFalse(json.loads(self.sent[-1]['item']['output'])['accepted'])
+        self.assertEqual(s.courier.get(self.row['id'])['code'],'4321')
+        self.assertNotIn('已保存',s.speak_message.call_args.args[0])
+
+    async def test_failed_receipt_has_one_fixed_notice_not_a_claim_or_retry_loop(self):
+        s=self.service;s.unattributed_source_notice=True;s.speak_message_notice=AsyncMock(return_value=True)
+        s.receipt_failure_notice();await s.message_lane.task
+        text=s.speak_message_notice.call_args.args[0]
+        self.assertIn('尚未确认保存',text);self.assertNotIn('已保存',text)
+        self.assertIsNone(s.message_receipts.pending);self.assertFalse(s.continue_response)
+        self.assertEqual(s.courier.get(self.row['id'])['code'],'4321')
 
     async def test_unknown_face_can_receive_code_but_cannot_read_private_memory(self):
         result=await self.call(dict(action='lookup',owner_name='甲工'))

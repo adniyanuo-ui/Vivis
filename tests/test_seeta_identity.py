@@ -63,7 +63,7 @@ class SeetaIdentityTests(unittest.TestCase):
         self.assertEqual(self.f.result['observation']['decision_reason'],'below_threshold')
         self.assertEqual(self.f.result['observation']['score_threshold'],.6)
 
-    def test_low_quality_holds_name_but_skips_comparison_and_recovers_after_three(self):
+    def test_low_quality_holds_name_but_skips_comparison_and_requires_qualified_recovery(self):
         for t in (10.,10.5,11.):self.infer(t)
         self.model.compare.reset_mock();self.model.quality=False;self.infer(11.5)
         self.assertEqual(self.f.result['state'],'reviewing')
@@ -71,7 +71,8 @@ class SeetaIdentityTests(unittest.TestCase):
         self.assertTrue(self.f.result['observation']['quality_rejected'])
         self.assertIsNone(self.f.result['similarity']);self.model.compare.assert_not_called()
         self.model.quality=True
-        for t in (12.,12.5):self.infer(t);self.assertEqual(self.f.result['state'],'reviewing')
+        for i in range(self.c['confirmation_samples']-1):
+            self.infer(12.+i*.25);self.assertEqual(self.f.result['state'],'reviewing')
         self.infer(13.);self.assertEqual(self.f.result['state'],'recognized')
 
     def test_new_credible_person_revokes_old_name_before_confirmation(self):
@@ -79,6 +80,35 @@ class SeetaIdentityTests(unittest.TestCase):
         self.model.index=1;self.infer(11.5)
         self.assertIsNone(self.f.result['person_id'])
         self.infer(12.);self.infer(12.5);self.assertEqual(self.f.result['person_id'],'beta')
+
+    def test_slow_identity_sampling_keeps_results_valid_between_samples(self):
+        self.f.c.update(hz=.5,max_result_age_s=3.,review_hold_s=8.)
+        stamps=[]
+        def offer(fn,*args):
+            stamps.append(args[2]);fn(*args);return True
+        self.f.job.offer=offer
+        image=np.zeros((120,120,3),np.uint8);row=np.array([0,0,100,100])
+        for stamp in (10.,10.5,11.,11.5,12.,12.5,13.,13.5,14.,14.5,15.):
+            result=self.f.step((1,stamp,image),row,now=stamp)
+            if stamp>=14:self.assertEqual(result['person_id'],'alpha')
+        self.assertEqual(stamps,[10.,12.,14.])
+        self.model.quality=False
+        for stamp in (16.,18.,20.):
+            result=self.f.step((1,stamp,image),row,now=stamp)
+            self.assertEqual(result['state'],'reviewing')
+        self.assertEqual(self.f.step((1,22.,image),row,now=22.)['state'],'unknown')
+
+    def test_current_sampling_confirms_two_good_samples_at_four_hz(self):
+        stamps=[]
+        def offer(fn,*args):stamps.append(args[2]);fn(*args);return True
+        self.f.job.offer=offer
+        image=np.zeros((120,120,3),np.uint8);row=np.array([0,0,100,100])
+        self.assertEqual(self.c['hz'],4.);self.assertEqual(self.c['confirmation_samples'],2)
+        for stamp in (10.,10.125,10.25):
+            result=self.f.step((1,stamp,image),row,now=stamp)
+            if stamp<10.25:self.assertNotEqual(result['state'],'recognized')
+        self.assertEqual(stamps,[10.,10.25])
+        self.assertEqual(result['state'],'recognized')
 
     def test_native_engine_is_not_destroyed_until_inflight_inference_finishes(self):
         self.model.entered=threading.Event();self.model.release=threading.Event()

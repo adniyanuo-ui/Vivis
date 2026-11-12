@@ -27,8 +27,8 @@ IDENTITY_RULES=('身份来源规则：云端没有收到摄像头图像，只收
     '用户自报身份可以作为自我介绍使用，但不冒充人脸识别成功；用户纠正优先于你之前的猜测。'
     '自报“小王”等称呼只表示对方这样介绍自己，不能据此匹配熟人档案、补全姓名职务或读取留言。'
     '询问“看看我是谁/认出我了吗”必须以最新视觉核验为准；unknown时明确说尚未确认，不能沿用自报或历史称呼宣称认出。'
-    'reviewing表示同一张脸正在短暂复核，可以保留之前的称呼，不要说突然不认识了；询问身份时坦诚说明正在复核。'
-    '复核不等于新近核验成功；仅当控制器明确identity_retained=true时，沿用同一张脸此前确认的身份和权限，其他复核状态不能读取私人内容或代确认收件。'
+    'reviewing表示身份正在复核，可以保留之前的称呼，不要说突然不认识了；询问身份时坦诚说明正在复核。'
+    '复核不等于新近核验成功；仅当控制器明确identity_retained=true时，沿用身份保持窗口内此前确认的身份和权限，其他复核状态不能读取私人内容。'
     '身份未知且对方没有明确要求怎样称呼时，只用“您好/您”；对方提到、否认或询问一个熟人称呼不代表那是本人，不能把该称呼套用给当前用户。'
     '不能说“我看着摄像头确认您就是某某”，不能编造画面模糊、失焦等原因，不能声称已调整相机或颈部。')
 
@@ -127,9 +127,13 @@ class Knowledge:
         identity=self.current_identity(now)
         return identity['person'] if identity['state']=='recognized' else None
 
-    def person_context(self,now=None,*,allow_identification=True,allow_review=False,retained_person_id=None):
+    def person_context(self,now=None,*,allow_identification=True,allow_review=False,retained_person_id=None,stable_identity=None):
         if self.config is None:return dict(instructions='',recognized=False,person_id=None)
         identity=self.current_identity(now)
+        if stable_identity is not None:
+            pid=stable_identity.get('person_id')
+            identity=(dict(state=stable_identity['state'],person=dict(person_id=pid,**self.people[pid]))
+                      if pid in self.people else dict(state='unknown',person=None))
         if ((identity['state']=='recognized' and not allow_identification)
                 or (identity['state']=='reviewing' and not allow_review)):
             identity=dict(state='unknown',person=None)
@@ -140,7 +144,7 @@ class Knowledge:
             identity=dict(identity,person=person,identity_retained=True)
         instructions=' current_visual_identity='+json.dumps(identity,ensure_ascii=False)+'。'+IDENTITY_RULES
         if retained:
-            instructions+=' 同一张脸在既有防抖有效期内复核，保持当前身份、背景和留言权限，正常继续，不反复询问身份、不重新问候。'
+            instructions+=' 当前处于前台身份保持窗口，短暂低分、不同候选或丢脸不立即换人；保持原会话身份、背景和留言权限，不声称刚重新识别成功，不反复询问身份或问候。'
         elif reviewing:
             instructions+=' 之前的称呼暂时保留，正在复核；不反复问姓名、不触发重新问候，不加载个人背景或留言。'
         elif person:

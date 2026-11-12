@@ -24,6 +24,7 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
         self.service.presence.visible=Mock(return_value=True)
         self.service.context.update(revision=1,mode='interaction',target='interaction',ready=True)
         self.service.enabled=True
+        self.identity_deadline=10.+self.service.presence.c['identity_uncertain_reset_s']
         self.state=VoiceSession(self.service.player,self.service.log)
         self.state.interrupt=Mock(wraps=self.state.interrupt)
 
@@ -39,7 +40,9 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
         s.verify_identity(self.state);self.state.interrupt.assert_not_called()
         s.begin_user_turn('next');self.assertEqual(s.turn_person,'alice')
         s.reviewing_identity.return_value=None
-        self.assertIsNone(s.identified_person())
+        self.assertEqual(s.identified_person(),'alice')
+        with patch('vivis.speech.cloud_managed.time.monotonic',return_value=s.identity_stability.change_started+8):
+            self.assertIsNone(s.identified_person())
         from vivis.interaction.message_lane import StaleMessageTurn
         with self.assertRaises(StaleMessageTurn):request.guard()
 
@@ -72,13 +75,13 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(c.kwargs['person_id']=='alice' and c.kwargs['interval_s']==3 for c in checks))
         self.state.interrupt.assert_not_called()
 
-    async def test_known_to_unknown_clears_context_after_three_seconds(self):
+    async def test_known_to_unknown_clears_context_after_configured_grace(self):
         self.service.conversation_person='alice';self.person=None
         previous=self.service.memory_session
         with patch('vivis.speech.cloud_managed.time.monotonic',return_value=10.) as clock:
             self.service.verify_identity(self.state)
-            clock.return_value=12.99;self.service.verify_identity(self.state)
-            clock.return_value=13.
+            clock.return_value=(self.identity_deadline-.01);self.service.verify_identity(self.state)
+            clock.return_value=self.identity_deadline
             with self.assertRaisesRegex(ConversationReset,'identity_uncertain'):
                 self.service.verify_identity(self.state)
         self.assertIsNone(self.service.conversation_person)
@@ -102,17 +105,17 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
         service.speech_responses.append('reply')
         pcm=(np.ones(480,dtype='<i2')*1000).tobytes()
         service.player.add('reply',pcm);service.player.finish('reply')
-        self.state.responses['reply']=dict(status='completed',received_audio_s=.02,empty_dac=13.2)
+        self.state.responses['reply']=dict(status='completed',received_audio_s=.02,empty_dac=(self.identity_deadline+.2))
         with patch('vivis.speech.cloud_managed.time.monotonic',return_value=10.) as clock:
             service.verify_identity(self.state)
-            clock.return_value=13.;service.verify_identity(self.state)
+            clock.return_value=self.identity_deadline;service.verify_identity(self.state)
             self.assertTrue(service.identity_reset_pending)
             self.assertTrue(service.can_play_response('reply'))
             self.state.interrupt.assert_not_called()
-            service.player.render(960,13.1)
+            service.player.render(960,(self.identity_deadline+.1))
             # PCM has left the queue, but its scheduled DAC span is unfinished.
             service.verify_identity(self.state);self.state.interrupt.assert_not_called()
-            clock.return_value=13.21
+            clock.return_value=(self.identity_deadline+.21)
             with self.assertRaisesRegex(ConversationReset,'identity_uncertain'):service.verify_identity(self.state)
         self.assertIsNone(service.identified_person())
 
@@ -126,9 +129,9 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
         service=self.service;service.conversation_person='alice';self.person=None
         service.in_speech=True
         with patch('vivis.speech.cloud_managed.time.monotonic',return_value=10.) as clock:
-            service.verify_identity(self.state);clock.return_value=13.;service.verify_identity(self.state)
+            service.verify_identity(self.state);clock.return_value=self.identity_deadline;service.verify_identity(self.state)
             self.state.interrupt.assert_not_called()
-            service.turn_person='alice';service.turn_item_id='stop';service.turn_ended_at=13.
+            service.turn_person='alice';service.turn_item_id='stop';service.turn_ended_at=self.identity_deadline
             with self.assertRaisesRegex(ValueError,'speaker changed'):service.fresh_task_source()
             service.in_speech=False
             self.state.responses['control']=dict(status='completed',user_turn=dict(item_id='stop'))
@@ -138,7 +141,7 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
         service=self.service;service.conversation_person='alice';self.person=None
         service.turn_item_id='stop';service.turn_ended_at=10.
         with patch('vivis.speech.cloud_managed.time.monotonic',return_value=10.) as clock:
-            service.verify_identity(self.state);clock.return_value=13.;service.verify_identity(self.state)
+            service.verify_identity(self.state);clock.return_value=self.identity_deadline;service.verify_identity(self.state)
             self.state.interrupt.assert_not_called()
             self.state.responses['control']=dict(status='completed',user_turn=dict(item_id='stop'))
             with self.assertRaisesRegex(ConversationReset,'identity_uncertain'):service.verify_identity(self.state)
@@ -206,7 +209,7 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
         service=self.service;service.conversation_person='alice';self.person=None
         service.reviewing_identity=lambda:dict(state='reviewing',person=dict(person_id='bob'))
         with patch('vivis.speech.cloud_managed.time.monotonic',return_value=10.) as clock:
-            service.verify_identity(self.state);clock.return_value=13.
+            service.verify_identity(self.state);clock.return_value=self.identity_deadline
             with self.assertRaisesRegex(ConversationReset,'identity_uncertain'):service.verify_identity(self.state)
 
     async def test_review_status_retains_name_but_personal_memory_and_relay_are_blocked(self):

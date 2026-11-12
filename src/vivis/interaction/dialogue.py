@@ -482,7 +482,7 @@ def main(argv=None):
                     elif event['kind']=='cloud_transcript' and event.get('role')=='assistant':
                         print(identity['display_name']+'：'+event.get('text',''),flush=True)
                     elif event['kind']=='cloud_transcript' and event.get('role')=='user' and event.get('text','').strip():
-                        print('用户（识别）：'+event['text'],flush=True)
+                        print(event.get('identity_label','other-other')+'（识别）：'+event['text'],flush=True)
                     if qwen_only:continue  # Cloud tools alone decide actions; transcripts are diagnostics.
                     # A completed USER transcription is a second recognizer,
                     # not an LLM action/tool. Only the same explicit control

@@ -60,6 +60,7 @@ class VoiceMemoryOrderTests(unittest.TestCase):
         self.transcript('0','过期的话。');self.transcript('unknown','身份不明的话。')
         self.assertFalse(service.memory.search_all([])['matches'])
         self.assertFalse(service.turn_saved)
+        self.assertTrue(service.unattributed_source_notice)
 
 
 if __name__=='__main__':unittest.main()

@@ -5,7 +5,7 @@ import json
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock,Mock,patch
 
-from vivis.speech.trusted_reading import RealtimeReader
+from vivis.speech.trusted_reading import RealtimeReader,ReadingMismatch
 from vivis.speech.runtime_policy import policy
 
 
@@ -18,7 +18,10 @@ class TrustedReadingTests(IsolatedAsyncioTestCase):
             dict(type='response.done',response=dict(id='r',status=status))]
         outer=self
         class WS:
-            async def __aenter__(self):return self
+            async def __aenter__(self):
+                if not hasattr(self,'original'):self.original=list(events)
+                else:events[:]=self.original
+                return self
             async def __aexit__(self,*_):outer.closed=True
             async def send(self,s):outer.sent.append(json.loads(s))
             def __aiter__(self):return self
@@ -67,3 +70,12 @@ class TrustedReadingTests(IsolatedAsyncioTestCase):
              patch('vivis.speech.trusted_reading.policy',return_value={**policy(),'message_tts_operation_s':.02}):
             with self.assertRaises(TimeoutError):await reader.generate('测试')
         self.assertTrue(self.closed)
+
+    async def test_mismatch_retry_returns_only_verified_audio_once(self):
+        reader=self.reader();verified=object()
+        reader._generate=AsyncMock(side_effect=[ReadingMismatch('wrong text'),verified])
+        self.assertIs(await reader.generate('已保存，等转告。'),verified)
+        self.assertEqual(reader._generate.await_count,2)
+        reader._generate=AsyncMock(side_effect=ReadingMismatch('wrong again'))
+        with self.assertRaises(ReadingMismatch):await reader.generate('已保存，等转告。')
+        self.assertEqual(reader._generate.await_count,2)

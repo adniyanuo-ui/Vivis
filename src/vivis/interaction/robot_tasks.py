@@ -146,7 +146,7 @@ class RobotTasks:
         if not row:raise ValueError('Unknown task')
         return dict(row)
 
-    def list(self,status='active',recipient=None,after_task_id=None,limit=None,visible_to=None):
+    def list(self,status='active',recipient=None,after_task_id=None,limit=None,visible_to=None,content_keyword=None):
         self.ensure_schema()
         if status not in (*STATES,'active','all'):raise ValueError('Unknown task status')
         if recipient:person_key(recipient)
@@ -154,9 +154,13 @@ class RobotTasks:
         if visible_to is not None:
             person_key(visible_to)
             clauses.append("(kind='todo' OR creator=? OR recipient=?)");params.extend([visible_to,visible_to])
-        if status=='active':clauses.append("status IN ('pending','in_progress','announced')")
+        if status=='active':clauses.append("(status IN ('pending','in_progress') OR (kind='todo' AND status='announced'))")
+        elif status=='announced':clauses.append("(status='announced' OR (kind IN ('message','reminder') AND status='completed'))")
         elif status!='all':clauses.append('status=?');params.append(status)
         if recipient:clauses.append('recipient=?');params.append(recipient)
+        if content_keyword:
+            if not isinstance(content_keyword,str) or not 2<=len(content_keyword)<=40:raise ValueError('Invalid message keyword')
+            clauses.append('instr(content,?)>0');params.append(content_keyword)
         if after_task_id:
             cursor=self.get(after_task_id)
             clauses.append('(created>? OR (created=? AND task_id>?))');params.extend([cursor['created'],cursor['created'],cursor['task_id']])
@@ -165,8 +169,8 @@ class RobotTasks:
             rows=[dict(r) for r in db.execute('SELECT * FROM robot_tasks'+where+' ORDER BY created,task_id LIMIT?',[*params,limit or self.c['list_limit']])]
         return rows
 
-    def page(self,status='active',recipient=None,after_task_id=None,visible_to=None):
-        rows=self.list(status,recipient,after_task_id,self.c['list_limit']+1,visible_to);more=len(rows)>self.c['list_limit'];rows=rows[:self.c['list_limit']]
+    def page(self,status='active',recipient=None,after_task_id=None,visible_to=None,content_keyword=None):
+        rows=self.list(status,recipient,after_task_id,self.c['list_limit']+1,visible_to,content_keyword);more=len(rows)>self.c['list_limit'];rows=rows[:self.c['list_limit']]
         return dict(tasks=rows,has_more=more,next_after_task_id=rows[-1]['task_id'] if rows and more else None,counts=self.counts(visible_to))
 
     def counts(self,visible_to=None):
@@ -210,7 +214,7 @@ class RobotTasks:
         cutoff=datetime.fromisoformat(stamp).timestamp()-self.c['repeat_after_s']
         cutoff=datetime.fromtimestamp(cutoff,timezone.utc).isoformat()
         with self.memory.db() as db:
-            return [dict(r) for r in db.execute("SELECT * FROM robot_tasks WHERE recipient=? AND kind IN ('message','reminder') AND status IN ('pending','in_progress','announced') AND (not_before IS NULL OR not_before<=?) AND (last_attempt IS NULL OR last_attempt<=?) ORDER BY COALESCE(due_at,not_before,created),created LIMIT?",(recipient,stamp,cutoff,self.c['list_limit']))]
+            return [dict(r) for r in db.execute("SELECT * FROM robot_tasks WHERE recipient=? AND kind IN ('message','reminder') AND status IN ('pending','in_progress') AND (not_before IS NULL OR not_before<=?) AND (last_attempt IS NULL OR last_attempt<=?) ORDER BY COALESCE(due_at,not_before,created),created LIMIT?",(recipient,stamp,cutoff,self.c['list_limit']))]
 
     def prepare_relay(self,task_id,recipient):
         task=self.get(task_id)
@@ -221,13 +225,19 @@ class RobotTasks:
             self.event(db,task_id,'relay_prepared',recipient,{})
         return task
 
-    def mark_announced(self,task_id,recipient,response_id):
+    def mark_announced(self,task_id,recipient,response_id,guard=None):
         task=self.get(task_id)
         if task['recipient']!=recipient:raise ValueError('Wrong relay recipient')
         with self.memory.db() as db:
-            cursor=db.execute("UPDATE robot_tasks SET status='announced',last_announced=?,updated=? WHERE task_id=? AND status IN ('pending','in_progress','announced')",(now_utc(),now_utc(),task_id))
-            if cursor.rowcount:self.event(db,task_id,'audio_played',recipient,dict(response_id=response_id,understanding_confirmed=False))
+            db.execute('BEGIN IMMEDIATE')
+            if guard:guard()
+            cursor=db.execute("UPDATE robot_tasks SET status='announced',next_action=?,last_announced=?,updated=? WHERE task_id=? AND status IN ('pending','in_progress','announced')",('已完整转达；无需口头确认，不跟踪事情执行',now_utc(),now_utc(),task_id))
+            if cursor.rowcount:self.event(db,task_id,'audio_played',recipient,dict(response_id=response_id,delivery_complete=True,understanding_confirmed=False))
+            if guard:guard()
         self.memory.version+=1
+        result=self.get(task_id)
+        if result['status'] not in ('announced','completed'):raise ValueError('Message changed before delivery could be recorded')
+        return result
 
     def bind_source(self,session,utterance,message_id):
         self.ensure_schema()

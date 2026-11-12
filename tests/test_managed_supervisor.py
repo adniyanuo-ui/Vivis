@@ -58,7 +58,7 @@ def commands():
     emit(kind='voice_warning',epoch=c['epoch'],message='本句缓冲超限，交互继续')
     emit(kind='cloud_transcript',epoch=c['epoch']-1,role='user',text='过期识别')
     emit(kind='cloud_transcript',epoch=c['epoch'],role='user',text='   ')
-    emit(kind='cloud_transcript',epoch=c['epoch'],role='user',text='停止')
+    emit(kind='cloud_transcript',epoch=c['epoch'],role='user',text='停止',identity_label='小王-other')
    if c['epoch']==1:emit(kind='asr_control',control_sequence=1,text='结束',captured_end_monotonic=time.monotonic())
   else:
    speaker.unlink(missing_ok=True);emit(kind='voice_state',epoch=c['epoch'],status='off',speaker_owned=False)
@@ -132,8 +132,8 @@ time.sleep(10)
             if qwen:
                 self.assertEqual(prompts,[])
                 self.assertIn('语音提示：本句缓冲超限，交互继续',console.getvalue())
-                self.assertEqual([line for line in console.getvalue().splitlines() if line.startswith('用户（识别）：')],
-                    ['用户（识别）：停止'])
+                self.assertEqual([line for line in console.getvalue().splitlines() if line.startswith('小王-other（识别）：')],
+                    ['小王-other（识别）：停止'])
             self.assertNotIn('identity',prompts)  #Natural cloud answer, no duplicate cached voice.
             effective=(root/'run/effective.json').read_text();self.assertNotIn('unit-test-placeholder',effective)
             if repeated:

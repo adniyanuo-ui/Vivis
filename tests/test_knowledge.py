@@ -85,7 +85,7 @@ class KnowledgeTests(unittest.TestCase):
         k=self.knowledge();path=self.root/config()['state_file'];path.parent.mkdir(parents=True)
         good=dict(schema_version='vivis-familiar-person-1.0',state='recognized',person_id='testperson',observed_monotonic=20.)
         path.write_text(json.dumps(good));self.assertEqual(k.current_person(21)['display_name'],'测试同事')
-        self.assertIsNone(k.current_person(22));self.assertIsNone(k.current_person(19))
+        self.assertIsNone(k.current_person(20+config()['max_result_age_s']+.1));self.assertIsNone(k.current_person(19))
         for bad in ([],None,dict(good,person_id=[]),dict(good,person_id='other'),dict(good,observed_monotonic='20'),dict(good,state='unknown')):
             path.write_text(json.dumps(bad));self.assertIsNone(k.current_person(20))
         path.write_text('{broken');self.assertIsNone(k.current_person(20))
@@ -121,10 +121,11 @@ class KnowledgeTests(unittest.TestCase):
         self.assertIn('喜欢讨论算法验证',retained['instructions'])
         wrong=k.person_context(22.,allow_review=True,retained_person_id='another-person')
         self.assertNotIn('"identity_retained": true',wrong['instructions'])
-        self.assertEqual(k.current_identity(24.),dict(state='unknown',person=None)) # stale producer
-        expired=k.person_context(24.,allow_review=True,retained_person_id='testperson')
+        stale=22.+config()['max_result_age_s']+.1
+        self.assertEqual(k.current_identity(stale),dict(state='unknown',person=None)) # stale producer
+        expired=k.person_context(stale,allow_review=True,retained_person_id='testperson')
         self.assertIsNone(expired['person_id']);self.assertNotIn('"identity_retained": true',expired['instructions'])
-        for changed in (dict(review,observed_monotonic=25.),dict(review,confirmed_monotonic=23.),
+        for changed in (dict(review,observed_monotonic=20.+config()['review_hold_s']),dict(review,confirmed_monotonic=23.),
                         dict(review,confirmed_monotonic=None)):
             path.write_text(json.dumps(changed))
             self.assertEqual(k.current_identity(changed['observed_monotonic']),dict(state='unknown',person=None))
@@ -177,13 +178,14 @@ class FamiliarTests(unittest.TestCase):
         self.assertEqual(match(vector(0),np.array([vector(0),vector(0)]),['alpha','alpha'],.5,.08)[0],'alpha')
 
     def test_confirmation_no_face_expiry_and_identity_switch(self):
-        for _ in range(2):self.infer();self.assertIsNone(self.f.result['person_id'])
+        for _ in range(self.f.c['confirmation_samples']-1):self.infer();self.assertIsNone(self.f.result['person_id'])
         self.infer();self.assertEqual(self.f.result['person_id'],'alpha')
         self.infer(1);self.assertIsNone(self.f.result['person_id'])
         self.infer(1);self.infer(1);self.assertEqual(self.f.result['person_id'],'beta')
         row=np.array([0,0,80,80]+[0]*11,dtype=np.float32)
-        self.f.last_submit=12
-        self.assertIsNone(self.f.step((1,10,None),row,now=12)['person_id'])
+        stale=10.+self.f.c['max_result_age_s']+.1
+        self.f.last_submit=stale
+        self.assertIsNone(self.f.step((1,10,None),row,now=stale)['person_id'])
         self.assertIsNone(self.f.step((1,10,None),None,now=10)['person_id'])
 
     def test_late_inference_does_not_restore_old_identity_after_reset_or_close(self):
@@ -194,25 +196,26 @@ class FamiliarTests(unittest.TestCase):
         for _ in range(4):self.infer()
         self.assertIsNone(self.f.result['person_id'])
 
-    def test_low_score_reviews_same_person_until_three_recovery_samples(self):
+    def test_low_score_reviews_same_person_until_required_recovery_samples(self):
         for _ in range(3):self.infer(stamp=10.)
         self.infer(2,10.5)
         self.assertEqual(self.f.result['state'],'reviewing')
         self.assertEqual(self.f.result['person_id'],'alpha')
         self.assertEqual(self.f.result['confirmed_monotonic'],10.)
-        for stamp in (11.,11.5):
-            self.infer(0,stamp);self.assertEqual(self.f.result['state'],'reviewing')
+        for i in range(self.f.c['confirmation_samples']-1):
+            self.infer(0,11.+i*.25);self.assertEqual(self.f.result['state'],'reviewing')
         self.infer(0,12.)
         self.assertEqual(self.f.result['state'],'recognized')
         self.assertEqual(self.f.result['confirmed_monotonic'],12.)
 
     def test_review_has_a_fixed_deadline_not_refreshed_by_intermittent_matches(self):
         for _ in range(3):self.infer(stamp=10.)
-        for stamp in np.arange(10.5,15.,.5):
+        deadline=10.+self.f.c['review_hold_s']
+        for stamp in np.arange(10.5,deadline,.5):
             self.infer(2 if int(stamp*2)%2 else 0,float(stamp))
             self.assertEqual(self.f.result['state'],'reviewing')
             self.assertEqual(self.f.result['confirmed_monotonic'],10.)
-        self.infer(2,15.)
+        self.infer(2,deadline)
         self.assertEqual(self.f.result['state'],'unknown');self.assertIsNone(self.f.result['person_id'])
 
     def test_multiple_faces_no_face_or_large_bbox_jump_clears_held_identity(self):
@@ -230,11 +233,12 @@ class FamiliarTests(unittest.TestCase):
     def test_stale_review_invalidates_pending_old_inference(self):
         for _ in range(3):self.infer(stamp=10.)
         self.infer(2,10.5);epoch=self.f.epoch
-        self.f.last_submit=12.1
+        stale=10.5+self.f.c['max_result_age_s']+.1
+        self.f.last_submit=stale
         row=np.array([0,0,80,80]+[0]*11,dtype=np.float32)
-        result=self.f.step((1,12.1,None),row,now=12.1)
+        result=self.f.step((1,stale,None),row,now=stale)
         self.assertEqual(result['state'],'unknown')
-        for _ in range(3):self.infer(stamp=12.1,epoch=epoch)
+        for _ in range(3):self.infer(stamp=stale,epoch=epoch)
         self.assertIsNone(self.f.result['person_id'])
 
     def test_first_pending_inference_is_not_invalidated_by_empty_initial_result(self):
@@ -252,9 +256,10 @@ class FamiliarTests(unittest.TestCase):
         def offer(_fn,_image,_row,stamp,epoch):
             self.infer(stamp=stamp,epoch=epoch);return True
         self.f.job.offer=offer
-        sample=(1,12.,np.zeros((100,100,3),dtype=np.uint8))
+        stale=10.+self.f.c['max_result_age_s']+.1
+        sample=(1,stale,np.zeros((100,100,3),dtype=np.uint8))
         row=np.array([0,0,80,80]+[0]*11,dtype=np.float32)
-        result=self.f.step(sample,row,now=12.)
+        result=self.f.step(sample,row,now=stale)
         self.assertEqual(result['state'],'unknown');self.assertEqual(self.f.hits,1)
 
     def test_missing_or_corrupt_gallery_degrades_optional_recognition(self):

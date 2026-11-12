@@ -4,10 +4,10 @@
   "people_directory": "private/people",
   "state_file": "outputs/runtime/familiar_person.json",
   "minimum_margin": 0.08,
-  "confirmation_samples": 3,
-  "hz": 2.0,
+  "confirmation_samples": 2,
+  "hz": 4.0,
   "max_result_age_s": 1.5,
-  "review_hold_s": 5.0,
+  "review_hold_s": 8.0,
   "min_face_size_px": 60,
   "backend": "seeta6",
   "backends": {

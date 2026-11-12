@@ -32,6 +32,39 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
     async def save(self):
         r=self.request();await self.lane.run(r);self.assertTrue(self.lane.result['saved']);return r
 
+    async def test_supplement_during_extraction_restarts_with_same_person_draft(self):
+        entered=asyncio.Event();finish=asyncio.Event();hints=[]
+        async def extract(text,people,hint):
+            hints.append(dict(hint))
+            if len(hints)==1:entered.set();await finish.wait()
+            return dict(action='create',recipient_id='bob',content='今天下午买一个冰淇淋。')
+        self.lane.extract=extract
+        first=self.request(text='让小乙买一个冰淇淋。');self.lane.start(first)
+        await entered.wait();self.lane.next_turn('alice','visit')
+        next_request=self.request(text='下午，今天下午。')
+        finish.set();await self.lane.task
+        self.assertFalse(self.store.list('all'))
+        self.lane.start(next_request);await self.lane.task
+        self.assertEqual(hints[-1]['draft_source'],first.source_text)
+        self.assertEqual(len(self.store.list('all')),1)
+        self.assertEqual(self.store.list('all')[0]['content'],'今天下午买一个冰淇淋。')
+        self.assertFalse(self.lane.has_continuation('alice','visit'))
+
+    async def test_pending_draft_cannot_cross_person_or_session_or_edit_saved_message(self):
+        r=self.request();self.lane.extracting=r
+        self.lane.next_turn('alice','visit');self.assertTrue(self.lane.has_continuation('alice','visit'))
+        self.lane.next_turn('bob','visit');self.assertFalse(self.lane.continuation)
+        self.lane.next_turn('alice','new-session');self.assertFalse(self.lane.continuation)
+        self.lane.extracting=None
+        await self.lane.run(r);self.lane.next_turn('alice','visit')
+        self.assertFalse(self.lane.continuation)
+
+    async def test_recovered_query_cannot_write_but_can_read_ledger(self):
+        request=replace(self.request(),read_only=True);self.current=request
+        await self.lane.run(request);self.assertFalse(self.store.list('all'))
+        self.answer=dict(action='query',status='all')
+        await self.lane.run(request);self.assertEqual(self.lane.result['operation_status'],'read')
+
     async def test_courier_query_uses_owner_ledger_not_colleague_messages(self):
         from vivis.interaction.courier import CourierHandoffs
         self.lane.courier=CourierHandoffs(self.memory)
@@ -71,7 +104,7 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         await entered.wait();self.current=replace(r,actor='bob',verified_person='bob');finish.set();await task
         self.assertFalse(self.store.list('all'));self.assertFalse(self.spoken)
 
-    async def test_interrupted_relay_never_marks_announced_and_complete_then_ack_is_durable(self):
+    async def test_interrupted_relay_stays_pending_and_complete_delivery_is_durable(self):
         await self.save();row=self.store.list('all')[0]
         request=MessageRequest('bob','visit',None,None,None,'bob');self.current=request
         async def interrupted(*_):return False
@@ -80,9 +113,10 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         async def complete(*_):return True
         self.lane.speak=complete;await self.lane.relay(row['task_id'],request)
         self.assertEqual(self.store.get(row['task_id'])['status'],'announced')
-        self.answer=dict(action='acknowledge');await self.lane.run(self.request('bob','收到了。'))
         fresh=RobotTasks(PersonMemory(self.config,self.tmp.name),self.policy)
-        self.assertEqual(fresh.get(row['task_id'])['status'],'completed');self.assertFalse(fresh.due('bob'))
+        self.assertEqual(fresh.get(row['task_id'])['status'],'announced');self.assertFalse(fresh.due('bob'))
+        self.assertFalse(fresh.list('active',recipient='bob'))
+        self.assertNotIn('收到了吗',self.spoken[-1])
 
     async def test_a_rollback_never_speaks_success_and_unknown_commit_checks_on_retry(self):
         original=self.store.get
@@ -105,11 +139,52 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         await self.lane.run(self.request(text='刚才的留言保存了吗？'))
         self.assertIn('已保存，等待转告',self.spoken[-1]);self.assertEqual(len(self.store.list('all')),1)
 
-    async def test_ack_after_restart_can_bind_only_a_single_announced_message(self):
+    async def test_specific_query_filters_before_pagination_and_keeps_database_unchanged(self):
+        await self.save()
+        self.answer=dict(action='create',recipient_id='bob',content='今天下午买一个冰淇淋。')
+        await self.lane.run(self.request(text='让小乙今天下午买一个冰淇淋。'))
+        row=self.store.list('all')[-1];self.store.mark_announced(row['task_id'],'bob','complete-audio')
+        self.store.c['list_limit']=1
+        self.answer=dict(action='query',status='all',recipient_id='bob',content_keyword='冰淇淋')
+        await self.lane.run(self.request(text='我让小乙买冰淇淋的事，你转告了吗？'))
+        self.assertIn('查询到1条',self.spoken[-1]);self.assertIn('已转达',self.spoken[-1])
+        self.assertIn('冰淇淋',self.spoken[-1]);self.assertNotIn('USB',self.spoken[-1])
+        self.assertEqual(sum(self.store.counts().values()),2)
+
+    async def test_query_keyword_cannot_be_invented_or_disclose_other_people(self):
+        await self.save()
+        self.answer=dict(action='query',content_keyword='不存在的东西')
+        await self.lane.run(self.request(text='给小乙的留言保存了吗？'))
+        self.assertNotIn('USB',self.spoken[-1])
+        # The database predicate never relaxes the existing actor permission.
+        self.assertFalse(self.store.page('all',visible_to='other',content_keyword='USB')['tasks'])
+
+    async def test_delivered_message_is_not_pending_after_restart_and_can_be_queried(self):
         await self.save();tid=self.store.list('all')[0]['task_id'];self.store.mark_announced(tid,'bob','previous-complete-audio')
         self.lane.offered.clear();self.lane.last.clear()
-        self.answer=dict(action='acknowledge');await self.lane.run(self.request('bob','收到了。'))
-        self.assertEqual(self.store.get(tid)['status'],'completed')
+        self.answer=dict(action='query',status='all');await self.lane.run(self.request('bob','我的留言有哪些？'))
+        self.assertIn('已转达',self.spoken[-1]);self.assertNotIn('等待确认',self.spoken[-1])
+        self.assertEqual(self.store.get(tid)['status'],'announced')
+        self.assertFalse(self.store.due('bob','2099-01-01T00:00:00+00:00'))
+
+    async def test_recipient_change_at_delivery_commit_keeps_pending(self):
+        await self.save();tid=self.store.list('all')[0]['task_id']
+        request=MessageRequest('bob','visit',None,None,None,'bob');self.current=request
+        original=self.store.mark_announced
+        def changed(*args,**kwargs):
+            self.current=None
+            return original(*args,**kwargs)
+        self.store.mark_announced=changed
+        await self.lane.relay(tid,request)
+        self.assertEqual(self.store.get(tid)['status'],'pending')
+
+    async def test_explicit_repeat_reads_delivered_message_without_reopening(self):
+        await self.save();tid=self.store.list('all')[0]['task_id']
+        request=MessageRequest('bob','visit',None,None,None,'bob');self.current=request
+        await self.lane.relay(tid,request)
+        self.answer=dict(action='relay',task_id=tid)
+        await self.lane.run(self.request('bob','没听清，再说一遍。'))
+        self.assertIn('USB hub',self.spoken[-1]);self.assertFalse(self.store.due('bob'))
 
     async def test_same_request_supplement_cannot_mutate_another_persons_message(self):
         await self.save();tid=self.store.list('all')[0]['task_id']

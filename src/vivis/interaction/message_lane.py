@@ -16,7 +16,7 @@ class MessageLane:
         self.store=store;self.service=MessageService(store);self.people=people
         self.extract=extract;self.speak=speak;self.valid=valid;self.log=log
         self.last={};self.offered={};self.seen=set();self.task=None;self.active_relay=None
-        self.result=None
+        self.result=None;self.extracting=None;self.continuation=None
         self.courier=courier;self.notify=notify
 
     async def notice(self,text,request):
@@ -39,15 +39,23 @@ class MessageLane:
         if len(self.seen)>128:self.seen={key}
         self.cancel();self.task=asyncio.create_task(self.run(request));return True
 
-    def target(self,request,instruction,*,recipient=False):
-        target=instruction.get('task_id') or (self.offered.get(request.actor) if recipient else
-            self.last.get(request.actor,{}).get('task_id'))
-        if not target and recipient:
-            waiting=self.store.list('announced',recipient=request.actor,limit=2)
-            if len(waiting)==1:target=waiting[0]['task_id']
+    def next_turn(self,actor,session):
+        # A new speech turn may supplement an UNCOMMITTED extraction. It must
+        # never silently edit an already-saved message or cross a person/session.
+        pending=self.extracting
+        if pending and pending.actor==actor and pending.session==session:
+            self.continuation=dict(actor=actor,session=session,source=pending.source_text)
+        elif self.continuation and (self.continuation['actor']!=actor or self.continuation['session']!=session):
+            self.continuation=None
+
+    def has_continuation(self,actor,session):
+        return bool(self.continuation and self.continuation['actor']==actor and self.continuation['session']==session)
+
+    def target(self,request,instruction):
+        target=instruction.get('task_id') or self.last.get(request.actor,{}).get('task_id')
         if not target:raise ValueError('请说明是哪一条留言。')
         record=self.store.get(target)
-        if record['recipient' if recipient else 'creator']!=request.actor:raise ValueError('这条留言不属于当前人员。')
+        if record['creator']!=request.actor:raise ValueError('这条留言不属于当前人员。')
         return target
 
     async def say(self,text,request):
@@ -69,16 +77,20 @@ class MessageLane:
             if request.verified_person!=request.actor:
                 self.result=dict(operation_status='needs_clarification',saved=False)
                 await self.notice('请正对摄像头确认身份后再交代或查询私人留言。',request);return
-            hint=self.last.get(request.actor,{})
-            if request.actor not in self.offered:
-                waiting=self.store.list('announced',recipient=request.actor,limit=2)
-                if len(waiting)==1:self.offered[request.actor]=waiting[0]['task_id']
+            hint=dict(self.last.get(request.actor,{}))
+            if self.has_continuation(request.actor,request.session):
+                hint['draft_source']=self.continuation['source'];self.continuation=None
             if request.actor in self.offered:
                 offered=self.store.get(self.offered[request.actor])
-                hint=dict(task_id=offered['task_id'],content=offered['content'],awaiting_ack=True)
+                hint=dict(task_id=offered['task_id'],content=offered['content'],delivery_complete=offered['status'] in ('announced','completed'))
             hint=dict(hint,current_person_id=request.actor)
-            instruction=await self.extract(request.source_text,self.people,hint)
+            self.extracting=request
+            try:instruction=await self.extract(request.source_text,self.people,hint)
+            finally:
+                if self.extracting is request:self.extracting=None
             self.check(request);action=instruction['action']
+            if request.read_only and action not in ('query','courier_query','clarify','none'):
+                raise ValueError('本次只恢复查询；如需保存、修改或转达，请重新明确提出请求。')
             self.log('message_fields',actor=request.actor,**{k:instruction[k] for k in ('action','recipient_id','status','missing') if k in instruction})
             recipient=instruction.get('recipient_id')
             if action in ('query','relay') and recipient and recipient not in self.people:
@@ -108,14 +120,15 @@ class MessageLane:
             if action=='query':
                 args=dict(action='list',status=instruction.get('status','all'))
                 if instruction.get('recipient_id'):args['recipient_id']=instruction['recipient_id']
+                if instruction.get('content_keyword'):args['content_keyword']=instruction['content_keyword']
                 out=await asyncio.to_thread(self.service.execute,args,guarded,self.people)
                 self.check(request);self.result=out.payload()
                 rows=out.result['tasks'];words=[]
                 import re
                 recent=self.last.get(request.actor,{}).get('task_id')
-                if recent and re.search(r'刚才|那条|这条',request.source_text):
+                if recent and not args.get('content_keyword') and re.search(r'刚才|那条|这条',request.source_text):
                     rows=[message_view(await asyncio.to_thread(self.store.get,recent))]
-                self.log('message_query_result',actor=request.actor,recipient_id=args.get('recipient_id'),status=args['status'],count=len(rows))
+                self.log('message_query_result',actor=request.actor,recipient_id=args.get('recipient_id'),status=args['status'],count=len(rows),content_keyword=args.get('content_keyword'))
                 for row in rows:
                     words.append(row.get('delivery_label','历史已取消')+'。'+row['content'])
                 recipient_name=(self.people[args['recipient_id']].get('preferred_address') or self.people[args['recipient_id']].get('display_name') or '该收件人') if args.get('recipient_id') else None
@@ -131,7 +144,7 @@ class MessageLane:
                     waiting=self.store.list('active',recipient=request.actor,limit=2)
                     if not waiting:
                         self.result=dict(operation_status='read',saved=None)
-                        await self.say('目前没有等待转告或确认的留言。',request);return
+                        await self.say('目前没有待转达的留言。',request);return
                     target=waiting[0]['task_id']
                 await self.relay(target,request)
                 self.result=dict(operation_status='read',saved=True,result=message_view(self.store.get(target)))
@@ -159,14 +172,9 @@ class MessageLane:
             elif action=='supplement':
                 target=self.target(request,instruction)
                 args=dict(action='supplement',task_id=target,content=instruction.get('content',''))
-            elif action=='acknowledge':
-                target=self.target(request,instruction,recipient=True)
-                if self.store.get(target)['status']!='announced':raise ValueError('这条留言尚未完整转告，暂不记录为已确认。')
-                args=dict(action='acknowledge',task_id=target)
-            else:raise ValueError('本轮仅支持保存、补充、查询和确认收到留言。')
+            else:raise ValueError('本轮仅支持保存、补充、查询和转达留言。')
             out=await asyncio.to_thread(self.service.execute,args,guarded,self.people)
             self.check(request);self.result=out.payload()
-            if action=='acknowledge':self.offered.pop(request.actor,None)
             if action in ('create','retry','supplement'):
                 self.last[request.actor]=dict(task_id=out.result['task_id'],content=out.result['content'])
             text=RECEIPTS[out.receipt_effect]
@@ -212,11 +220,12 @@ class MessageLane:
             from datetime import datetime
             from zoneinfo import ZoneInfo
             day=datetime.fromisoformat(row['created']).astimezone(ZoneInfo(self.store.c['timezone'])).strftime('%m月%d日')
-            complete=await self.say(label+'在'+day+'给您留言：'+row['content']+'。这条留言您收到了吗？',request)
+            complete=await self.say(label+'在'+day+'给您留言：'+row['content'],request)
             self.check(request)
             if complete:
-                await asyncio.to_thread(self.store.mark_announced,task_id,request.actor,'trusted-tts')
+                await asyncio.to_thread(self.store.mark_announced,task_id,request.actor,'trusted-tts',guard=lambda:self.check(request))
                 self.offered[request.actor]=task_id
+                self.log('message_delivered',task_id=task_id,recipient=request.actor,acknowledgement_required=False)
         except (asyncio.CancelledError,StaleMessageTurn):self.log('message_relay_interrupted',task_id=task_id)
         except Exception as exc:self.log('message_relay_failed',task_id=task_id,error_type=type(exc).__name__)
         finally:self.active_relay=None
@@ -248,8 +257,9 @@ def query_recipient_fields(out,text,people,hint):
 def extraction_tool(people=None):
     tool=dict(type='function',name='message_fields',description='只提取当前最终文字中的留言指令，不保存、不查重、不回复用户。',
         parameters=dict(type='object',additionalProperties=False,required=['action','recipient_reference'],
-            properties=dict(recipient_reference=dict(type='string',description='原话中的收件人称呼，逐字摘录，例如小王、我、小儿；没有指定则空字符串，不纠正或猜名字。'),action=dict(type='string',enum=['create','supplement','retry','query','courier_query','relay','acknowledge','clarify','none']),
+            properties=dict(recipient_reference=dict(type='string',description='原话中的收件人称呼，逐字摘录，例如小王、我、小儿；没有指定则空字符串，不纠正或猜名字。'),action=dict(type='string',enum=['create','supplement','retry','query','courier_query','relay','clarify','none']),
                 recipient_id=dict(type='string'),content=dict(type='string',maxLength=500),task_id=dict(type='string'),
+                content_keyword=dict(type='string',maxLength=40,description='查询具体事项时，从用户原话逐字摘录2至40字的核心物品或事项，例如冰淇淋；不填整句，不改写。查询全部留言时留空。'),
                 status=dict(type='string',enum=['active','all','pending','announced','completed','cancelled']),
                 missing=dict(type='string',enum=['','recipient','content','target','meaning']))))
     if people is not None:tool['parameters']['properties']['recipient_id']['enum']=['',*people]
@@ -261,21 +271,21 @@ async def extract_qwen(url,secret,session,log,text,people,hint):
     from vivis.speech.realtime import websocket_connection,connect_session
     public=[dict(id=k,name=v.get('display_name',''),address=v.get('preferred_address','')) for k,v in people.items()]
     # Only one explicitly referenced recent message, never a history search.
-    recent={k:v for k,v in hint.items() if k in ('task_id','content','draft_source','missing','awaiting_ack','current_person_id')}
+    recent={k:v for k,v in hint.items() if k in ('task_id','content','draft_source','missing','delivery_complete','current_person_id')}
     settings=dict(session,modalities=['text'],tools=[extraction_tool(people)],instructions=(
         '你是结构化提取器。只调用一次message_fields，不说话、不查历史、不判断保存成功。'
         '提取用户当前最终文字中的收件人和留言内容。自然交代让同事买/带/准备东西视为create。'
-        '明确说补充才supplement；明确重新保存刚才同一请求才retry；问保存了吗或状态是query；明确收到刚转告的留言才acknowledge。'
+        '明确说补充才supplement；明确重新保存刚才同一请求才retry；问保存了吗或状态是query。完整播报即已转达，不需要确认，单纯收到、知道了、明白了为none。'
         '只有明确要听给当前说话人自己的留言时才用relay，recipient_id填recent.current_person_id。刚转告的内容没听清也可relay。'
         '给别人的留言保存了吗、把内容完整说一下、帮我查给小王的留言都用query；完整读出不等于转告收件人，不用relay。'
         '本人询问自己给快递员的留言有没有、退件留言保存了吗、我的取件码是什么，使用courier_query，只查询当前核验委托人自己的独立退件账本；不查普通同事留言、不替别人查、不把快递员猜成某位熟人。'
         'query和relay必须用recipient_reference逐字摘录原话中的收件人称呼，没有明确称呼时填空。不要把第三方名字替换成当前说话人。'
-        '还没收到、没听清、询问是否收到都不是acknowledge。'
         '人名只按people中的姓名和称呼对应ID，不能拼写一个新ID，也不能把听错或不明的人名猜成名单中的别人。比如小儿不是小王，收件人不明用clarify和missing=recipient，不查询一个猜测对象后说没有留言。'
         '普通聊天none。缺谁问recipient，缺内容问content，物品不明问meaning，不猜。'
-        '查询默认status=all；仅用户明确问待转告、已转告待确认、已确认时才分别用pending、announced、completed。'
+        '查询默认status=all；用户明确问待转达或未完成用active，已转达或已完成留言用announced（含历史关闭记录），明确只问历史确认记录才用completed。announced就是已转达，不是待确认或未完成。'
         'query若提及具体收件人，填写recipient_id；只提刚才那条时，可用recent中的task_id定位。'
-        'recent.awaiting_ack=true表示刚完整转告过这条留言，此时用户说收到、知道了、明白了，应提取acknowledge。'
+        '问特定事项例如买冰淇淋的事转告了吗，status=all且content_keyword=冰淇淋，只查询该事项，不读全部历史。关键词必须逐字存在于本轮原话，不能从历史猜测。'
+        'recent.delivery_complete=true表示刚完整转达过这条留言；只有明确没听清、要求重说时才用relay和该task_id重复播报。'
         'recent含未完成的draft_source时，本句是对缺项的补充回答，结合该单条草稿提取完整内容；不得扩展到别的历史。'
         '不自动遍历、合并历史，不输出成功回执；task_id仅能使用给出的最近留言ID或用户明确提供的ID。'
         '保留数量、日期、地点、用途，不把转告当实际执行。相对日期保留原词。数据：'
