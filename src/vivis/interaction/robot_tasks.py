@@ -235,12 +235,15 @@ class RobotTasks:
             self.event(db,task_id,'relay_prepared',recipient,{})
         return task
 
-    def mark_announced(self,task_id,recipient,response_id,guard=None):
+    def mark_announced(self,task_id,recipient,response_id,guard=None,expected_updated=None):
         task=self.get(task_id)
         if task['recipient']!=recipient:raise ValueError('Wrong relay recipient')
         with self.memory.db() as db:
             db.execute('BEGIN IMMEDIATE')
             if guard:guard()
+            if expected_updated is not None:
+                current=db.execute('SELECT updated FROM robot_tasks WHERE task_id=?',(task_id,)).fetchone()
+                if not current or current['updated']!=expected_updated:raise ValueError('Message changed during playback; delivery not recorded')
             cursor=db.execute("UPDATE robot_tasks SET status='announced',next_action=?,last_announced=?,updated=? WHERE task_id=? AND status IN ('pending','in_progress','announced')",('已完整转达；无需口头确认，不跟踪事情执行',now_utc(),now_utc(),task_id))
             if cursor.rowcount:self.event(db,task_id,'audio_played',recipient,dict(response_id=response_id,delivery_complete=True,understanding_confirmed=False))
             if guard:guard()

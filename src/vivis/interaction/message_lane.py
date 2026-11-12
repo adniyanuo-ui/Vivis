@@ -17,7 +17,7 @@ class MessageLane:
         self.extract=extract;self.speak=speak;self.valid=valid;self.log=log
         self.last={};self.offered={};self.seen=set();self.task=None;self.active_relay=None
         self.result=None;self.extracting=None;self.continuation=None
-        self.courier=courier;self.notify=notify;self.on_intent=on_intent
+        self.courier=courier;self.notify=notify;self.on_intent=on_intent;self.readback={}
 
     async def notice(self,text,request):
         if self.notify:
@@ -33,7 +33,7 @@ class MessageLane:
         if self.task and not self.task.done():self.task.cancel()
 
     def reset_context(self):
-        self.cancel();self.last.clear();self.offered.clear()
+        self.cancel();self.last.clear();self.offered.clear();self.readback.clear()
         self.continuation=None;self.extracting=None;self.result=None
 
     def start(self,request):
@@ -144,14 +144,44 @@ class MessageLane:
                 if recent and not args.get('content_keyword') and re.search(r'刚才|那条|这条',request.source_text):
                     matching=[row for row in rows if row['task_id']==recent]
                     if matching:rows=matching
-                self.log('message_query_result',actor=request.actor,recipient_id=args.get('recipient_id'),status=args['status'],count=len(rows),content_keyword=args.get('content_keyword'))
+                sender_only=instruction.get('query_detail')=='sender'
+                recent_read=self.readback.get(request.actor)
+                if sender_only and recent_read and recent_read['session']==request.session:
+                    rows=[]
+                    for task_id in recent_read['task_ids']:
+                        row=message_view(await asyncio.to_thread(self.store.get,task_id))
+                        if row['recipient']==request.actor:rows.append(row)
+                self.log('message_query_result',actor=request.actor,recipient_id=args.get('recipient_id'),creator_id=args.get('creator_id'),status=args['status'],count=len(rows),content_keyword=args.get('content_keyword'),detail='sender' if sender_only else 'content')
                 for row in rows:
-                    words.append(row.get('delivery_label','历史已取消')+'。'+row['content'])
+                    owner=self.people.get(row['creator'],{})
+                    label=owner.get('preferred_address') or owner.get('display_name') or '委托人'
+                    words.append('这条留言是'+label+'给您的。' if sender_only else
+                        row.get('delivery_label','历史已取消')+'。'+label+'留言：'+row['content'])
                 recipient_name=(self.people[args['recipient_id']].get('preferred_address') or self.people[args['recipient_id']].get('display_name') or '该收件人') if args.get('recipient_id') else None
                 empty=('没有查到您有权查看的、给'+recipient_name+'的对应状态留言。') if recipient_name else '没有查到您有权查看的对应状态留言。'
+                if args['status']=='active':
+                    if args.get('recipient_id')==request.actor:empty='目前没有待转达给您的留言。'
+                    elif not args.get('recipient_id') and not args.get('creator_id'):empty='目前没有与您有关的待转达留言。'
                 text=empty if not words else '查询到'+str(len(words))+'条留言。'+'。'.join(words)
-                if out.result['has_more']:text+='还有更多留言，可以按状态分别查询。'
-                await self.say(text,request);return
+                if out.result['has_more'] and not (sender_only and recent_read):text+='还有更多留言，可以按状态分别查询。'
+                complete=await self.say(text,request)
+                if complete and rows and not sender_only:
+                    self.check(request)
+                    self.readback[request.actor]=dict(session=request.session,task_ids=[row['task_id'] for row in rows])
+                if complete and not request.read_only and not sender_only:
+                    self.check(request)
+                    for row in rows:
+                        if row['recipient']!=request.actor or row['status'] not in ('pending','in_progress'):continue
+                        try:
+                            await asyncio.to_thread(self.store.mark_announced,row['task_id'],request.actor,'trusted-query-tts',
+                                guard=guard,expected_updated=row['updated'])
+                            self.offered[request.actor]=row['task_id']
+                            self.log('message_delivered',task_id=row['task_id'],recipient=request.actor,
+                                acknowledgement_required=False,source='query_full_playback')
+                        except StaleMessageTurn:raise
+                        except Exception as exc:
+                            self.log('message_delivery_unconfirmed',task_id=row['task_id'],error_type=type(exc).__name__)
+                return
             if action=='relay':
                 target=instruction.get('task_id')
                 if target and self.store.get(target)['recipient']!=request.actor:
@@ -244,8 +274,9 @@ class MessageLane:
             complete=await self.say(label+'在'+day+'给您留言：'+row['content'],request)
             self.check(request)
             if complete:
-                await asyncio.to_thread(self.store.mark_announced,task_id,request.actor,'trusted-tts',guard=lambda:self.check(request))
+                await asyncio.to_thread(self.store.mark_announced,task_id,request.actor,'trusted-tts',guard=lambda:self.check(request),expected_updated=row['updated'])
                 self.offered[request.actor]=task_id
+                self.readback[request.actor]=dict(session=request.session,task_ids=[task_id])
                 self.log('message_delivered',task_id=task_id,recipient=request.actor,acknowledgement_required=False)
         except (asyncio.CancelledError,StaleMessageTurn):self.log('message_relay_interrupted',task_id=task_id)
         except Exception as exc:self.log('message_relay_failed',task_id=task_id,error_type=type(exc).__name__)
@@ -264,9 +295,25 @@ def recipient_only(content,people):
 
 def query_recipient_fields(out,text,people,hint):
     """Keep sender, recipient and query scope separate; resolve only evidenced names."""
-    if out.get('action') not in ('query','visit_query','relay'):return out
     import re
+    if (out.get('action') in ('query','clarify')
+            and (re.search(r'(?:谁|哪位)给我(?:的|留).*留言|谁(?:留|发)的留言',text) or re.fullmatch(r'(?:这|那|刚才那条)?(?:是)?谁留的[？?。]*',text.strip()))):
+        return dict(action='query',recipient_id=hint.get('current_person_id'),status='active',query_detail='sender')
     out=dict(out);clarify=dict(action='clarify',missing='recipient')
+    # Query scope is not a missing write recipient. These explicit self-scopes
+    # take precedence over a model inventing both sender and recipient filters.
+    if out.get('action')=='query' or (out.get('action')=='clarify' and out.get('missing')=='recipient'):
+        compact=re.sub(r'[\s，。？！?,.!]','',text)
+        if re.fullmatch(r'(?:还)?有(?:没有|没)?(?:别的|其他|其它|更多)?(?:的)?留言(?:吗|么|没|没有)?',compact):
+            return dict(action='query',recipient_id=hint.get('current_person_id'),status='active')
+        if re.search(r'(?:跟|和|与)我(?:有)?关',text):
+            others=[a for pid,p in people.items() if pid!=hint.get('current_person_id') for a in
+                (p.get('display_name'),p.get('preferred_address'),*p.get('aliases',[])) if a and a in text]
+            if not others:
+                status=out.get('status','all') if re.search(r'历史|已完成|已转达|所有|全部|取消',text) else 'active'
+                return dict(action='query',status=status)
+
+    if out.get('action') not in ('query','visit_query','relay'):return out
     if (out['action']=='relay' and hint.get('delivery_complete') and hint.get('task_id')
             and re.search(r'没听清|再(?:说|念|读)一遍|重说',text)):
         if out.get('task_id') not in (None,'',hint['task_id']):return dict(action='clarify',missing='target')
@@ -292,6 +339,8 @@ def query_recipient_fields(out,text,people,hint):
     elif out['action']=='query' and re.search(r'(?:有|给|发给|留给)我的留言',text):explicit['recipient']='我'
     named=re.search(r'给([^，。？！?]{1,20}?)的留言',text)
     if named and 'recipient' not in explicit:explicit['recipient']=named.group(1).strip()
+    if explicit.get('recipient')=='我' and 'creator' not in explicit and out.get('creator_reference') in ('我','自己','本人'):
+        out.pop('creator_id',None);out.pop('creator_reference',None)
     for role in ('recipient','creator'):
         reference=explicit.get(role,out.get(role+'_reference','').strip())
         extracted=out.get(role+'_id')
@@ -320,6 +369,7 @@ def extraction_tool(people=None):
     tool=dict(type='function',name='message_fields',description='只把最终识别原话提取为一条指令，不操作数据库、不判断保存成功、不回复用户。写入create必须有明确recipient_id和content；缺收件人或内容用clarify及missing，不猜。supplement必须明确补充旧留言且能定位task_id。查询query只提取收件人/范围/关键词，不生成新内容；relay只用于向当前收件人转达。',
         parameters=dict(type='object',additionalProperties=False,required=['action','recipient_reference'],
             properties=dict(recipient_reference=dict(type='string',description='本轮原话中的目标称呼或代词，逐字摘录，例如小王、他、我；不把他改写成姓名。'),action=dict(type='string',enum=['create','supplement','retry','query','visit_query','courier_query','relay','clarify','none']),
+                query_detail=dict(type='string',enum=['content','sender'],description='query：问谁留的用sender；询问内容或状态用content。发件人不是缺失的收件人。'),
                 creator_reference=dict(type='string',description='query中发件人的原话称呼，例如小王给我的留言中填小王；我给小王中填我。不是收件人。'),
                 creator_id=dict(type='string',description='仅query：对应creator_reference的登记发件人ID；不要把小王给我的留言当成给小王的留言。'),
                 recipient_id=dict(type='string',description='从给定people中对应原话称呼；create必需，不能从当前说话人猜收件人。'),
@@ -345,6 +395,8 @@ async def extract_qwen(url,secret,session,log,text,people,hint):
         '明确说把给我的留言说一下/念出来/再说一遍时必须用relay，不用query；只有明确要听给当前说话人自己的留言时才用relay，recipient_id填recent.current_person_id。刚转告的内容没听清也可relay。'
         '当前发件人问给别人的留言保存了吗、把给别人的留言内容完整说一下、帮我查给小王的留言都用query；完整读出不等于转告收件人，不用relay。'
         '本人询问自己给快递员的留言有没有、退件留言保存了吗、我的取件码是什么，使用courier_query，只查询当前核验委托人自己的独立退件账本；不查普通同事留言、不替别人查、不把快递员猜成某位熟人。'
+        '还有别的留言吗默认查询当前人的待转达收件箱，不缺收件人；与我/跟我有关的事查询当前人作为发件人或收件人的记录，creator_reference和recipient_reference均留空，不同时填我，不能把权限范围当成两个AND过滤条件。'
+        '这是谁给我的留言/谁留的，是查询发件人，action=query、query_detail=sender、recipient_id为当前人，不询问收件人，不写新留言。'
         'query分别提取creator_reference/creator_id（发件人）和recipient_reference/recipient_id（收件人）：小王给我的留言是creator小王、recipient我；我给小王的留言则相反。不要把发件人当收件人。'
         'query和relay必须用recipient_reference逐字摘录原话中的收件人称呼，没有明确称呼时填空。不要把第三方名字替换成当前说话人。'
         '查询某人来过没有、见过没有，用visit_query，recipient_id为被查询的人；不回答来过或没来过，由程序查实际记录。'
