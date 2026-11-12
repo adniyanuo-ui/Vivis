@@ -23,7 +23,7 @@ from vivis.interaction.message_delivery import (MessageService,MessageRequest,Id
     MessageRecipientUnavailable,MessageSourcePending)
 from vivis.interaction.message_status import message_view,operation_failure
 from vivis.interaction.message_lane import MessageLane,StaleMessageTurn,extract_qwen
-from vivis.speech.message_receipts import MessageReceipts,ReceiptRejected
+from vivis.speech.message_receipts import MessageReceipts,ReceiptRejected,MESSAGE_REQUEST
 
 
 CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负责，没有本地ASR或本地语义模型备用。'
@@ -528,7 +528,10 @@ class CloudManagedVoice(ManagedVoice):
         return (event.get('type')=='conversation.item.input_audio_transcription.completed'
             and event.get('item_id')==self.turn_item_id and event.get('transcript','').strip() and self.tasks and self.memory and self.can_speak()
             and not re.search(r'取件码|快递员|(?:我来|上门).{0,6}取.{0,8}(?:快递|退件)',event.get('transcript',''))
-            and courier_read_intent(event.get('transcript','')) is None)
+            and courier_read_intent(event.get('transcript','')) is None
+            and (MESSAGE_REQUEST.search(event.get('transcript','')) or
+                (self.message_lane is not None and self.message_lane.accepts_followup(
+                    self.identified_person() or self.anonymous,self.memory_session,event.get('transcript','')))))
 
     def final_message(self,event,state):
         if (event.get('type')!='conversation.item.input_audio_transcription.completed'
@@ -766,7 +769,7 @@ class CloudManagedVoice(ManagedVoice):
         await controller_events.append(ws,self.context,'explicit_wake',directive)
         if not self.explicit_wake_current(source) or self.in_speech:return False
         self.explicit_wake_pending=None;self.announcement_revision=None
-        self.final_message(dict(type='conversation.item.input_audio_transcription.completed',item_id=source['item']),state)
+        self.final_message(dict(type='conversation.item.input_audio_transcription.completed',item_id=source['item'],transcript=self.pending_user_text),state)
         self.continue_response=self.message_claimed!=self.input_generation
         self.log.write('explicit_wake_audio_ready',item_id=source['item'],original_question_preserved=True)
         self.emit(dict(kind='voice_warning',epoch=self.epoch,message='已收到明确唤醒，说话许可和云端语音输出已恢复。'))

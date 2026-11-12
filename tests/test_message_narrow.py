@@ -129,6 +129,18 @@ class FixedMessageFlowTests(unittest.IsolatedAsyncioTestCase):
         data=json.loads(value.split('\n',1)[1])
         self.assertEqual(data,dict(未提交交代='给小乙带句话。',当前补充='买好了。'))
 
+    async def test_followup_admission_is_contextual_and_person_bound(self):
+        self.assertFalse(self.lane.accepts_followup('alice','visit','保存了吗？'))
+        await self.save()
+        self.assertTrue(self.lane.accepts_followup('alice','visit','保存了吗？'))
+        self.assertFalse(self.lane.accepts_followup('bob','visit','保存了吗？'))
+        self.assertFalse(self.lane.accepts_followup('alice','visit','你会唱歌吗？'))
+        self.lane.last['alice']=dict(draft_source='给小乙带句话',draft_session='visit')
+        self.assertTrue(self.lane.accepts_followup('alice','visit','买好了。'))
+        self.assertFalse(self.lane.accepts_followup('alice','other','买好了。'))
+        self.lane.reset_context()
+        self.assertFalse(self.lane.accepts_followup('alice','visit','买好了。'))
+
     async def test_recovered_query_cannot_write_but_can_read_ledger(self):
         request=replace(self.request(),read_only=True);self.current=request
         await self.lane.run(request);self.assertFalse(self.store.list('all'))

@@ -122,6 +122,55 @@ class FinalTurnAdmissionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(service.message_receipts.intents['u'],'waiting')
             finally:service.log.close()
 
+    async def test_unrelated_chat_does_not_create_lane_or_hold_audio_for_intent(self):
+        from test_cloud_control import CloudBackendTests
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            service=CloudBackendTests().service(tmp,[])
+            try:
+                service.context.update(revision=1,mode='interaction',target='interaction',ready=True)
+                service.enabled=True;service.presence.wake();service.tasks=Mock();service.memory=Mock()
+                service.final_courier_read=Mock(return_value=False);service.messages=Mock()
+                service.message_request=Mock()
+                for index,text in enumerate(('今天天气真好。','你会唱什么歌？','小帅笑一个。',
+                        '我今天有点累，想聊聊天。','你是哪个公司的？','第一件事是好好休息。')):
+                    with self.subTest(text=text):
+                        item=str(index);service.turn_item_id=item;service.pending_user_text=text
+                        event=dict(type='conversation.item.input_audio_transcription.completed',item_id=item,transcript=text)
+                        self.assertFalse(service.ordinary_message_turn(event))
+                        service.final_message(event,Mock())
+                        self.assertNotIn(item,service.message_receipts.intents)
+                        service.message_receipts.bind('r'+item,index,item)
+                        service.message_receipts.filter(event)
+                        audio=dict(type='response.audio.delta',response_id='r'+item,delta=base64.b64encode(b'\0'*480).decode())
+                        self.assertEqual(service.message_receipts.filter(audio),[audio])
+                service.messages.assert_not_called();service.message_request.assert_not_called()
+            finally:service.log.close()
+
+    async def test_synonyms_and_pending_reply_still_enter_without_literal_message_word(self):
+        from test_cloud_control import CloudBackendTests
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            service=CloudBackendTests().service(tmp,[])
+            try:
+                service.context.update(revision=1,mode='interaction',target='interaction',ready=True)
+                service.enabled=True;service.presence.wake();service.tasks=Mock();service.memory=Mock()
+                service.final_courier_read=Mock(return_value=False);lane=Mock();service.messages=Mock(return_value=lane)
+                service.message_request=Mock(return_value=object())
+                for index,text in enumerate(('帮我捎句话给小王。','碰到小王提醒他带资料。',
+                        '麻烦问一下何工明天几点到。','给小王留个口信。','请转达何工明天早上九点到。')):
+                    with self.subTest(text=text):
+                        service.turn_item_id=str(index);service.pending_user_text=text
+                        event=dict(type='conversation.item.input_audio_transcription.completed',item_id=str(index),transcript=text)
+                        self.assertTrue(service.ordinary_message_turn(event));service.final_message(event,Mock())
+                self.assertEqual(lane.start.call_count,5)
+                service.message_lane=Mock();service.message_lane.accepts_followup.return_value=True
+                service.turn_item_id='body';service.pending_user_text='打火机买好了。'
+                event=dict(type='conversation.item.input_audio_transcription.completed',item_id='body',transcript=service.pending_user_text)
+                self.assertTrue(service.ordinary_message_turn(event))
+                service.final_message(event,Mock());self.assertEqual(lane.start.call_count,6)
+            finally:service.log.close()
+
 class SemanticCompletionTests(unittest.TestCase):
     def test_discarded_chat_still_delivers_transport_completion(self):
         gate=MessageReceipts();gate.expect_intent('u');gate.bind('r',1,'u')
@@ -199,16 +248,19 @@ class ManagedMessageConnectionTests(unittest.IsolatedAsyncioTestCase):
                     dict(type='response.audio.delta',response_id='r',delta=base64.b64encode(b'\0'*480).decode()),
                     dict(type='response.audio_transcript.done',response_id='r',transcript='我记下了，包在我身上！' if business else '是啊，阳光真好。'),
                     dict(type='response.done',response=dict(id='r',status='completed'))]:await queue.put(event)
-                await entered.wait();await asyncio.sleep(.05)
-                self.assertEqual(service.player.count,0)
-                finish.set();await until(lambda:service.message_lane is not None and service.message_lane.result is not None)
-                await until(lambda:service.cloud_state.generating is None)
                 if business:
+                    await asyncio.wait_for(entered.wait(),3);await asyncio.sleep(.05)
+                    self.assertEqual(service.player.count,0)
+                    finish.set();await until(lambda:service.message_lane is not None and service.message_lane.result is not None)
+                    await until(lambda:service.cloud_state.generating is None)
                     self.assertEqual(len(service.tasks.list('all')),1);self.assertEqual(service.player.count,0)
                     service.speak_message.assert_awaited_once()
                     self.assertIn('已保存',service.speak_message.call_args.args[0])
                 else:
                     await until(lambda:service.player.count>0)
+                    self.assertFalse(entered.is_set());self.assertIsNone(service.message_lane)
+                    self.assertNotIn('u',service.message_receipts.intents)
+                    await until(lambda:service.cloud_state.generating is None)
                     self.assertFalse(service.tasks.list('all'));service.speak_message.assert_not_awaited()
             finally:
                 task.cancel();await asyncio.gather(task,return_exceptions=True);service.log.close()

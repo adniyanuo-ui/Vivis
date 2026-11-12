@@ -125,7 +125,7 @@ class MessageReceiptTests(unittest.TestCase):
 
     def test_delegate_variants_are_candidates_not_automatic_execution(self):
         from vivis.speech.message_receipts import MESSAGE_REQUEST
-        for text in ('你告诉他就好','帮我捎句话','跟小王说一声','让小王帮我买一个东西'):
+        for text in ('你告诉他就好','帮我捎句话','帮我传个话','帮我递句话','给小王捎个信','跟小王说一声','让小王帮我买一个东西'):
             with self.subTest(text=text):self.assertTrue(MESSAGE_REQUEST.search(text))
 
 

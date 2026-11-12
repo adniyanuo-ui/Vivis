@@ -56,6 +56,17 @@ class MessageLane:
     def has_continuation(self,actor,session):
         return bool(self.continuation and self.continuation['actor']==actor and self.continuation['session']==session)
 
+    def accepts_followup(self,actor,session,text):
+        """Only an unfinished draft or a message-specific contextual question."""
+        from vivis.speech.message_receipts import MESSAGE_FOLLOWUP
+        prior=self.last.get(actor,{})
+        if self.has_continuation(actor,session):return True
+        if prior.get('draft_source') and prior.get('draft_session')==session:return True
+        recent_read=self.readback.get(actor)
+        recent=bool(prior.get('task_id') or prior.get('request') or actor in self.offered
+            or (recent_read and recent_read['session']==session))
+        return recent and bool(MESSAGE_FOLLOWUP.search(text))
+
     def target(self,request,instruction):
         target=instruction.get('task_id') or self.last.get(request.actor,{}).get('task_id')
         if not target:raise ValueError('请说明是哪一条留言。')
@@ -416,6 +427,7 @@ async def extract_qwen(url,secret,session,log,text,people,hint):
     recent={k:v for k,v in hint.items() if k in ('task_id','content','draft_source','missing','delivery_complete','current_person_id','recent_user_turns')}
     settings=dict(session,enable_search=False,modalities=['text'],tools=[extraction_tool(people)],instructions=(
         '你是结构化提取器。只调用一次message_fields，不说话、不查历史、不判断保存成功。'
+        '提到留言、转告等词不等于委托：讨论功能、解释词义、假设举例、引用他人说法或明确不要求办理，均为none；不得因此追问收件人或写库。只有本轮确实委托或查询才办理。'
         '提取当前请求中的收件人和留言内容。若用户输入含未提交交代和当前补充，它们是同一人连续说完的一件事，必须合起来理解。自然交代让同事买/带/准备东西、遇到某人帮我问问/告诉他/提醒他均视为create，不依赖留言二字。'
         '明确说补充才supplement；明确重新保存刚才同一请求才retry；问保存了吗或状态是query。完整播报即已转达，不需要确认，单纯收到、知道了、明白了为none；没听清、没收到不属于确认，recent.delivery_complete为true时表示请求重说，使用relay和recent.task_id。'
         '明确说把给我的留言说一下/念出来/再说一遍时必须用relay，不用query；只有明确要听给当前说话人自己的留言时才用relay，recipient_id填recent.current_person_id。刚转告的内容没听清也可relay。'
