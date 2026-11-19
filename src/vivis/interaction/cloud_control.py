@@ -14,9 +14,10 @@ def tools(program_ids):
     from vivis.interaction.speech_dialect import configuration as dialect_configuration
     channels=channel_names()
     return [dict(type='function',name='robot_program',
-        description='用户唤醒、点播、停止/退出节目或要求待机时调用。stop回交互，standby回待机；这两种只需action，不要填写节目。play必须填写program。这里只请求状态管理器，不直接控制电机。',
+        description='用户唤醒、点播、停止/退出节目或要求休息/待机时调用。stop回交互，standby回待机；这两种只需action，不要填写节目。play必须填写program。明确呼叫名字用wake_reason=name；当前允许单人可见招呼时可用greeting。否定、引用及旁人讲话不执行。这里只请求状态管理器，不直接控制电机。',
         parameters=dict(type='object',properties=dict(action=dict(type='string',enum=['wake','play','stop','standby']),
-            program=dict(type='string',enum=['',*program_ids]),explicit_wake=dict(type='boolean',description='用户本句明确呼唤唤醒词时为true；stop/standby可省略，不能要求用户先唤醒再停止')),required=['action'],additionalProperties=False)),
+            program=dict(type='string',enum=['',*program_ids]),explicit_wake=dict(type='boolean',description='用户本句明确呼唤配置名字时为true；仅泛化招呼必须为false。stop/standby可省略，不能要求用户先唤醒再停止'),
+            wake_reason=dict(type='string',enum=['name','greeting'],description='仅wake使用。greeting须当前单人可见且controller_state.greeting_wake_allowed=true；不授予无人脸权限')),required=['action'],additionalProperties=False)),
         dict(type='function',name='set_expression',
             description='交互态52基础表情及组合：expression可选单个标准通道名，或custom并在weights给出多个通道权重。悲伤、哭脸、大笑等用custom组合已有基础表情，不要求重新标定才可试。smile温和微笑，neutral/attentive收回表情意图，auto恢复自动回应。明确口令source=command，聊天合理回应source=social。点头属于颈部动作，不在52通道内。',
             parameters=dict(type='object',properties=dict(expression=dict(type='string',enum=['smile','neutral','attentive','auto','custom',*channels]),
@@ -43,17 +44,22 @@ def tools(program_ids):
 
 
 def normalize_program(arguments,program_ids):
-    if not isinstance(arguments,dict) or not {'action'}<=arguments.keys()<={'action','program','explicit_wake'}:raise ValueError('Invalid program request fields')
+    if not isinstance(arguments,dict) or not {'action'}<=arguments.keys()<={'action','program','explicit_wake','wake_reason'}:raise ValueError('Invalid program request fields')
     action=arguments['action'];program=arguments.get('program','')
     if not isinstance(action,str) or not isinstance(program,str):raise ValueError('Invalid program request types')
     if action not in ('wake','play','stop','standby'):raise ValueError('Unknown program action')
     if program and program not in program_ids:raise ValueError('Unknown program')
     # A redundant known programme must not prevent an unambiguous stop.
     if action in ('stop','standby'):program=''
-    wake=arguments.get('explicit_wake',action=='wake')
+    reason=arguments.get('wake_reason','name')
+    if reason not in ('name','greeting'):raise ValueError('Unknown wake reason')
+    wake=arguments.get('explicit_wake',action=='wake' and reason=='name')
     if type(wake) is not bool:raise ValueError('Wake evidence must be boolean')
-    if action=='wake' and not wake:raise ValueError('Explicit wake required')
-    return dict(action=action,program=program,explicit_wake=wake)
+    if action=='wake' and not wake and reason!='greeting':raise ValueError('Explicit wake required')
+    if action=='wake' and reason=='greeting' and wake:raise ValueError('Greeting cannot grant no-face wake permission')
+    result=dict(action=action,program=program,explicit_wake=wake)
+    if action=='wake' and 'wake_reason' in arguments:result['wake_reason']=reason
+    return result
 
 
 def controller_intent(arguments,program_ids,mode):
@@ -89,13 +95,18 @@ class SpeechPresence:
         self.c=config;self.path=Path(root)/config['state_file'];self.wake_until=0.;self.last_visible=False;self.last_face=-float('inf')
         validate_presence_config(config)
 
-    def visible(self,now=None):
+    def face_count(self,now=None):
         now=time.monotonic() if now is None else now
         try:
             d=json.loads(self.path.read_text());stamp=d.get('observed_monotonic');faces=d.get('faces')
-            return (d.get('schema_version')=='vivis-face-presence-1.0' and type(stamp) in (int,float)
-                    and 0<=now-stamp<=self.c['max_age_s'] and type(faces) is int and faces>0)
-        except (OSError,ValueError,AttributeError):return False
+            if (d.get('schema_version')=='vivis-face-presence-1.0' and type(stamp) in (int,float)
+                    and 0<=now-stamp<=self.c['max_age_s'] and type(faces) is int and faces>=0):return faces
+        except (OSError,ValueError,AttributeError):pass
+        return 0
+
+    def visible(self,now=None):return self.face_count(now)>0
+
+    def single_visible(self,now=None):return self.face_count(now)==1
 
     def allowed(self,now=None):
         now=time.monotonic() if now is None else now
@@ -144,6 +155,10 @@ class ReceptionGate:
         if (config.get('schema_version')!='vivis-reception-1.0' or type(config.get('enabled')) is not bool
                 or not .5<=config['arrival_hold_s']<=5 or not 1<=config['departure_hold_s']<=30
                 or not 10<=config['greeting_cooldown_s']<=3600 or not 5<=config['return_to_standby_after_s']<=300):raise ValueError('Invalid reception policy')
+
+    def dismiss_current_visit(self):
+        """Explicit rest should not immediately re-wake for the same visible face."""
+        self.armed=False;self.absent_since=None
 
     def observe(self,visible,mode,now=None,person_id=None):
         now=time.monotonic() if now is None else now

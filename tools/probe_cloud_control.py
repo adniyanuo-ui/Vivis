@@ -12,6 +12,7 @@ from vivis.speech.cloud_managed import CLOUD_POLICY,ControllerEventGate
 from vivis.speech.realtime import connect_session,websocket_connection,Journal
 from vivis.interaction.knowledge import Knowledge
 from vivis.interaction.cloud_control import controller_intent
+from vivis.interaction.presence_entry import configuration as entry_configuration,instructions as entry_instructions
 from vivis.interaction.speech_dialect import SpeechDialect,configuration as dialect_configuration
 
 
@@ -30,7 +31,7 @@ async def run(args):
             print(json.dumps(dict(compaction_text_reply=result,no_devices_opened=True,synthetic_data_only=True),ensure_ascii=False));return
         mode='task' if args.scenario=='stop' else 'interaction' if args.scenario in ('identity','smile','neutral','attentive','reception','sad','laugh','single-channel','dialect','task-create','robot-memory') else 'standby'
         initial=dict(session,modalities=['text'])
-        initial['instructions']+=CLOUD_POLICY+Knowledge(args.robot).person_instructions()+ ' controller_state='+json.dumps(dict(mode=mode,ready=True,face_visible=mode=='interaction',wake_permission=False))
+        initial['instructions']+=CLOUD_POLICY+entry_instructions(entry_configuration())+Knowledge(args.robot).person_instructions()+ ' controller_state='+json.dumps(dict(mode=mode,ready=True,face_visible=mode=='interaction',wake_permission=False,greeting_wake_allowed=False))
         initial['instructions']+=SpeechDialect().instructions()
         texts={'probe':'','modes':'','wake':'小帅，给我播放白骨夫人吧。','stop':'不用演了，停下来吧。','identity':'小帅，你认识我吗？','smile':'笑一个，保持几秒。','neutral':'别笑了，恢复正常表情。','attentive':'我虽然笑着，但今天其实很难过，请认真听我说。','sad':'做一个悲伤的表情，用已有基础表情组合就好。','laugh':'大笑一个，表情明显一些。','single-channel':'只闭合左眼，EyeBlinkLeft权重0.8，保持3秒。'}
         spoken_name={'广东话':'粤语','上海话':'沪语'}.get(args.dialect,args.dialect)

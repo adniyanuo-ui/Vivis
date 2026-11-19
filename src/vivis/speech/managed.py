@@ -60,6 +60,8 @@ def voice_configuration(speech,robot):
         if task_config['enabled'] and not memory_config['enabled']:raise ValueError('Robot tasks require persistent memory storage')
         from vivis.interaction.expression_intent import configuration as expression_configuration
         expression_configuration()
+        from vivis.interaction.presence_entry import configuration as entry_configuration
+        entry_configuration()
         session['tools']=tools([p['id'] for p in catalog['programs']])
         session['tool_choice']='auto'
         robot_definition=json.loads(Path(robot).read_text())
