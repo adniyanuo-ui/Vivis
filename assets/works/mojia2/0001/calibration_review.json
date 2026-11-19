@@ -1,0 +1,365 @@
+{
+  "robot": "mojia2",
+  "work": "00012",
+  "source_work": "0001",
+  "status": "offline candidate; NOT commissioned",
+  "source_calibration_name": "标准头小翌11.18（17：30）.json",
+  "source_calibration_sha256": "4a77f50bc019c4789f1403326336553f5935e16c18038ae251586ea98087ba5c",
+  "calibration_sha256": "2181d4ba99479d1b1cf930de6dcfeec3128835b315552f12fa251402c830d9cb",
+  "metadata_corrections": [
+    {
+      "shape": "JawForward",
+      "field": "posSize",
+      "before": 1,
+      "after": 2
+    },
+    {
+      "shape": "JawLeft",
+      "field": "posSize",
+      "before": 1,
+      "after": 2
+    },
+    {
+      "shape": "JawRight",
+      "field": "posSize",
+      "before": 1,
+      "after": 2
+    }
+  ],
+  "position_endpoints_unchanged": true,
+  "audio_unchanged": true,
+  "source_clip_unchanged": true,
+  "gain": 1.0,
+  "neck_animation": false,
+  "accepted_targets_sha256": "9141a67bc51d533bc7226b97b89bb51fadc3b11319ae1d12712c996d21462fa7",
+  "baseline_reproduction_max_error_counts": 0.0,
+  "motor_ids": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    35,
+    36
+  ],
+  "newly_mapped_ids": [
+    9,
+    24
+  ],
+  "pending_eeprom_ids": [
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36
+  ],
+  "target_ranges": {
+    "2": [
+      1931.7123725441684,
+      2055.707685160947
+    ],
+    "3": [
+      2013.1734274375383,
+      2049.5515495884924
+    ],
+    "4": [
+      2047.0196596210121,
+      2070.20651342477
+    ],
+    "5": [
+      2046.552844471954,
+      2480.0
+    ],
+    "6": [
+      2046.1309150571028,
+      2347.0
+    ],
+    "7": [
+      1980.2,
+      2051.6666666666665
+    ],
+    "8": [
+      1994.1333333333332,
+      2135.5
+    ],
+    "9": [
+      1963.8487152457237,
+      2047.2617227733135
+    ],
+    "10": [
+      1852.27439045161,
+      2339.689547488979
+    ],
+    "11": [
+      1922.4727887422778,
+      2098.55821852386
+    ],
+    "12": [
+      1687.3873578198254,
+      2234.59101331234
+    ],
+    "13": [
+      1520.3485554295037,
+      2315.3637005761266
+    ],
+    "14": [
+      1978.9080809354782,
+      2047.0
+    ],
+    "15": [
+      1548.6169277443164,
+      2135.4749725572765
+    ],
+    "16": [
+      2047.0,
+      2136.7806465625763
+    ],
+    "17": [
+      2026.112642452251,
+      2101.9961909294693
+    ],
+    "18": [
+      2043.062190613718,
+      2081.3880340111314
+    ],
+    "19": [
+      2023.9833901271552,
+      2047.0
+    ],
+    "20": [
+      1750.0,
+      2042.7835652685035
+    ],
+    "21": [
+      1927.0,
+      2050.2098924590155
+    ],
+    "22": [
+      2037.6082192155936,
+      2087.0
+    ],
+    "23": [
+      2000.2,
+      2128.5
+    ],
+    "24": [
+      2047.0,
+      2130.2483117580414
+    ],
+    "25": [
+      1758.8950999662256,
+      2243.9985507223755
+    ],
+    "26": [
+      1999.85580686084,
+      2177.8575699701905
+    ],
+    "27": [
+      1878.7294011823833,
+      2402.5919535423163
+    ],
+    "28": [
+      1999.0049827955663,
+      2627.747764939474
+    ],
+    "29": [
+      2047.0,
+      2047.0
+    ],
+    "30": [
+      1866.1735006225192,
+      2325.6820057367113
+    ],
+    "31": [
+      1570.0963359065354,
+      2047.0
+    ],
+    "35": [
+      2047.0,
+      2137.839660167694
+    ],
+    "36": [
+      2047.0,
+      2047.0
+    ]
+  },
+  "changes_vs_old_targets": {
+    "2": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 78.70825626454052
+    },
+    "3": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 12.078329480534649
+    },
+    "4": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 16.151882697249448
+    },
+    "5": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 80.0
+    },
+    "6": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 197.0
+    },
+    "7": {
+      "changed_frames": 248,
+      "max_abs_delta_counts": 2.0
+    },
+    "8": {
+      "changed_frames": 4047,
+      "max_abs_delta_counts": 38.5
+    },
+    "10": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 193.41726835907093
+    },
+    "11": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 117.76492147147655
+    },
+    "12": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 133.20713923685253
+    },
+    "13": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 894.831915426068
+    },
+    "14": {
+      "changed_frames": 3964,
+      "max_abs_delta_counts": 7.083387553691864
+    },
+    "15": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 262.8490054353506
+    },
+    "16": {
+      "changed_frames": 3583,
+      "max_abs_delta_counts": 22.445161640644073
+    },
+    "17": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 46.298189838371854
+    },
+    "18": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 12.597345005276566
+    },
+    "19": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 15.62106638918749
+    },
+    "20": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 15.82341238952904
+    },
+    "21": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 16.12584849094901
+    },
+    "22": {
+      "changed_frames": 6708,
+      "max_abs_delta_counts": 26.82442112274748
+    },
+    "23": {
+      "changed_frames": 4044,
+      "max_abs_delta_counts": 5.0
+    },
+    "25": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 182.49978458566375
+    },
+    "26": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 84.49389088805765
+    },
+    "27": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 138.19363897293806
+    },
+    "28": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 940.1334630211736
+    },
+    "29": {
+      "changed_frames": 0,
+      "max_abs_delta_counts": 0.0
+    },
+    "30": {
+      "changed_frames": 6774,
+      "max_abs_delta_counts": 150.22958072973415
+    },
+    "31": {
+      "changed_frames": 6674,
+      "max_abs_delta_counts": 134.58367102593184
+    },
+    "35": {
+      "changed_frames": 5394,
+      "max_abs_delta_counts": 60.559773445129395
+    },
+    "36": {
+      "changed_frames": 0,
+      "max_abs_delta_counts": 0.0
+    }
+  },
+  "limitation": "No old hardware limits were applied; no device parameter or motion validation is implied.",
+  "targets_sha256": "67b463381496d7650d592a21d5ac28f3df68fe8ee9be028af7c3a5fa1181dbcb"
+}
