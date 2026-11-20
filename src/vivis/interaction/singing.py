@@ -200,6 +200,8 @@ def main(argv=None):
         usb_volume_times_three=robot.definition['defaults'].get('usb_volume_times_three',False),
         authorized_tongue_observation=p['authorize'],home_position_recovery=recovery_policy(home.get('disabled_position_recovery')),
         home_sensor_fault_confirmation=home.get('sensor_fault_confirmation',False))
+    from vivis.runtime.motion_session import preparation_action
+    home_args.motion_session,home_args.preparation_action=preparation_action(robot)
     clearance=recovery_clearance_plan(home,motors)
     stop=False;stop_file=ROOT/'outputs/STOP'
     def request_stop(*_):
@@ -265,7 +267,7 @@ def main(argv=None):
                             source.close()
                             (directory/'animation_summary.json').write_text(json.dumps(source.summary(),indent=2)+'\n')
                         if receiver:receiver.close()
-                        if p['authorize'] and 'hardware_restore' in report:unload_tongue(profile,report)
+                        if p['authorize'] and ('hardware_restore' in report or report.get('tongue_cleanup_required')):unload_tongue(profile,report)
                         (directory/'preparation.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
                 summary['completed']=True
     except BaseException as exc:

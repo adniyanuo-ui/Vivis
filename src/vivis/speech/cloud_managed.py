@@ -239,12 +239,14 @@ class CloudManagedVoice(ManagedVoice):
                     and ticket['generation']==self.input_generation and self.cloud_state is state)
         def current():
             return (live() and self.context['mode']=='standby'
-                and self.context['ready'] and self.controller_reply_id==ticket['id']
+                and (self.context.get('standby_fault') if ticket.get('fault') else self.context['ready'])
+                and self.controller_reply_id==ticket['id']
                 and self.enabled and self.pending_mode is None)
         async def speak():
             from vivis.speech.trusted_reading import RealtimeReader
             from vivis.speech.message_voice import MessageSpeaker
-            text='好，您忙，我先休息。需要时再叫我。'
+            text=('机器头待机出现故障，暂时不能运动，请检查设备。系统会定期复查。' if ticket.get('fault') else
+                  '好，您忙，我先休息。需要时再叫我。')
             reason='not_played'
             try:
                 # Reuse the verified Qwen reader and the SAME output/AEC/A2F
@@ -257,14 +259,16 @@ class CloudManagedVoice(ManagedVoice):
                     async def generate(self,_):return audio
                 speaker=MessageSpeaker(engine,self.player,state,lambda _:current(),
                     lambda words:self.emit(dict(kind='cloud_transcript',epoch=self.epoch,role='assistant',
-                        text=words,source='transition_farewell')),self.log.write,tts=PreparedAudio())
+                        text=words,source='standby_fault' if ticket.get('fault') else 'transition_farewell')),self.log.write,tts=PreparedAudio())
                 complete=await speaker.say(text,ticket)
                 reason='played' if complete else 'interrupted'
             except asyncio.CancelledError:reason='cancelled'
             except StaleMessageTurn:reason='superseded'
             except Exception as exc:
                 reason='speech_failed';self.log.write('transition_reply_failed',error_type=type(exc).__name__)
-                self.emit(dict(kind='voice_warning',epoch=self.epoch,message='告别语音未完整播出；待机动作已执行，语音监听继续。'))
+                self.emit(dict(kind='voice_warning',epoch=self.epoch,message=(
+                    '待机故障语音未完整播出；故障记录保留，下轮继续检查。' if ticket.get('fault') else
+                    '告别语音未完整播出；待机动作已执行，语音监听继续。')))
             finally:self.finish_farewell(ticket,reason)
         self.farewell_task=asyncio.create_task(speak())
 
@@ -332,17 +336,25 @@ class CloudManagedVoice(ManagedVoice):
                 and not self.presence.allowed(now))
 
     def request(self,command):
+        if command.get('kind')=='voice_fault_notice':
+            reply=command.get('reply_id')
+            if not isinstance(reply,str) or not 1<=len(reply)<=64:return
+            self.cancel_farewell('fault_notice_replaced')
+            self.farewell=dict(id=reply,generation=self.input_generation,connection=self.message_connection,fault=True)
+            return
         if command.get('kind')=='voice_context':
             revision=command.get('revision');mode=command.get('mode');target=command.get('target')
             if (type(revision) is not int or revision<=self.context['revision'] or mode not in ('standby','interaction','task')
                     or target not in {'standby','interaction',*self.program_ids} or type(command.get('ready')) is not bool):return
             if ('speech_ready' in command and (type(command['speech_ready']) is not bool
                     or mode!='interaction' or target!='interaction')):return
+            if 'standby_fault' in command and (type(command['standby_fault']) is not bool or mode!='standby'):return
             if (mode=='task')!=(target in self.program_ids) or (mode!='task' and mode!=target):return
             previous=self.context
             reply=command.get('transition_reply_id')
             self.controller_reply_id=reply if isinstance(reply,str) and 1<=len(reply)<=64 and mode=='standby' else None
-            if self.farewell and (mode!='standby' or self.controller_reply_id!=self.farewell['id']):
+            if self.farewell and (mode!='standby' or self.controller_reply_id!=self.farewell['id']
+                    or self.farewell.get('fault') and not command.get('standby_fault')):
                 self.cancel_farewell('controller_changed')
             if mode=='standby':self.presence.clear_greeting()
             if mode=='standby' and previous['mode']!='standby' and self.presence.greeting_visible():
@@ -354,6 +366,7 @@ class CloudManagedVoice(ManagedVoice):
             if mode!='standby' and self.memory_task and not self.memory_task.done():self.memory_task.cancel()
             self.context={k:command[k] for k in ('revision','mode','target','ready')}
             if 'speech_ready' in command:self.context['speech_ready']=command['speech_ready']
+            if 'standby_fault' in command:self.context['standby_fault']=command['standby_fault']
             if self.explicit_wake_pending:
                 if mode=='interaction' and previous['mode'] in ('standby','interaction'):
                     self.explicit_wake_pending['revision']=revision
@@ -782,6 +795,7 @@ class CloudManagedVoice(ManagedVoice):
         self.question_onset=dict(item=item_id,generation=self.input_generation,revision=self.context['revision'],
             connection=self.message_connection,person=self.turn_person,quiet=quiet,outputs=outputs,
             visible_person=self.presence.greeting_visible(),
+            conversation_presence=self.context['mode']=='interaction' and self.context['ready'] and self.presence.allowed(),
             preparation_presence=self.context['mode']=='interaction' and not self.context['ready'] and self.presence.allowed(),
             eligible=self.context['mode']=='interaction' and self.context['ready'] and self.presence.visible() and self.can_speak())
 
@@ -791,6 +805,14 @@ class CloudManagedVoice(ManagedVoice):
                 and (self.presence.greeting_visible() or
                      self.context['mode']=='interaction' and not self.context['ready'] and self.presence.allowed()))
 
+    def continuing_greeting(self,source):
+        # A current participant does not disappear on one missed camera frame.
+        # Reuse the existing grace at BOTH onset and completion; never create
+        # an empty-frame standby wake or refresh the grace without observation.
+        return (source is not None and source.get('conversation_presence') is True
+                and self.entry['enabled'] and self.entry['visible_greeting_wake']
+                and self.context['mode']=='interaction' and self.presence.allowed())
+
     def verify_wake_source(self,greeting=True):
         """Model proposals need the same final-text/source gate as wake recovery."""
         from vivis.interaction.presence_entry import whole_greeting
@@ -799,7 +821,7 @@ class CloudManagedVoice(ManagedVoice):
         if (not source or source['generation']!=self.input_generation
                 or source['revision']!=self.context['revision'] or source['connection'] is not self.message_connection
                 or (not greeting and source['person']!=(self.identified_person() or self.anonymous))
-                or (greeting and source.get('visible_person') is not True)):
+                or (greeting and source.get('visible_person') is not True and not self.continuing_greeting(source))):
             raise GreetingAdmissionError('greeting_source_not_current')
         turn=self.memory_turns.get(source['item'])
         text=turn.get('text') if turn else None
@@ -822,10 +844,13 @@ class CloudManagedVoice(ManagedVoice):
         from vivis.speech.explicit_wake import addressed_wake
         from vivis.interaction.presence_entry import whole_greeting
         from vivis.speech.invalid_question import distinct_from_playback
+        if self.context.get('standby_fault'):return False
         item=event.get('item_id');text=event.get('transcript');source=self.question_onset
         named=addressed_wake(text,self.wake_words)
-        greeting=(whole_greeting(text,self.entry) and self.greeting_wake_allowed(require_ready=self.context['mode']!='interaction')
-                  and source is not None and (source.get('visible_person') is True or source.get('preparation_presence') is True))
+        greeting=(whole_greeting(text,self.entry) and (
+            self.greeting_wake_allowed(require_ready=self.context['mode']!='interaction') and source is not None
+            and (source.get('visible_person') is True or source.get('preparation_presence') is True)
+            or self.continuing_greeting(source)))
         if (not (named or greeting) or item in self.explicit_wake_seen
                 or not source or item!=source['item'] or self.context['mode'] not in ('standby','interaction')
                 or source['generation']!=self.input_generation or source['revision']!=self.context['revision']
@@ -873,7 +898,7 @@ class CloudManagedVoice(ManagedVoice):
             and self.turn_item_id==source['item']
             and (not require_presence or source.get('wake_reason')!='greeting'
                  or not self.context.get('speech_ready',self.context['ready'])
-                 or self.greeting_wake_allowed(require_ready=False)))
+                 or self.greeting_wake_allowed(require_ready=False) or self.continuing_greeting(source)))
 
     async def complete_explicit_wake(self,ws,state,controller_events,audio_gate,instructions):
         source=self.explicit_wake_pending

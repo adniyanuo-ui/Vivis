@@ -14,7 +14,7 @@ from vivis.interaction.dialogue import main
 
 
 class ManagedSupervisorTests(unittest.TestCase):
-    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False,early=False):
+    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False,early=False,slow_initial=False,faulted=False,slow_return=False):
         actual_popen=subprocess.Popen;voice_starts=[];prompts=[]
         settings=json.loads((ROOT/'configs/interaction/p1.json').read_text())
         settings['realtime_voice']['control_backend']='qwen_realtime' if qwen else 'local'
@@ -23,14 +23,31 @@ class ManagedSupervisorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);serial=root/'serial';speaker=root/'speaker';trace=root/'trace'
             worker=root/'worker.py'
-            worker.write_text('''import sys,time
+            worker.write_text('''import sys,time,os,json
 from pathlib import Path
 folder,serial,speaker,trace,name=map(Path,sys.argv[1:6]);folder.mkdir()
 early=sys.argv[6]=='True'
+slow_initial=sys.argv[7]=='True'
+faulted=sys.argv[8]=='True'
+slow_return=sys.argv[9]=='True'
 assert (early and str(name)=='interaction') or not speaker.exists(),'Cloud still owns speaker'
 serial.open('x').close()
+action=os.environ.get('VIVIS_MOTION_ACTION')
+with trace.with_suffix('.actions').open('a') as f:f.write(json.dumps(dict(name=str(name),action=action))+'\\n')
+if slow_initial and action=='startup':
+ time.sleep(.5)
+ assert not folder.with_suffix('.cancel').exists(),'Wake bypassed mandatory boot initialization'
 with trace.open('a') as f:f.write('start '+str(name)+'\\n')
 if early and str(name)=='interaction':time.sleep(.35)
+if slow_return and action=='standby' and folder.name.startswith('0005_'):
+ time.sleep(.8)
+ assert not folder.with_suffix('.cancel').exists(),'Wake cancelled standby homing'
+ assert speaker.exists(),'Wake speech still waited for standby homing'
+ with trace.with_suffix('.return').open('w') as f:f.write('home completed after speech enabled')
+if faulted and folder.name.startswith('0005_'):
+ print('STANDBY FAULT injected standby fault',flush=True)
+ time.sleep(1.25)
+ print('STANDBY RECOVERED injected recovery',flush=True)
 print('STANDBY START' if str(name)=='standby' else 'INTERACTION START' if str(name)=='interaction' else 'ROUND 1/1 START',flush=True)
 start=time.monotonic()
 while not folder.with_suffix('.cancel').exists() and not(str(name)=='baigufuren' and time.monotonic()-start>.2):time.sleep(.005)
@@ -109,7 +126,7 @@ time.sleep(10)
                 def poll(self):pass
                 def contains(self,*_):return False
             def program(program,robot,folder,*_):
-                return [sys.executable,str(worker),str(folder),str(serial),str(speaker),str(trace),program['id'] if program else 'standby',str(early)]
+                return [sys.executable,str(worker),str(folder),str(serial),str(speaker),str(trace),program['id'] if program else 'standby',str(early),str(slow_initial),str(faulted),str(slow_return)]
             def popen(command,**kwargs):
                 if 'vivis.speech.managed' in command:
                     voice_starts.append(command)
@@ -132,6 +149,7 @@ time.sleep(10)
                       ['standby','interaction','wz2','interaction','expression-follow','standby','interaction','baigufuren','interaction','standby']
                       if extended else ['standby','interaction','baigufuren','interaction','standby','interaction','standby'])
             if recover:expected=['standby','interaction','standby','interaction','standby']
+            if faulted:expected=['standby','interaction','baigufuren','interaction','standby']
             self.assertEqual([s[6:] for s in lines if s.startswith('start ')],expected)
             if recover:
                 self.assertIn('管理器继续运行',console.getvalue())
@@ -147,7 +165,16 @@ time.sleep(10)
                 records=[json.loads(s) for s in (root/'run/events.jsonl').read_text().splitlines()]
                 done=[s for s in records if s['kind']=='voice_reply_done']
                 self.assertEqual(len(done),2)
+            if faulted:
+                self.assertIn('STANDBY RECOVERED injected recovery',console.getvalue())
+                records=[json.loads(s) for s in (root/'run/events.jsonl').read_text().splitlines()]
+                self.assertTrue(any(s['kind']=='standby_fault' for s in records))
+                self.assertTrue(any(s['kind']=='cloud_action_blocked_motion_fault' for s in records))
+            if slow_return:self.assertTrue(trace.with_suffix('.return').exists())
             self.assertNotIn('identity',prompts)  #Natural cloud answer, no duplicate cached voice.
+            actions=[json.loads(s) for s in trace.with_suffix('.actions').read_text().splitlines()]
+            self.assertEqual([a['action'] for a in actions].count('startup'),1)
+            self.assertTrue(all(a['action']=='resume' for a in actions if a['name'] not in ('standby',)))
             if early:
                 contexts=[json.loads(s) for s in speaker.with_suffix('.contexts').read_text().splitlines()]
                 self.assertTrue(any(not c['motion_ready'] for c in contexts))
@@ -159,6 +186,15 @@ time.sleep(10)
 
     def test_verified_voice_wake_enables_speaker_during_interaction_preparation(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,early=True)
+
+    def test_wake_during_cold_boot_waits_for_mandatory_startup(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,slow_initial=True)
+
+    def test_wake_can_speak_while_return_home_finishes_without_cancelling_motion(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,early=True,slow_return=True)
+
+    def test_standby_fault_keeps_manager_alive_and_rejects_wake_or_program(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,faulted=True)
 
     def test_network_outage_holds_motion_and_requires_fresh_request_after_recovery(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,recover=True)

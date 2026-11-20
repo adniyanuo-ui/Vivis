@@ -188,6 +188,8 @@ def startup_feedback(reader,sid,deadline,records,should_stop=lambda:False,wait=t
         raise RuntimeError(f'ID{sid}: startup communication recovery failed; no two consecutive valid samples') from last_error
 
 def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=None,gaze_override=None,frame_source=None,clock_factory=None):
+    from vivis.runtime.motion_session import for_profile
+    motion_session=for_profile(profile)
     if (not isinstance(ids,list) or not ids or len(set(ids))!=len(ids)
             or any(type(sid) is not int or not 0<=sid<=253 for sid in ids)):
         raise ValueError('Playback IDs must be nonempty, unique servo IDs')
@@ -404,6 +406,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                                     should_stop,stop.wait) if scheduled_feedback else bus.snapshot(sid))
             motor=motors[sid]
             result['preflight_snapshots'].append(state)
+            if motion_session is not None:motion_session.validate_snapshot(state)
             if state['model_raw']!=motor['model_raw_expected']:raise RuntimeError(f'{sid}: model mismatch')
             if state['mode']!=0 or state['torque_enable']!=1:raise RuntimeError(f'{sid}: requires existing position mode and enabled torque')
             if state['configured_min']>motor['safe_min'] or state['configured_max']<motor['safe_max']:raise RuntimeError(f'{sid}: software range exceeds device range')

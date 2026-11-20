@@ -26,14 +26,15 @@ class VoiceBridge:
         self.send(kind='voice_mode',enabled=value,epoch=self.epoch,
                   **({'last_program':dict(self.last_program)} if value and self.last_program else {}))
 
-    def context(self,mode,target,ready,*,speech_ready=None):
+    def context(self,mode,target,ready,*,speech_ready=None,standby_fault=False):
         reply=self.transition_reply_id if mode=='standby' else None
         early=bool(speech_ready) and mode=='interaction' and not ready
-        value=(mode,target,bool(ready),reply,early)
+        value=(mode,target,bool(ready),reply,early,bool(standby_fault))
         if value==self.last_context:return
         self.last_context=value;self.context_revision+=1
         self.send(kind='voice_context',revision=self.context_revision,mode=mode,target=target,ready=bool(ready),
                   **({'speech_ready':True} if early else {}),
+                  **({'standby_fault':True} if standby_fault and mode=='standby' else {}),
                   **({'transition_reply_id':reply} if reply else {}))
 
     def interrupt(self):self.send(kind='voice_interrupt',epoch=self.epoch)

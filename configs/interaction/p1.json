@@ -14,6 +14,9 @@
   "interaction": "configs/interaction/interaction.json",
   "interaction_seconds": 600,
   "warm_home_speed_counts_s": 120,
+  "motion_lifecycle": {
+    "standby_check_interval_s": 60
+  },
   "semantic": "configs/interaction/semantic.json",
   "conversation": "configs/interaction/conversation.json",
   "realtime_voice": {

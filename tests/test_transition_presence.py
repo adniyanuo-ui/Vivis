@@ -108,8 +108,11 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
         s.report_receipt_failure(dict(kind='receipt',turn=s.input_generation-1))
         self.assertFalse(self.events);s.receipt_failure_notice.assert_not_called()
 
-    async def test_real_receive_handoff_and_receipt_gate_deliver_greeting_pcm(self,early=False,invalid=False):
+    async def test_real_receive_handoff_and_receipt_gate_deliver_greeting_pcm(self,early=False,invalid=False,continuing=False):
         s=self.s;messages=asyncio.Queue();sent=[];self.body();s.reception.c={**s.reception.c,'enabled':False}
+        if continuing:
+            s.context.update(mode='interaction',target='interaction',ready=True)
+            s.presence.last_face=time.monotonic();self.pub.close()
         s.audio=Mock(output_stream=None)
         class WS:
             async def __aenter__(self):return self
@@ -141,9 +144,11 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
                               dict(type='conversation.item.input_audio_transcription.completed',item_id='onsite-user',transcript='你好。')):
                     await messages.put(event)
                 await self.until(lambda:s.explicit_wake_pending is not None)
-                s.request(dict(kind='voice_context',revision=2,mode='interaction',target='interaction',ready=False))
-                s.request(dict(kind='voice_context',revision=3,mode='interaction',target='interaction',ready=not early,
-                    **({'speech_ready':True} if early else {})));s.enabled=True
+                if not continuing:
+                    s.request(dict(kind='voice_context',revision=2,mode='interaction',target='interaction',ready=False))
+                    s.request(dict(kind='voice_context',revision=3,mode='interaction',target='interaction',ready=not early,
+                        **({'speech_ready':True} if early else {})))
+                s.enabled=True
                 if early:self.pub.close()  # Actual old-camera release before the new detector is ready.
                 await self.until(lambda:s.player.count>0)
                 if early:
@@ -162,6 +167,9 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
                 await self.until(lambda:any(e.get('text')=='您好，我在呢。' for e in self.events))
                 self.assertFalse(any('回执' in e.get('message','') for e in self.events))
                 self.assertEqual(len([e for e in sent if e['type']=='response.create']),1)
+                if continuing:
+                    self.assertEqual(s.presence.wake_until,0)
+                    self.assertFalse(s.presence.greeting_visible())
             finally:
                 connection.cancel();await asyncio.gather(connection,return_exceptions=True)
 
@@ -170,6 +178,20 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_semantically_rejected_greeting_binds_new_reply_not_previous_item(self):
         await self.test_real_receive_handoff_and_receipt_gate_deliver_greeting_pcm(invalid=True)
+
+    async def test_active_conversation_greeting_survives_missed_frame_and_semantic_rejection(self):
+        await self.test_real_receive_handoff_and_receipt_gate_deliver_greeting_pcm(invalid=True,continuing=True)
+
+    async def test_conversation_greeting_cannot_refresh_expired_presence_or_wake_empty_standby(self):
+        s=self.s;s.context.update(mode='interaction',target='interaction',ready=True)
+        s.presence.last_face=time.monotonic();original=s.presence.last_face
+        event=self.final('你好');self.assertTrue(s.question_onset['conversation_presence'])
+        s.presence.last_face-=s.presence.c['face_loss_grace_s']+1
+        self.assertFalse(s.admit_explicit_wake(event,self.state))
+        s.presence.last_face=original
+        s.context.update(mode='standby',target='standby')
+        self.assertFalse(s.admit_explicit_wake(self.final('你好'),self.state))
+        self.assertEqual(s.presence.wake_until,0)
 
     async def test_verified_body_greeting_uses_existing_grace_during_camera_handoff(self):
         s=self.s;self.body();s.admit_explicit_wake(self.final('Hello'),self.state)
@@ -267,6 +289,28 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
     def ready_standby(self,reply,ready=True):
         self.s.request(dict(kind='voice_context',revision=self.s.context['revision']+1,
             mode='standby',target='standby',ready=ready,transition_reply_id=reply))
+
+    async def test_fault_notice_can_speak_while_motion_is_faulted_without_wake_permission(self):
+        s=self.s;self.pub.close()
+        s.request(dict(kind='voice_fault_notice',reply_id='fault-one'))
+        s.request(dict(kind='voice_context',revision=2,mode='standby',target='standby',ready=False,
+            standby_fault=True,transition_reply_id='fault-one'));s.enabled=True
+        engine=SimpleNamespace(generate=AsyncMock(return_value=SimpleNamespace(samples=np.ones(1200)*.01,sample_rate=24000)))
+        with patch('vivis.speech.trusted_reading.RealtimeReader',return_value=engine):
+            s.schedule_farewell(self.state);await self.until(lambda:s.player.count>0)
+            self.assertFalse(s.can_speak());self.assertFalse(s.context['ready'])
+            self.assertFalse(s.admit_explicit_wake(self.final('小帅'),self.state))
+            s.player.render(s.player.count,time.monotonic()+.01)
+            await asyncio.wait_for(s.farewell_task,1)
+            self.assertIn('故障',engine.generate.call_args.args[0])
+            self.assertEqual(len([e for e in self.events if e.get('kind')=='voice_reply_done']),1)
+
+    async def test_recovery_cancels_pending_fault_notice(self):
+        s=self.s;s.request(dict(kind='voice_fault_notice',reply_id='fault-one'))
+        s.request(dict(kind='voice_context',revision=2,mode='standby',target='standby',ready=False,
+            standby_fault=True,transition_reply_id='fault-one'))
+        s.request(dict(kind='voice_context',revision=3,mode='standby',target='standby',ready=True,transition_reply_id='fault-one'))
+        self.assertIsNone(s.farewell)
 
     async def test_farewell_uses_current_voice_once_and_completes_only_after_dac(self):
         s=self.s;reply=await self.farewell();self.ready_standby(reply,False)

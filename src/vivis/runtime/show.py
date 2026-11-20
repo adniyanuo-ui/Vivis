@@ -206,17 +206,53 @@ def prepare_recovery_clearance(bus,plan,snapshots,motors,guard,report,home_speed
 
 def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,telemetry_policy,guard,report,directory,publish):
     """Report read-only self-check separately from tuning writes and homing."""
+    action=getattr(args,'preparation_action','startup')
+    session=getattr(args,'motion_session',None)
+    if session is not None:session.read(check_port=False)
+    if action=='resume':
+        if session is None:raise RuntimeError('Managed resume requires startup evidence')
+        guard();session.read(require_ready=True)
+        if args.authorized_tongue_observation:
+            # Mojia's established tongue unload needs its physical jaw-clearance
+            # interlock on reacquisition. Reuse it without centering the head.
+            from vivis.hardware.feetech.sdk import OfficialSDKBus
+            bus=OfficialSDKBus(profile['port'],profile['baud'],transaction_timeout_ms=20,
+                               snapshot_chunk_bytes=profile.get('snapshot_chunk_bytes'))
+            try:
+                motors={m['id']:m for m in profile['motors']}
+                snapshots=[bus.snapshot(sid) for sid in (29,31)]
+                for snapshot in snapshots:session.validate_snapshot(snapshot)
+                report['tongue_cleanup_required']=True
+                tongue=snapshots[0];motor=motors[29]
+                if (not tongue['torque_enable'] or abs(tongue['position_raw']-motor['neutral'])>motor.get('initial_settle_tolerance_counts',20)
+                        or not motor['device_min']<=tongue['position_raw']<=motor['device_max']):
+                    prepare_recovery_clearance(bus,clearance_plan,snapshots,motors,guard,
+                        report.setdefault('recovery_clearance',{}),args.home_speed,getattr(args,'home_position_recovery',None))
+                    recover_tongue(bus,motor,guard,report.setdefault('startup_events',[]),speed=min(args.home_speed,motor['max_speed_counts_s']))
+                    jaw=next(a for a in home_axes if a['id']==31)
+                    home_all(bus,[jaw],{31:motors[31]},guard,report.setdefault('jaw_recovery',{}),args.home_speed,
+                        {31:motors[31]['max_speed_counts_s']},keep_enabled=[31],telemetry_policy=telemetry_policy)
+            finally:bus.close()
+        report.update(self_check=dict(state='reused',performed=False),homing=dict(completed=False,required=False),
+                      preparation_phase='ready',preparation_completed=True)
+        print('RESUME READY 已复用本次启动自检；不重复回中，实时反馈保护继续',flush=True)
+        return
+    if action not in ('startup','standby','inspect'):raise ValueError('Invalid preparation action')
+    prefix='HOME GUARD' if action=='standby' else 'SELF-CHECK'
     check=dict(state='running',axis_ids=[a['id'] for a in home_axes],
                excluded_ids=list(profile.get('excluded_actuator_ids',[])),checked_ids=[])
-    report.update(self_check=check,preparation_phase='self_check',preparation_completed=False)
-    print(f'SELF-CHECK START 舵机自检：{len(home_axes)}轴；排除{check["excluded_ids"]}（不检查、不发送指令）',flush=True)
+    report.update(self_check=check,preparation_phase='self_check',preparation_completed=False,active_ids=list(ids))
+    print(f'{prefix} START 舵机状态核验：{len(home_axes)}轴；排除{check["excluded_ids"]}（不检查、不发送指令）',flush=True)
     try:
         if set(check['axis_ids'])&set(check['excluded_ids']) or set(ids)&set(check['excluded_ids']):
             raise ValueError('Excluded actuator entered preparation inventory')
         publish('self_check')
         _prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,telemetry_policy,guard,report,directory,publish)
-        report.update(preparation_phase='ready',preparation_completed=True)
-        print('PREPARE COMPLETE 自检通过，参数核验及回中完成',flush=True)
+        if action=='startup' and session is not None:session.initialized(report)
+        report.update(preparation_phase='ready',preparation_completed=True,preparation_action=action)
+        print('INSPECTION COMPLETE 只读巡检通过' if action=='inspect' else
+              'PREPARE COMPLETE 回中核验完成' if action=='standby' else
+              'PREPARE COMPLETE 自检通过，参数核验及回中完成',flush=True)
     except BaseException as exc:
         from vivis.runtime.cancellation import operator_cancelled
         cancelled=operator_cancelled(exc)
@@ -224,8 +260,9 @@ def prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tele
             check.update(state='cancelled' if cancelled else 'failed',error=str(exc))
             found=re.search(r'(?:ID|Servo\s+|^)(\d+)(?::|\b)',str(exc))
             if found:check['failed_axis']=int(found.group(1))
-            print(('SELF-CHECK CANCELLED 自检取消：' if cancelled else 'SELF-CHECK FAIL 自检失败：')+str(exc),flush=True)
+            print((prefix+' CANCELLED 自检取消：' if cancelled else prefix+' FAIL 自检失败：')+str(exc),flush=True)
         report['preparation_error']=str(exc)
+        report['preparation_completed']=False
         print(f'PREPARE {"CANCELLED" if cancelled else "FAILED"} 准备阶段{report["preparation_phase"]}：{exc}',flush=True)
         raise
 
@@ -234,6 +271,7 @@ def _prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tel
     """Fresh full-inventory checks, tuning restoration and homing for one round."""
     home_ids=[a['id'] for a in home_axes];home_neutrals={a['id']:a['neutral'] for a in home_axes}
     motors={m['id']:m for m in profile['motors']}
+    action=getattr(args,'preparation_action','startup');session=getattr(args,'motion_session',None)
     report.update(startup_events=[],homing={})
     warning_recorder=WarningRecorder(report.setdefault('telemetry_warnings',[]))
     bus=None
@@ -294,15 +332,26 @@ def _prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tel
         if hardware_preset is not None:
             # Validate the complete inventory before the first parameter write.
             startup_plan(hardware_preset,snapshots,args.home_speed)
+        if action=='inspect':
+            if session is not None and session.read(check_port=False).get('ready'):
+                for snapshot in snapshots:session.validate_snapshot(snapshot)
+        if action=='standby':
+            if session is None:raise RuntimeError('Managed return requires startup evidence')
+            for snapshot in snapshots:session.validate_snapshot(snapshot)
+            original_speeds.update({a['id']:a['speed_raw'] for a in hardware_preset['axes']})
         report['self_check']['state']='passed'
-        print(f'SELF-CHECK PASS 舵机自检通过：{len(home_ids)}/{len(home_ids)}轴；排除轴不计入通过数',flush=True)
+        print(f'{"HOME GUARD" if action=="standby" else "SELF-CHECK"} PASS '+
+              ('回中前状态核验通过：' if action=='standby' else '舵机自检通过：')+
+              f'{len(home_ids)}/{len(home_ids)}轴；排除轴不计入通过数',flush=True)
+        if action=='inspect':return
         report['preparation_phase']='hardware_setup'
-        if hardware_preset is not None:
+        if hardware_preset is not None and action=='startup':
             original_speeds=restore_startup_settings(bus,hardware_preset,snapshots,args.home_speed,
                 guard,report.setdefault('hardware_restore',{}))
             print('STARTUP hardware tuning restored and verified; homing speed remains capped',flush=True)
         report['preparation_phase']='homing'
         if args.authorized_tongue_observation:
+            report['tongue_cleanup_required']=True
             prepare_recovery_clearance(bus,clearance_plan,snapshots,motors,guard,
                 report.setdefault('recovery_clearance',{}),args.home_speed,position_policy)
             recover_tongue(bus,motors[29],guard,report['startup_events'],speed=min(args.home_speed,motors[29]['max_speed_counts_s']))
@@ -371,6 +420,8 @@ def main(argv=None,vision_readiness=None):
     if not 1<=args.home_speed<=32767:parser.error('Home speed must be within 1..32767')
     from vivis.runtime.robot import Robot
     robot=Robot(args.robot)
+    from vivis.runtime.motion_session import preparation_action
+    args.motion_session,args.preparation_action=preparation_action(robot)
     robot.require_mode(args.mode)
     if args.mouth_speed is not None:robot.set_mouth_speed(args.mouth_speed)
     work=robot.work(args.work)

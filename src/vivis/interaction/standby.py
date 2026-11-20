@@ -74,11 +74,13 @@ class IdleFrames:
         self.next_blink=self.rng.uniform(*settings['blink_interval_s']);self.blink=None
         self.next_look=self.rng.uniform(*settings['look_interval_s']);self.look=None;self.direction=1
         self.blinks=self.looks=0
+        self.time_offset=0.
 
     @staticmethod
     def smooth(value):return value**3*(10+value*(-15+6*value))
 
     def sample(self,t,now):
+        t+=self.time_offset
         c=self.c;weights=[0.]*52
         if t>=self.next_blink:
             self.blink=t;self.next_blink=t+self.rng.uniform(*c['blink_interval_s']);self.blinks+=1
@@ -336,6 +338,8 @@ def main(argv=None,default_config=None):
     home_args=SimpleNamespace(home_speed=settings['home_speed_counts_s'],home_only=True,usb_volume_times_three=False,
         authorized_tongue_observation=authorize,home_position_recovery=recovery_policy(home.get('disabled_position_recovery')),
         home_sensor_fault_confirmation=home.get('sensor_fault_confirmation',False))
+    from vivis.runtime.motion_session import preparation_action
+    home_args.motion_session,home_args.preparation_action=preparation_action(robot)
     report={};result=dict(completed=False,camera_opened=False,program=behavior,audio_opened=False,a2f_used=False)
     receiver=publisher=None
     lock_path=ROOT/'outputs/developer/control.lock';lock_path.parent.mkdir(parents=True,exist_ok=True)
@@ -355,20 +359,42 @@ def main(argv=None,default_config=None):
                         guard()
                         if vision is not None:vision.check()
                     if receiver is not None and not args.overlap_warmup:receiver.wait_ready()
-                    prepare_round(home_args,profile,ids,home['axes'],startup,recovery_clearance_plan(home,motors),robot.telemetry(),
-                        preparing_guard,report,output,lambda *_:None)
-                    if receiver is not None and args.overlap_warmup:
-                        if vision is not None:vision.wait_ready(guard)
-                        receiver.wait_ready();guard()
-                    gaze=StandbyGaze(source.tracking,profile,ids,receiver,source) if source.tracking_enabled else None
-                    guard();print(f'{behavior.upper()} START: tracking={source.tracking_enabled}, smile={source.response["enabled"]}, gain={mapper.smile_strength:g}',flush=True)
-                    print('交互态：人脸跟随与持续微笑回应。' if behavior=='interaction' else ('前台接待待机：相机观察来人，低频眨眼，不执行眼颈跟随。' if source.presence_only else '真正待机：摄像头关闭，低频眨眼；由管理器保持唤醒监听。'),flush=True)
-                    playback=play(profile,ids,neutral,60,None,output/'playback_log.json',stop_file,
-                        frame_source=source,gaze_override=gaze,clock_factory=lambda:MonotonicClock(None if args.continuous else args.seconds))
-                    result['completed']=playback['completed']
+                    preparation_number=0
+                    def prepare_action(action):
+                        nonlocal preparation_number
+                        tongue_cleanup=report.get('tongue_cleanup_required',False) or authorize and 'hardware_restore' in report
+                        preparation_number+=1;report.clear()
+                        if tongue_cleanup:report['tongue_cleanup_required']=True
+                        home_args.preparation_action=action
+                        try:
+                            prepare_round(home_args,profile,ids,home['axes'],startup,recovery_clearance_plan(home,motors),robot.telemetry(),
+                                preparing_guard,report,output,lambda *_:None)
+                        finally:
+                            folder=output/'preparations';folder.mkdir(exist_ok=True)
+                            (folder/f'{preparation_number:04d}_{action}.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+                    idle_started=None
+                    def play_segment(duration=None,number=1):
+                        nonlocal idle_started
+                        if receiver is not None and args.overlap_warmup:
+                            if vision is not None:vision.wait_ready(guard)
+                            receiver.wait_ready();guard()
+                        gaze=StandbyGaze(source.tracking,profile,ids,receiver,source) if source.tracking_enabled else None
+                        guard();print(f'{behavior.upper()} START: tracking={source.tracking_enabled}, smile={source.response["enabled"]}, gain={mapper.smile_strength:g}',flush=True)
+                        if idle_started is None:idle_started=time.monotonic()
+                        source.time_offset=max(0.,time.monotonic()-idle_started)
+                        filename='playback_log.json' if number==1 else f'playback_{number:04d}.json'
+                        playback=play(profile,ids,neutral,60,None,output/filename,stop_file,max_seconds=duration,
+                            frame_source=source,gaze_override=gaze,clock_factory=lambda:MonotonicClock(None if args.continuous else args.seconds))
+                        result['completed']=playback['completed']
+                        return playback
+                    if behavior=='standby' and args.continuous and home_args.motion_session is not None:
+                        from vivis.runtime.motion_session import maintain_standby
+                        maintain_standby(home_args.motion_session,home_args.preparation_action,prepare_action,play_segment,guard)
+                    else:
+                        prepare_action(home_args.preparation_action);play_segment()
             finally:
                 if receiver is not None:receiver.close()
-                if authorize and 'hardware_restore' in report:unload_tongue(profile,report)
+                if authorize and ('hardware_restore' in report or report.get('tongue_cleanup_required')):unload_tongue(profile,report)
                 error=publisher.finish(dict(active=False,program=behavior,state='stopped',updated_monotonic=time.monotonic()))
                 if error:result['preview_error']=error
     except Exception as exc:

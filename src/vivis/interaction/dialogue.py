@@ -106,20 +106,27 @@ def program_command(program,robot,folder,speech,settings):
 
 class Worker:
     """Only this child may own the serial lock. Cancellation is instance-local."""
-    def __init__(self,command,folder,events):
-        self.folder=folder;self.cancelled_at=None;self.ready=False;self.preparation=dict(state='pending')
+    def __init__(self,command,folder,events,motion_environment=None):
+        self.folder=folder;self.cancelled_at=None;self.ready=False;self.preparation=dict(state='pending');self.standby_fault=None
         folder.parent.mkdir(parents=True,exist_ok=True)
         self.log=folder.with_suffix('.log').open('w')
         try:
-            self.process=subprocess.Popen(command,cwd=ROOT,env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'PYTHONNOUSERSITE':'1','VIVIS_MANAGED_SESSION':'1'},
+            self.process=subprocess.Popen(command,cwd=ROOT,env={**os.environ,'PYTHONPATH':str(ROOT/'src'),'PYTHONNOUSERSITE':'1','VIVIS_MANAGED_SESSION':'1',**(motion_environment or {})},
                 stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,start_new_session=True)
         except BaseException:self.log.close();raise
         def reader():
             try:
                 for line in self.process.stdout:
                     self.log.write(line)
-                    if line.startswith(('SELF-CHECK ','HOME ','WARMUP ','TUNING ','PREPARE COMPLETE','PREPARE FAILED','PREPARE CANCELLED')):
+                    if line.startswith('STANDBY FAULT '):
+                        self.standby_fault=line[len('STANDBY FAULT '):].strip();self.ready=False
+                        print(line.rstrip(),flush=True)
+                        events.put(dict(kind='standby_fault',pid=self.process.pid,error=self.standby_fault))
+                    if line.startswith('STANDBY RECOVERED '):self.standby_fault=None
+                    if line.startswith(('SELF-CHECK ','HOME ','WARMUP ','TUNING ','RESUME ','INSPECTION ',
+                                        'STANDBY RECOVERED ','PREPARE COMPLETE','PREPARE FAILED','PREPARE CANCELLED')):
                         state={'START':'running','PASS':'passed','FAIL':'failed','CANCELLED':'cancelled'}.get(line.split()[1]) if line.startswith('SELF-CHECK ') else None
+                        if line.startswith('RESUME READY'):state='reused'
                         if state is not None:self.preparation['state']=state
                         self.preparation['last_message']=line.rstrip();print(line.rstrip(),flush=True)
                         try:events.put_nowait(dict(kind='worker_preparation',pid=self.process.pid,state=state,message=line.rstrip()))
@@ -325,6 +332,9 @@ def main(argv=None):
     events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_trace=asr_thread=None;active_target=None;active_program=None
     quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;preparation={};log=(output/'events.jsonl').open('w')
     ready=False;warm_ready=False;reported_fault=None;semantic=cloud=voice=None
+    from vivis.runtime.motion_session import MotionSession,configuration as lifecycle_configuration
+    motion_policy=lifecycle_configuration(settings.get('motion_lifecycle'))
+    motion_session=MotionSession.create(output/'motion_session.json',robot,motion_policy) if not args.listen_only else None
     voice_available=True
     def request_shutdown(*_):
         nonlocal quitting
@@ -343,7 +353,7 @@ def main(argv=None):
             desired_mode=session.mode,active_program=active_program,desired_program=session.desired if session.mode=='task' else None,
             microphone_active=ready and asr is not None and asr.poll() is None,
             microphone_pid=getattr(asr,'pid',None),
-            wake_words=wake_words,error=fault,output=str(output),self_check=preparation)
+            wake_words=wake_words,error=fault or getattr(worker,'standby_fault',None),output=str(output),self_check=preparation)
         if voice:state['realtime_voice']=dict(status=voice.status,speaker_owned=voice.owned,epoch=voice.epoch)
         path=ROOT/'outputs/runtime/program_status.json';temp=path.with_suffix('.tmp');temp.write_text(json.dumps(state,ensure_ascii=False)+'\n');temp.replace(path)
     def start_worker(target):
@@ -358,7 +368,8 @@ def main(argv=None):
         active_target=target;active_program=target if session.mode_of(target)=='task' else None
         phase='preparing';preparation=dict(state='pending')
         record('start',program=active_program,mode=session.mode_of(target),session=folder.name);print('准备：'+(program['title'] if program else '真正待机'),flush=True)
-        return Worker(command,folder,events)
+        action='startup' if not warm_ready else 'standby' if target==STANDBY else 'resume'
+        return Worker(command,folder,events,motion_session.environment(action) if motion_session else None)
     gate=EventGate(settings['max_event_age_s'])
     try:
         def optional_event(event):
@@ -450,9 +461,22 @@ def main(argv=None):
                     continue
                 if event.get('kind')=='worker_ready' and worker and worker.cancelled_at is None and event['pid']==worker.process.pid:
                     warm_ready=True
-                    if voice:voice.preparation_speech=False
+                    if not worker.standby_fault:
+                        preparation.pop('error',None)
+                        if preparation.get('state')=='failed':preparation['state']='passed'
+                    if voice and active_target==session.desired:voice.preparation_speech=False
                     phase=session.mode_of(active_target);record('worker_ready',program=active_program,mode=phase)
                     print('状态：'+{STANDBY:('①接待待机（相机观察来人）' if reception_enabled else '①待机（摄像头关闭，等待唤醒）'),INTERACTION:'②交互态','task':'③任务执行'}[phase],flush=True)
+                    continue
+                if event.get('kind')=='standby_fault' and worker and event['pid']==worker.process.pid:
+                    phase='standby_fault';session.desired=STANDBY;session.pending_prompt=None
+                    preparation.update(state='failed',error=event['error'])
+                    record('standby_fault',error=event['error'])
+                    if voice:
+                        voice.preparation_speech=False
+                        voice.transition_reply_id=uuid.uuid4().hex
+                        voice.send(kind='voice_fault_notice',reply_id=voice.transition_reply_id)
+                    elif prompt:prompt.play('fault')
                     continue
                 if event.get('kind')=='worker_preparation' and worker and event['pid']==worker.process.pid:
                     if event['state'] is not None:preparation['state']=event['state']
@@ -461,6 +485,8 @@ def main(argv=None):
                 if event.get('kind')=='cloud_action':
                     if not qwen_only or not voice or not voice_available or event.get('revision')!=voice.context_revision or quitting or fault:
                         record('cloud_action_stale',detail=event);continue
+                    if worker and worker.standby_fault:
+                        record('cloud_action_blocked_motion_fault',error=worker.standby_fault);continue
                     from vivis.interaction.cloud_control import controller_intent
                     try:requested=controller_intent(event.get('arguments'),session.programs,session.mode)
                     except ValueError as exc:
@@ -597,7 +623,7 @@ def main(argv=None):
                 if intent['kind'] in ('wake','select','standby','interaction','prompt'):
                     if voice and session.desired!=INTERACTION:voice.enable(False)
                     if prompt:prompt.stop()
-                    if worker and (session.desired!=active_target or restart):
+                    if worker and (session.desired!=active_target or restart) and not (active_target==STANDBY and not worker.ready):
                         worker.cancel();phase='stopping'
                         record('cancel_requested',program=active_program,reason=event['text'])
             if fault and fault.startswith(('Speech process ended','Speech input unavailable')) and fault!=reported_fault:
@@ -639,15 +665,17 @@ def main(argv=None):
             if voice:
                 motion_ready=bool(worker and worker.ready and worker.cancelled_at is None and active_target==session.desired
                     and not quitting and fault is None and voice_available)
-                early_voice=bool(voice.preparation_speech and session.desired==INTERACTION and active_target==INTERACTION
-                    and worker and worker.cancelled_at is None and not quitting and fault is None and voice_available)
+                early_voice=bool(warm_ready and voice.preparation_speech and session.desired==INTERACTION
+                    and (worker is None or active_target in (STANDBY,INTERACTION))
+                    and not quitting and fault is None and voice_available)
+                standby_fault=bool(worker and worker.standby_fault)
                 if qwen_only:
                     session.pending_prompt=None
-                    voice.context(session.mode,session.desired,motion_ready,speech_ready=motion_ready or early_voice)
+                    voice.context(session.mode,session.desired,motion_ready,speech_ready=motion_ready or early_voice,standby_fault=standby_fault)
                 desired_voice=(voice_available and not quitting and not fault
-                    and ((session.desired==INTERACTION and active_target==INTERACTION)
+                    and ((session.desired==INTERACTION and (active_target==INTERACTION or early_voice))
                          or (session.desired==STANDBY and active_target==STANDBY and voice.transition_reply_id is not None))
-                    and worker is not None and (worker.ready or early_voice) and worker.cancelled_at is None
+                    and (early_voice or worker is not None and (worker.ready or standby_fault) and worker.cancelled_at is None)
                     and session.pending_prompt is None and (prompt is None or prompt.clock is None)
                     and (prompt is None or not prompt.contains(time.monotonic())))
                 voice.enable(desired_voice)
@@ -658,7 +686,12 @@ def main(argv=None):
                 if prompt:prompt.stop()
                 if worker:worker.cancel()
                 else:break
-            elif not args.listen_only and ready and voice_available and worker is None and fault is None and (voice is None or voice.released):worker=start_worker(session.desired)
+            elif not args.listen_only and ready and voice_available and worker is None and fault is None and (
+                    voice is None or voice.released or qwen_only and session.desired in (STANDBY,INTERACTION)):
+                worker=start_worker(session.desired if warm_ready else STANDBY)
+            if (worker and getattr(worker,'ready',False) and worker.cancelled_at is None and active_target!=session.desired
+                    and not worker.standby_fault):
+                worker.cancel();phase='stopping'
             if not quitting and worker is not None and prompt and (voice is None or voice.released):
                 spoken=session.take_prompt(active_target,getattr(worker,'ready',False) and worker.cancelled_at is None)
                 if spoken:prompt.play(spoken)

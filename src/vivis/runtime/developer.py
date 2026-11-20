@@ -246,7 +246,9 @@ def run_example(mode, argv=None, default_work='wz2', default_repeat=1):
             config['control']['held_eye_ids'] = [7, 22]
         config_path = output / 'tracking_effective.json'
         config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + '\n')
-        print(f'模式：{mode}；作品：{args.work}；每遍独立准备、{len(robot.home(mode)["axes"])}轴缓慢回中。', flush=True)
+        managed_resume=os.environ.get('VIVIS_MANAGED_SESSION')=='1' and os.environ.get('VIVIS_MOTION_ACTION')=='resume'
+        print(f'模式：{mode}；作品：{args.work}；'+('复用本次启动自检，不重复回中。' if managed_resume else
+              f'每遍独立准备、{len(robot.home(mode)["axes"])}轴缓慢回中。'),flush=True)
         if args.mouth_speed is not None:
             print(f'口部速度对照：{args.mouth_speed}计数/秒；通过原启动流程写入并核验SRAM，默认配置不改。',flush=True)
         if args.round_lip_gain!=1.:
