@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import signal
 import socket
@@ -74,9 +75,20 @@ def main(argv=None):
     frames = with_face = 0
     jpeg = None
     begin = time.monotonic()
+    def startup(stage,**details):
+        state=dict(stage=stage,pid=os.getpid(),elapsed_s=time.monotonic()-begin,
+                   camera_device=camera_config['device'],config_sha256=config_digest,**details)
+        print(json.dumps(dict(event='vision_startup',**state),ensure_ascii=False),flush=True)
+        status=output.parent/'vision_startup.json'
+        try:
+            status.parent.mkdir(parents=True,exist_ok=True)
+            temporary=status.with_suffix('.tmp');temporary.write_text(json.dumps(state,ensure_ascii=False)+'\n')
+            temporary.replace(status)
+        except OSError:pass  # The flushed process log still contains the stage.
     summary = {'completed': False, 'actuators_opened': False, 'config': config,
                'preview_url': f'http://{args.host}:{args.port}/', 'output': str(output)}
     try:
+        startup('vision_lock')
         with ExitStack() as resources:
             lock_path = ROOT / 'outputs/vision/service.lock'
             lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -85,17 +97,20 @@ def main(argv=None):
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise RuntimeError('A person-tracking service is already running')
+            startup('face_detector_init')
             vision = FaceVision(config, ROOT)
             from vivis.interaction.cloud_control import PresencePublisher
             presence=PresencePublisher(json.loads((ROOT/'configs/perception/speech_presence.json').read_text()),ROOT)
             resources.callback(presence.close)
             familiar=None
             if config.get('familiar_faces',{}).get('enabled'):
+                startup('identity_init')
                 from vivis.vision.familiar import FamiliarFaces
                 familiar=FamiliarFaces(config['familiar_faces'],ROOT)
                 resources.callback(familiar.close)
             social=landmarker=None
             if social_config.get('enabled') or expression_config.get('enabled'):
+                startup('face_landmarker_init')
                 from vivis.vision.landmarks import FaceLandmarkerDetector
                 wanted=expression_config if expression_config.get('enabled') else social_config
                 if social_config.get('enabled') and expression_config.get('enabled'):
@@ -106,9 +121,11 @@ def main(argv=None):
             if social_config.get('enabled'):
                 from vivis.interaction.smile import SmileGate
                 social=SmileGate(social_config['gate'],max_gap_s=config['transport']['max_age_s'])
-            camera = LatestCamera(camera_config)
+            camera = LatestCamera(camera_config,progress=startup)
             resources.callback(camera.close)
             summary['camera_actual'] = camera.actual
+            first_frame_started=time.monotonic()
+            startup('first_frame_wait')
             preview = Preview(args.host, args.port)
             resources.callback(preview.close)
             sender = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -129,7 +146,7 @@ def main(argv=None):
                 if sample is None or now - sample[1] > config['transport']['max_age_s']:
                     preview.update({**identity,'status': 'camera_stale', 'camera_error': camera.error,
                                     'actuators_opened': False})
-                    if frames == 0 and now - begin > 5:
+                    if frames == 0 and now - first_frame_started > 5:
                         raise RuntimeError('Camera did not provide a fresh frame within five seconds')
                     stop.wait(.02)
                     continue
@@ -138,6 +155,7 @@ def main(argv=None):
                     continue
                 cycle_begin = now
                 packet, jpeg, metrics = vision.detect(sample)
+                if frames==0:startup('first_frame_detected')
                 if familiar is not None:
                     recognized=familiar.step(sample,vision.selected_face_row,faces=metrics['faces'])
                     familiar.publish(recognized)
@@ -213,6 +231,7 @@ def main(argv=None):
             summary['completed'] = True
     except Exception as exc:
         summary['error'] = str(exc)
+        startup('failed',error=str(exc))
         raise
     finally:
         for sig, handler in previous_handlers.items():

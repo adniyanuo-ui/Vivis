@@ -45,7 +45,7 @@ def select_largest(faces, width, height, min_area_ratio=.002, score_threshold=.8
 
 
 class LatestCamera:
-    def __init__(self, config):
+    def __init__(self, config, progress=None):
         import cv2
         self.cv2 = cv2
         self.config = config
@@ -60,17 +60,38 @@ class LatestCamera:
                 raise RuntimeError('Camera device is missing: '+device+'; check USB connection and configured device path')
             if not os.access(device,os.R_OK|os.W_OK):
                 raise RuntimeError('Camera device access denied: '+device+'; check video group/device ACL permissions')
+        def trace(stage,**details):
+            if progress is not None:progress(stage,**details)
+        trace('camera_open_start',device=device)
         self.capture = cv2.VideoCapture(device, cv2.CAP_V4L2)
         if not self.capture.isOpened():
             self.capture.release()
             raise RuntimeError('Cannot open camera: '+str(device)+
                 '; check competing processes with sudo fuser -v '+os.path.realpath(str(device))+
                 ' and verify V4L2 format support. System camera services may restart after reboot.')
-        self.capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, config['width'])
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config['height'])
-        self.capture.set(cv2.CAP_PROP_FPS, config['fps'])
-        self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        trace('camera_open_complete')
+        actions={}
+        def matches(prop,value):
+            observed=self.capture.get(prop)
+            return type(observed) in (int,float) and math.isfinite(observed) and abs(observed-value)<1e-6
+        def setting(name,prop,value,force=False):
+            if not force and matches(prop,value):
+                actions[name]='already_matches'
+                trace('camera_setting_unchanged',property=name,value=value)
+                return None
+            trace('camera_setting_start',property=name,value=value)
+            accepted=self.capture.set(prop,value)
+            actions[name]='written' if accepted else 'not_accepted'
+            trace('camera_setting_complete',property=name,accepted=accepted)
+            return accepted
+        setting('fourcc',cv2.CAP_PROP_FOURCC,cv2.VideoWriter_fourcc(*'MJPG'))
+        # V4L2 applies a changed size only once both dimensions are supplied.
+        resize=not (matches(cv2.CAP_PROP_FRAME_WIDTH,config['width'])
+                    and matches(cv2.CAP_PROP_FRAME_HEIGHT,config['height']))
+        setting('width',cv2.CAP_PROP_FRAME_WIDTH,config['width'],force=resize)
+        setting('height',cv2.CAP_PROP_FRAME_HEIGHT,config['height'],force=resize)
+        setting('fps',cv2.CAP_PROP_FPS,config['fps'])
+        setting('buffersize',cv2.CAP_PROP_BUFFERSIZE,1)
         controls = {}
         for key, property_id in [('autofocus', cv2.CAP_PROP_AUTOFOCUS),
                                  ('backlight', cv2.CAP_PROP_BACKLIGHT),
@@ -81,13 +102,15 @@ class LatestCamera:
                 if not isinstance(value, (int, float, bool)) or not math.isfinite(value):
                     self.capture.release()
                     raise ValueError('Invalid camera control: ' + key)
-                accepted = self.capture.set(property_id, float(value))
+                accepted = setting(key,property_id,float(value))
                 controls[key] = {'requested': value, 'accepted': accepted,
-                                 'reported': self.capture.get(property_id)}
+                                 'reported': self.capture.get(property_id), 'write_skipped': accepted is None}
         self.actual = {'width': self.capture.get(cv2.CAP_PROP_FRAME_WIDTH),
                        'height': self.capture.get(cv2.CAP_PROP_FRAME_HEIGHT),
                        'fps_requested': config['fps'], 'fps_reported': self.capture.get(cv2.CAP_PROP_FPS),
-                       'controls': controls}
+                       'controls': controls,'configuration_actions':actions}
+        trace('camera_capture_start')
+        self.capture_started=time.monotonic()
         self.thread = threading.Thread(target=self._capture, daemon=True, name='latest-usb-frame')
         self.thread.start()
 

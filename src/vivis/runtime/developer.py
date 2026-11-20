@@ -58,14 +58,25 @@ class VisionReadiness:
 
     def check(self):
         if self.child is not None and self.child.poll() is not None:
-            raise RuntimeError('视觉服务启动失败或已退出，查看 '+str(self.output/'vision.log'))
+            raise RuntimeError(self.failure('视觉服务启动失败或已退出'))
+
+    def failure(self,message):
+        try:
+            status=json.loads((self.output/'vision_startup.json').read_text())
+            if status.get('config_sha256')==self.digest:
+                stage=status.get('stage','unknown')
+                message+='；阶段：'+str(stage)
+                if status.get('property'):message+=' / '+str(status['property'])
+                if status.get('error'):message+='；'+str(status['error'])
+        except (OSError,ValueError,AttributeError):pass
+        return message+'，查看 '+str(self.output/'vision.log')
 
     def wait_ready(self,guard=lambda:None):
         while True:
             guard();self.check()
             if self.ready or compatible_vision(preview_state(),self.config,self.digest):
                 self.ready=True;self.ready_at=time.monotonic();return
-            if time.monotonic()>=self.deadline:raise RuntimeError('视觉服务20秒内未就绪，查看 '+str(self.output/'vision.log'))
+            if time.monotonic()>=self.deadline:raise RuntimeError(self.failure('视觉服务20秒内未就绪'))
             time.sleep(.1)
 
 
@@ -73,6 +84,7 @@ class VisionReadiness:
 def vision_service(config_path, output, required, python=None,wait_ready=True):
     """Stop only our own child. Reuse an external service only after hash match."""
     child = log = readiness = None
+    primary_error=None
     try:
         if required:
             wanted = hashlib.sha256(config_path.read_bytes()).hexdigest()
@@ -94,6 +106,9 @@ def vision_service(config_path, output, required, python=None,wait_ready=True):
             if wait_ready:readiness.wait_ready()
             print('监控：http://127.0.0.1:8765/', flush=True)
         yield readiness
+    except BaseException as exc:
+        primary_error=exc
+        raise
     finally:
         try:
             if child is not None and child.poll() is None:
@@ -102,7 +117,14 @@ def vision_service(config_path, output, required, python=None,wait_ready=True):
                     child.wait(timeout=4)
                 except subprocess.TimeoutExpired:
                     child.kill()
-                    child.wait(timeout=2)
+                    try:child.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        message='视觉子进程强制停止后仍未退出；PID='+str(child.pid)+'；相机驱动操作可能阻塞，不能确认设备已释放'
+                        if primary_error is not None:
+                            note=getattr(primary_error,'add_note',None)
+                            if note is not None:note(message)
+                            print(message,flush=True)
+                        else:raise RuntimeError(message) from None
         finally:
             if log is not None:
                 log.close()
