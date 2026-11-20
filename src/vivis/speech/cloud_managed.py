@@ -353,6 +353,8 @@ class CloudManagedVoice(ManagedVoice):
             if self.explicit_wake_pending:
                 if mode=='interaction' and previous['mode'] in ('standby','interaction'):
                     self.explicit_wake_pending['revision']=revision
+                    if command['ready']:
+                        self.explicit_wake_pending.setdefault('controller_ready_monotonic',time.monotonic())
                 else:self.explicit_wake_pending=None
             self.tool_repair=None;self.control_pending=False
             if mode!='interaction' or not command['ready']:
@@ -841,7 +843,8 @@ class CloudManagedVoice(ManagedVoice):
             audio_recovery_required=not already_audible,face_visible=self.presence.visible(),
             wake_reason='name' if named else 'greeting')
         if already_audible:return False
-        self.explicit_wake_pending=dict(source,text=text,ended=ended,wake_reason='name' if named else 'greeting')
+        self.explicit_wake_pending=dict(source,text=text,ended=ended,wake_reason='name' if named else 'greeting',
+                                       admitted_monotonic=time.monotonic())
         self.announcement_revision=None;self.continue_response=False
         for rid,generation in self.response_inputs.items():
             if generation==self.input_generation:
@@ -883,14 +886,26 @@ class CloudManagedVoice(ManagedVoice):
         await audio_gate.enable(ws,instructions)
         if not self.explicit_wake_current(source) or self.in_speech:return False
         self.cloud_audio_enabled=True
+        # Handoff intentionally resets business execution state. Restore only
+        # this verified FINAL user text before creating its continuation, so a
+        # normal hello cannot be stranded in await_source and treated as a DB
+        # receipt. Do not re-deliver/log ASR or restore old business results.
+        final_event=dict(type='conversation.item.input_audio_transcription.completed',item_id=source['item'],transcript=source['text'])
+        self.message_receipts.source_turns[source['item']]=self.input_generation
+        restored=self.message_receipts.filter(final_event)
+        self.message_receipts.released.extend(e for e in restored if e.get('type')!='conversation.item.input_audio_transcription.completed')
         directive=('控制器已核验本话轮直接招呼的说话许可，云端已确认开启语音。原话：'+source['text']+
             '。请回答这个原问题或理解原请求；无需再次唤醒，不重复自我介绍。不得把唤醒视为熟人身份核验。')
         await controller_events.append(ws,self.context,'explicit_wake',directive)
         if not self.explicit_wake_current(source) or self.in_speech:return False
         self.explicit_wake_pending=None;self.announcement_revision=None
-        self.final_message(dict(type='conversation.item.input_audio_transcription.completed',item_id=source['item'],transcript=self.pending_user_text),state)
+        self.final_message(final_event,state)
         self.continue_response=self.message_claimed!=self.input_generation
-        self.log.write('explicit_wake_audio_ready',item_id=source['item'],original_question_preserved=True)
+        now=time.monotonic();admitted=source['admitted_monotonic'];ready=source.get('controller_ready_monotonic')
+        self.log.write('explicit_wake_audio_ready',item_id=source['item'],original_question_preserved=True,
+            final_source_restored=True,wake_to_audio_permission_s=now-admitted,
+            wake_to_controller_ready_s=None if ready is None else ready-admitted,
+            controller_ready_to_audio_permission_s=None if ready is None else now-ready)
         self.emit(dict(kind='voice_warning',epoch=self.epoch,message='已收到明确唤醒，说话许可和云端语音输出已恢复。'))
         return True
 
@@ -993,6 +1008,8 @@ class CloudManagedVoice(ManagedVoice):
                 # Keep it unattributed without asking for an unrelated pickup code.
                 from vivis.speech.message_receipts import normalized
                 if normalized(event.get('transcript','')) in ('是','嗯','啊','对','好','好的','哦','噢','呃','这','这这'):return
+                if not MESSAGE_REQUEST.search(event.get('transcript','')) and not self.message_receipts.awaiting_details:
+                    return  # Unattributed ordinary speech is not a failed message operation.
                 self.unattributed_source_notice=True
                 self.emit(dict(kind='voice_warning',epoch=self.epoch,
                     message='收到语音片段，但无法核验它属于哪个话轮；未据此办理业务。请将取件码或留言连成一句再说。'))
@@ -1142,6 +1159,15 @@ class CloudManagedVoice(ManagedVoice):
         if self.audio_completed(state,offer['response_id']):
             self.courier.mark_announced(offer['handoff_id'],offer['version'],offer['response_id'])
             offer['response_id']=None
+
+    def report_receipt_failure(self,record):
+        """An unassociated voice reply is not evidence of a failed DB action."""
+        if record.get('turn')!=self.input_generation:return
+        if record.get('kind') in ('await_source','ordinary'):
+            self.emit(dict(kind='voice_warning',epoch=self.epoch,
+                message='这句语音与回答未能可靠关联，已停止该段回答；请再说一次。'))
+            return
+        self.receipt_failure_notice()
 
     def receipt_failure_notice(self):
         """One truthful fixed notice, not another model-generated write receipt."""
@@ -1528,8 +1554,9 @@ class CloudManagedVoice(ManagedVoice):
                     retry=self.message_receipts.retry(rid,self.input_generation)
                     if not retry and entry_guard:self.message_receipts.pending=None
                     self.log.write('message_receipt_rejected',response_id=rid,reason=reason,retry=retry)
+                    if record.get('turn')!=self.input_generation:return
                     self.continue_response=retry and self.can_speak()
-                    if not retry:self.receipt_failure_notice()
+                    if not retry:self.report_receipt_failure(record)
                 async def deliver(event):
                     nonlocal transcript_response_id
                     rid=event.get('response_id');kind=event.get('type');transcript_response_id=rid

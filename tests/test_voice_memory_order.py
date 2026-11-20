@@ -60,7 +60,16 @@ class VoiceMemoryOrderTests(unittest.TestCase):
         self.transcript('0','过期的话。');self.transcript('unknown','身份不明的话。')
         self.assertFalse(service.memory.search_all([])['matches'])
         self.assertFalse(service.turn_saved)
-        self.assertTrue(service.unattributed_source_notice)
+        self.assertFalse(service.unattributed_source_notice)
+
+    def test_orphan_ordinary_fragment_does_not_request_pickup_code_but_business_still_warns(self):
+        events=[];self.service.emit=events.append
+        self.transcript('unknown','也。')
+        self.assertFalse(events);self.assertFalse(self.service.unattributed_source_notice)
+        self.transcript('unknown-business','退件码4455。')
+        self.assertTrue(self.service.unattributed_source_notice)
+        self.assertEqual(events[-1]['kind'],'voice_warning')
+        self.assertFalse(self.service.memory.search_all([])['matches'])
 
     def test_orphan_yes_is_logged_without_unrelated_business_notice(self):
         self.transcript('unknown','是')

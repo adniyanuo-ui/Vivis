@@ -1,5 +1,6 @@
 """Public hello/farewell acknowledgement; no real devices, cloud or DB writes."""
 import asyncio
+import base64
 import io
 import json
 import tempfile
@@ -13,6 +14,7 @@ import test_cloud_control as fixtures
 from vivis.interaction.cloud_control import SpeechPresence,PresencePublisher
 from vivis.interaction.voice_bridge import VoiceBridge
 from vivis.speech.realtime import VoiceSession
+from vivis.speech.message_receipts import ReceiptRejected
 
 
 class TransitionTests(unittest.IsolatedAsyncioTestCase):
@@ -62,6 +64,93 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(s.explicit_wake_pending);audio.enable.assert_not_awaited()
         self.body();self.assertTrue(await s.complete_explicit_wake(None,self.state,controller,audio,'instructions'))
         self.assertTrue(s.can_speak());controller.append.assert_awaited_once()
+
+    async def test_final_hello_source_survives_receipt_reset_before_new_response(self):
+        s=self.s
+        for text in ('小帅。','你好。','Hi.'):
+            with self.subTest(text=text):
+                s.request(dict(kind='voice_context',mode='standby',target='standby',ready=True,revision=s.context['revision']+1))
+                s.explicit_wake_seen.clear();self.body()
+                event=self.final(text);s.message_receipts.filter(dict(type='conversation.item.input_audio_transcription.completed',**event))
+                self.assertTrue(s.admit_explicit_wake(event,self.state))
+                s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=False,revision=s.context['revision']+1))
+                self.assertNotIn('user',s.message_receipts.sources)
+                s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=True,revision=s.context['revision']+1));s.enabled=True
+                async def response_during_controller_ack(*_):
+                    # A controller-initiated continuation still belongs to the
+                    # REAL final-ASR item, not the synthetic controller item.
+                    s.message_receipts.bind('reply',s.input_generation,'user')
+                    self.assertEqual(s.message_receipts.responses['reply']['kind'],'ordinary')
+                self.assertTrue(await s.complete_explicit_wake(None,self.state,
+                    SimpleNamespace(append=AsyncMock(side_effect=response_during_controller_ack)),
+                    SimpleNamespace(enable=AsyncMock()),'instructions'))
+                audio=dict(type='response.audio.delta',response_id='reply',delta=base64.b64encode(b'\x01\0'*240).decode())
+                self.assertEqual(s.message_receipts.filter(audio),[audio])
+                self.assertFalse(s.message_receipts.expired());self.assertIsNone(s.message_lane)
+
+    async def test_restoring_named_wake_with_message_does_not_bypass_business_guard(self):
+        s=self.s;event=self.final('小帅，给小王留言，让他明天来。');s.admit_explicit_wake(event,self.state)
+        s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=True,revision=2));s.enabled=True
+        await s.complete_explicit_wake(None,self.state,SimpleNamespace(append=AsyncMock()),SimpleNamespace(enable=AsyncMock()),'instructions')
+        s.message_receipts.bind('reply',s.input_generation,'user')
+        self.assertEqual(s.message_receipts.responses['reply']['kind'],'needs_tool')
+        with self.assertRaises(ReceiptRejected):
+            s.message_receipts.filter(dict(type='response.audio_transcript.done',response_id='reply',transcript='留言已经保存。'))
+
+    async def test_unknown_response_source_is_not_a_database_failure(self):
+        s=self.s;s.receipt_failure_notice=Mock()
+        s.report_receipt_failure(dict(kind='await_source',turn=s.input_generation))
+        s.receipt_failure_notice.assert_not_called()
+        self.assertNotIn('账本',self.events[-1]['message']);self.assertNotIn('留言',self.events[-1]['message'])
+        s.report_receipt_failure(dict(kind='courier_code',turn=s.input_generation))
+        s.receipt_failure_notice.assert_called_once()
+        self.events.clear();s.receipt_failure_notice.reset_mock()
+        s.report_receipt_failure(dict(kind='receipt',turn=s.input_generation-1))
+        self.assertFalse(self.events);s.receipt_failure_notice.assert_not_called()
+
+    async def test_real_receive_handoff_and_receipt_gate_deliver_greeting_pcm(self):
+        s=self.s;messages=asyncio.Queue();sent=[];self.body();s.reception.c={**s.reception.c,'enabled':False}
+        s.audio=Mock(output_stream=None)
+        class WS:
+            async def __aenter__(self):return self
+            async def __aexit__(self,*_):return False
+            def __aiter__(self):return self
+            async def __anext__(self):return json.dumps(await messages.get())
+            async def send(self,text):
+                event=json.loads(text);sent.append(event)
+                if event['type']=='session.update':
+                    await messages.put(dict(type='session.updated',session=event['session']))
+                elif event['type']=='conversation.item.create' and event.get('item',{}).get('id','').startswith('controller_'):
+                    await messages.put(dict(type='conversation.item.created',item=event['item']))
+                elif event['type']=='response.create':
+                    for response in (
+                        dict(type='response.created',response=dict(id='audible-hello')),
+                        dict(type='response.audio.delta',response_id='audible-hello',delta=base64.b64encode(b'\x01\0'*1200).decode()),
+                        dict(type='response.audio_transcript.done',response_id='audible-hello',transcript='您好，我在呢。'),
+                        dict(type='response.done',response=dict(id='audible-hello',status='completed'))):
+                        await messages.put(response)
+        async def connect(ws,session,log):return session
+        with patch('vivis.speech.cloud_managed.websocket_connection',return_value=WS()),\
+             patch('vivis.speech.cloud_managed.connect_session',side_effect=connect):
+            connection=asyncio.create_task(s._connection())
+            try:
+                await self.until(lambda:s.ws is not None)
+                for event in (dict(type='input_audio_buffer.speech_started',item_id='onsite-user'),
+                              dict(type='input_audio_buffer.speech_stopped',item_id='onsite-user'),
+                              dict(type='conversation.item.input_audio_transcription.completed',item_id='onsite-user',transcript='你好。')):
+                    await messages.put(event)
+                await self.until(lambda:s.explicit_wake_pending is not None)
+                s.request(dict(kind='voice_context',revision=2,mode='interaction',target='interaction',ready=False))
+                s.request(dict(kind='voice_context',revision=3,mode='interaction',target='interaction',ready=True));s.enabled=True
+                await self.until(lambda:s.player.count>0)
+                self.assertEqual(s.message_receipts.responses['audible-hello']['kind'],'ordinary')
+                self.assertNotIn('audible-hello',s.blocked);self.assertIsNone(s.message_lane)
+                s.player.render(s.player.count,time.monotonic()+.001);s.cloud_state.poll_playback()
+                await self.until(lambda:any(e.get('text')=='您好，我在呢。' for e in self.events))
+                self.assertFalse(any('回执' in e.get('message','') for e in self.events))
+                self.assertEqual(len([e for e in sent if e['type']=='response.create']),1)
+            finally:
+                connection.cancel();await asyncio.gather(connection,return_exceptions=True)
 
     async def test_body_warmup_wait_is_bounded_and_does_not_grant_named_permission(self):
         s=self.s;self.body();s.admit_explicit_wake(self.final('你好'),self.state)
