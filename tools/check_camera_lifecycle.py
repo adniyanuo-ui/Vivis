@@ -20,12 +20,37 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
 
 
+def production_worker(config,seconds,event,started):
+    """Exercise the actual runtime capture/configuration path, not a copy."""
+    from vivis.vision.detection import LatestCamera
+    camera=LatestCamera(config,progress=event)
+    event('capture_start',**camera.actual)
+    begin=time.monotonic();frames=0;last_sequence=-1;first=last=None;maximum_gap=0.;shape=None
+    try:
+        while time.monotonic()-begin<seconds:
+            sample=camera.get();now=time.monotonic()
+            if sample is not None and sample[0]!=last_sequence:
+                frames+=1;last_sequence=sample[0];shape=list(sample[2].shape)
+                if first is None:first=now;event('first_frame',shape=shape)
+                if last is not None:maximum_gap=max(maximum_gap,now-last)
+                last=now
+            time.sleep(.002)
+        event('capture_complete',frames=frames,shape=shape,capture_s=time.monotonic()-begin,
+              first_frame_s=None if first is None else first-started,
+              fps_measured=frames/(time.monotonic()-begin),maximum_frame_gap_s=maximum_gap)
+    finally:
+        event('release_start');camera.close()
+        event('release_complete' if not camera.thread.is_alive() else 'release_incomplete')
+    return 0 if frames and not camera.thread.is_alive() else 4
+
+
 def worker(config, seconds, strategy):
     started=time.monotonic()
     def event(stage,**data):
         print(json.dumps(dict(stage=stage,elapsed_s=time.monotonic()-started,**data)),flush=True)
     event('import_cv2')
     import cv2
+    if strategy=='production':return production_worker(config,seconds,event,started)
     event('open_start',opencv_version=cv2.__version__,device=config['device'])
     capture=cv2.VideoCapture(config['device'],cv2.CAP_V4L2)
     event('open_complete',opened=capture.isOpened())
@@ -99,7 +124,8 @@ def main():
     parser.add_argument('--cycles',type=int,default=10)
     parser.add_argument('--gap',type=float,default=3)
     parser.add_argument('--startup-budget',type=float,default=12)
-    parser.add_argument('--strategy',choices=['current','native'],default='current')
+    parser.add_argument('--strategy',choices=['current','native','production'],default='current',
+        help='production uses LatestCamera; current reproduces legacy unconditional settings; native only opens/reads')
     parser.add_argument('--output',type=Path)
     parser.add_argument('--worker',type=Path,help=argparse.SUPPRESS)
     args=parser.parse_args()

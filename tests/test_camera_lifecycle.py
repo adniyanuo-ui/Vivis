@@ -136,6 +136,25 @@ class FirstFrameBudgetTests(unittest.TestCase):
 
 
 class DiagnosticIsolationTests(unittest.TestCase):
+    def test_production_probe_uses_runtime_capture_and_reports_incomplete_release(self):
+        import numpy as np
+        spec=importlib.util.spec_from_file_location('camera_production_diagnostic',ROOT/'tools/check_camera_lifecycle.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        for alive in (False,True):
+            clock=[10.];events=[];camera=Mock();camera.actual=dict(width=640,height=480)
+            camera.get.return_value=(1,10.,np.zeros((480,640,3),dtype=np.uint8))
+            camera.thread.is_alive.return_value=alive
+            def event(stage,**data):events.append((stage,data))
+            with patch('vivis.vision.detection.LatestCamera',return_value=camera) as capture,\
+                 patch.object(module.time,'monotonic',side_effect=lambda:clock[0]),\
+                 patch.object(module.time,'sleep',side_effect=lambda _:clock.__setitem__(0,clock[0]+.05)):
+                result=module.production_worker({'device':'test-camera'},.1,event,10.)
+            capture.assert_called_once_with({'device':'test-camera'},progress=event)
+            camera.close.assert_called_once()
+            self.assertEqual(result,4 if alive else 0)
+            self.assertEqual(events[-1][0],'release_incomplete' if alive else 'release_complete')
+            self.assertEqual(next(d for s,d in events if s=='capture_complete')['frames'],1)
+
     def test_timed_out_owned_worker_is_reaped_without_camera_or_new_trials(self):
         spec=importlib.util.spec_from_file_location('camera_diagnostic',ROOT/'tools/check_camera_lifecycle.py')
         module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)

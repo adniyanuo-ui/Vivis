@@ -35,3 +35,25 @@ journalctl -u vivis-p1.service --since '10 minutes ago' --no-pager
 子程序异常退出时，应用会输出`节目故障[故障类型]`、中文说明、原始异常，以及可取得的舵机ID、反馈间隔、控制更新间隔和详细日志路径。例如`CONTROL_WATCHDOG`表示控制目标更新间隔触发保护；它本身不能证明舵机损坏。
 
 摘要同时保存在对应的`outputs/p1/<会话>/<序号>_<节目>.failure.json`和会话的`events.jsonl`（`worker_failure`事件）中，状态界面也显示该摘要。缺少详细记录时会明确提示无法取得具体异常，不推测硬件原因。正常结束和操作员中止不报告为节目故障。
+
+## 相机节点存在，但重新打开或设置格式超时
+
+`camera_setting_start / fourcc`表示最后停在设置像素格式，不单独证明格式配置错误。若内核同时记录`uvcvideo ... Failed to set UVC probe control : -110`，应先排查USB控制传输；设备节点存在、OpenCV报告打开成功，都不能代替实际出帧。
+
+```bash
+journalctl -k --since '10 minutes ago' --no-pager | rg 'uvcvideo|tegra-xusb|USB Camera'
+sudo systemctl stop vivis-p1.service
+ls -l /dev/v4l/by-id/
+```
+
+确认交互服务及其他相机程序已停止后，可单独重插摄像头USB；随后用真实运行时采集代码测试，不打开串口、麦克风或音箱，也不保存图像：
+
+```bash
+.venv/bin/python tools/check_camera_lifecycle.py \
+  --robot configs/robots/xiaoshuai/robot.json \
+  --mode hold --seconds 15 --strategy production
+```
+
+工具在独立子进程中记录打开、参数设置、首帧和释放阶段。`production`复用`LatestCamera`；`current`保留旧版无条件设置顺序，用于历史对照；`native`只打开和取流。超时或未确认释放时停止后续试次，不在旧驱动操作仍占用设备时并发重试。持续控制超时不能仅靠延长20秒就绪期限解决。
+
+短时恢复后还需分别验证连续取流和多次模式切换，不能据一次成功排除线材、供电、驱动或设备固件问题。仅摄像头测试通过后，再由现场人员启动交互服务；启动会执行原有自检和回中。
