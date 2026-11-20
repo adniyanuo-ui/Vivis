@@ -16,6 +16,7 @@ from vivis.interaction.knowledge import professional_profile
 from vivis.interaction.voice_bridge import VoiceBridge
 from vivis.speech.cloud_managed import CloudManagedVoice
 from vivis.speech.managed import voice_configuration
+from vivis.speech.realtime import VoiceSession
 
 
 def config(path):return json.loads((ROOT/path).read_text())
@@ -169,6 +170,8 @@ class CloudBackendTests(unittest.IsolatedAsyncioTestCase):
             async def send(text):sent.append(json.loads(text))
             ws=SimpleNamespace(send=send)
             service.context.update(revision=4,mode='standby',target='standby',ready=True)
+            service.begin_user_turn('wake-user');service.question_started('wake-user',VoiceSession(service.player,service.log))
+            service.memory_turns['wake-user']['text']='小帅';service.turn_ended_at=time.monotonic()
             service.response_revisions['r']=4
             event=dict(call_id='c',name='robot_program',arguments=json.dumps(dict(action='wake',program='',explicit_wake=True)),response_id='r')
             await service.tool(ws,event);await service.tool(ws,event)
@@ -247,11 +250,17 @@ class ContinuousCloudAudioTests(unittest.IsolatedAsyncioTestCase):
                 pcm=base64.b64encode((np.ones(240,dtype='<i2')*100).tobytes()).decode()
                 await messages.put(dict(type='response.audio.delta',response_id='muted',delta=pcm))
                 await asyncio.sleep(.05);self.assertEqual(service.player.count,0)
+                service.cloud_state.responses['muted']['transcript']='今天天气晴朗。'
+                service.begin_user_turn('wake-user');service.question_started('wake-user',service.cloud_state)
+                service.memory_turns['wake-user']['text']='小帅';service.turn_ended_at=time.monotonic()
                 await messages.put(dict(type='response.function_call_arguments.done',response_id='muted',call_id='wake',name='robot_program',arguments=json.dumps(dict(action='wake',program='',explicit_wake=True))))
-                await until(lambda:service.presence.wake_until>time.monotonic())
+                try:await until(lambda:service.presence.wake_until>time.monotonic())
+                except AssertionError:
+                    raise AssertionError([v for v in sent if v.get('item',{}).get('type')=='function_call_output'])
                 await messages.put(dict(type='response.created',response=dict(id='audible')))
                 await messages.put(dict(type='response.audio.delta',response_id='audible',delta=pcm))
                 await until(lambda:service.player.count>0)
+                service.cloud_state.responses['audible']['user_turn']=dict(item_id='wake-user',confirmed_end_monotonic=service.turn_ended_at)
                 self.assertFalse(service.continue_response)
                 # Lose the face beyond the15-second grace while this reply
                 # still streams. Its tail and transcript must survive; the

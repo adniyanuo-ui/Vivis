@@ -102,6 +102,11 @@ def main(argv=None):
             from vivis.interaction.cloud_control import PresencePublisher
             presence=PresencePublisher(json.loads((ROOT/'configs/perception/speech_presence.json').read_text()),ROOT)
             resources.callback(presence.close)
+            from vivis.vision.person import PersonWorker,configuration as person_configuration
+            startup('person_detector_init')
+            people=PersonWorker(person_configuration(),ROOT)
+            resources.callback(people.close)
+            if people.error:print('人体检测不可用，仅关闭人体招呼入口：'+people.error,flush=True)
             familiar=None
             if config.get('familiar_faces',{}).get('enabled'):
                 startup('identity_init')
@@ -154,7 +159,12 @@ def main(argv=None):
                     stop.wait(.002)
                     continue
                 cycle_begin = now
+                people.submit(sample)
                 packet, jpeg, metrics = vision.detect(sample)
+                metrics['person_detection']=people.observation()
+                body=metrics['person_detection'];body_stamp=body['observed_monotonic']
+                body['fresh']=(body['available'] and type(body_stamp) in (int,float)
+                               and 0<=time.monotonic()-body_stamp<=presence.c['max_age_s'])
                 if frames==0:startup('first_frame_detected')
                 if familiar is not None:
                     recognized=familiar.step(sample,vision.selected_face_row,faces=metrics['faces'])
@@ -181,7 +191,7 @@ def main(argv=None):
                 if landmarker is not None and observation['valid'] and metrics['faces']==1:
                     expression=dict(bilateral_smile=round(min(observation['weights'].get('mouthSmileLeft',0.),
                         observation['weights'].get('mouthSmileRight',0.)),1),observation_only=True)
-                presence.publish(metrics['faces'],sample[1],expression=expression)
+                presence.publish(metrics['faces'],sample[1],expression=expression,person=metrics['person_detection'])
                 now = time.monotonic()
                 last_sequence = sample[0]
                 age = now - sample[1]

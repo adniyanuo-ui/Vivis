@@ -17,6 +17,16 @@
       "location": "assets/models/yunet",
       "license_file": "assets/models/yunet/LICENSE",
       "manifest": "assets/models/yunet/manifest.json"
+    },
+    {
+      "name": "OpenCV Zoo NanoDet-m-plus-1.5x_416",
+      "source": "https://github.com/opencv/opencv_zoo",
+      "revision": "47534e27c9851bb1128ccc0102f1145e27f23f98",
+      "license": "Apache-2.0",
+      "location": "assets/models/nanodet",
+      "license_file": "assets/models/nanodet/LICENSE",
+      "manifest": "assets/models/nanodet/manifest.json",
+      "changes": "Model unchanged. Person-only decoder/letterbox adapted in src/vivis/vision/person.py; stable softmax, original-image clipping and asynchronous latest-frame worker."
     }
   ]
 }

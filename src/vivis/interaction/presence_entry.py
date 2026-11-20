@@ -41,7 +41,10 @@ def instructions(config):
         '仅当controller_state.greeting_wake_allowed=true，用户明确面对你打招呼（例如'+
         '、'.join(config['greetings'])+'），也可wake，wake_reason=greeting且explicit_wake=false。'
         'greeting_wake_allowed=false时绝不能用greeting调用唤醒；“他刚才说你好”是叙述，不是对你问好，不调用wake。'
-        '泛化招呼不能取得无人脸唤醒权限；引用别人的招呼、对旁人讲话、音箱自播都不是唤醒。'
+        '摄像头持续看到人脸时控制器会主动唤醒，不要求先认出姓名。'
+        '仅看到人体但看不到脸时，必须听到对你的直接招呼才能唤醒；看到人体本身不会自动唤醒。'
+        '画面无人时只有明确名字呼叫才能唤醒，泛化招呼不能取得画面无人时的说话权限。'
+        '人体检测不确认姓名，不授权读取私人资料；引用别人的招呼、对旁人讲话、音箱自播都不是唤醒。'
         '任务中用户表达结束当前表演（例如'+ '、'.join(config['stop_examples'])+
         '），调用stop回交互；“可以了／好了”在普通聊天中可能只是回应，不要无故退出。'
         '用户对你明确表达离开或让你休息（例如'+ '、'.join(config['standby_examples'])+

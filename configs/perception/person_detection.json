@@ -1,0 +1,9 @@
+{
+  "schema_version": "vivis-person-detection-1.0",
+  "enabled": true,
+  "model_manifest": "assets/models/nanodet/manifest.json",
+  "hz": 4,
+  "score_threshold": 0.5,
+  "nms_threshold": 0.6,
+  "min_area_ratio": 0.015
+}

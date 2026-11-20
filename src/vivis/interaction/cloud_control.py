@@ -14,10 +14,10 @@ def tools(program_ids):
     from vivis.interaction.speech_dialect import configuration as dialect_configuration
     channels=channel_names()
     return [dict(type='function',name='robot_program',
-        description='用户唤醒、点播、停止/退出节目或要求休息/待机时调用。stop回交互，standby回待机；这两种只需action，不要填写节目。play必须填写program。明确呼叫名字用wake_reason=name；当前允许单人可见招呼时可用greeting。否定、引用及旁人讲话不执行。这里只请求状态管理器，不直接控制电机。',
+        description='用户唤醒、点播、停止/退出节目或要求休息/待机时调用。stop回交互，standby回待机；这两种只需action，不要填写节目。play必须填写program。明确呼叫名字用wake_reason=name；当前看到人脸或人体且获准直接招呼时可用greeting。否定、引用及旁人讲话不执行。这里只请求状态管理器，不直接控制电机。',
         parameters=dict(type='object',properties=dict(action=dict(type='string',enum=['wake','play','stop','standby']),
             program=dict(type='string',enum=['',*program_ids]),explicit_wake=dict(type='boolean',description='用户本句明确呼唤配置名字时为true；仅泛化招呼必须为false。stop/standby可省略，不能要求用户先唤醒再停止'),
-            wake_reason=dict(type='string',enum=['name','greeting'],description='仅wake使用。greeting须当前单人可见且controller_state.greeting_wake_allowed=true；不授予无人脸权限')),required=['action'],additionalProperties=False)),
+            wake_reason=dict(type='string',enum=['name','greeting'],description='仅wake使用。greeting须摄像头当前看到人脸或人体且controller_state.greeting_wake_allowed=true；不授予画面无人时的名字呼叫权限')),required=['action'],additionalProperties=False)),
         dict(type='function',name='set_expression',
             description='交互态52基础表情及组合：expression可选单个标准通道名，或custom并在weights给出多个通道权重。悲伤、哭脸、大笑等用custom组合已有基础表情，不要求重新标定才可试。smile温和微笑，neutral/attentive收回表情意图，auto恢复自动回应。明确口令source=command，聊天合理回应source=social。点头属于颈部动作，不在52通道内。',
             parameters=dict(type='object',properties=dict(expression=dict(type='string',enum=['smile','neutral','attentive','auto','custom',*channels]),
@@ -93,6 +93,7 @@ def validate_presence_config(c):
 class SpeechPresence:
     def __init__(self,config,root=ROOT):
         self.c=config;self.path=Path(root)/config['state_file'];self.wake_until=0.;self.last_visible=False;self.last_face=-float('inf')
+        self.greeted_person=False;self.last_greeted_person=-float('inf')
         validate_presence_config(config)
 
     def face_count(self,now=None):
@@ -108,12 +109,35 @@ class SpeechPresence:
 
     def single_visible(self,now=None):return self.face_count(now)==1
 
+    def person_count(self,now=None):
+        now=time.monotonic() if now is None else now
+        try:
+            d=json.loads(self.path.read_text());body=d.get('person')
+            if d.get('schema_version')!='vivis-face-presence-1.0' or not isinstance(body,dict):return 0
+            stamp=body.get('observed_monotonic');count=body.get('persons')
+            if (body.get('enabled') is True and body.get('available') is True
+                    and type(stamp) in (int,float) and 0<=now-stamp<=self.c['max_age_s']
+                    and type(count) is int and count>=0):return count
+        except (OSError,ValueError,AttributeError):pass
+        return 0
+
+    def greeting_visible(self,now=None):return self.visible(now) or self.person_count(now)>0
+
+    def greet(self):
+        """Direct greeting authorizes conversation with visible people, not identity."""
+        self.greeted_person=True
+
+    def clear_greeting(self):
+        self.greeted_person=False;self.last_greeted_person=-float('inf')
+
     def allowed(self,now=None):
         now=time.monotonic() if now is None else now
         visible=self.visible(now)
         if visible:self.last_face=now;self.wake_until=0.  # After a visible person leaves, require another explicit wake.
         self.last_visible=bool(visible)
-        return visible or now-self.last_face<self.c['face_loss_grace_s'] or now<self.wake_until
+        if self.greeted_person and self.person_count(now)>0:self.last_greeted_person=now
+        return (visible or now-self.last_face<self.c['face_loss_grace_s'] or now<self.wake_until
+                or self.greeted_person and now-self.last_greeted_person<self.c['face_loss_grace_s'])
 
     def wake(self,now=None):
         now=time.monotonic() if now is None else now;self.wake_until=now+self.c['wake_without_face_hold_s']
@@ -128,7 +152,7 @@ class PresencePublisher:
         validate_presence_config(config)
         self.c=config;self.path=Path(root)/config['state_file'];self.owner=uuid.uuid4().hex;self.last=-float('inf')
 
-    def publish(self,faces,stamp,now=None,expression=None):
+    def publish(self,faces,stamp,now=None,expression=None,person=None):
         now=time.monotonic() if now is None else now
         if now-self.last<1/self.c['publish_hz']:return
         self.path.parent.mkdir(parents=True,exist_ok=True)
@@ -136,7 +160,7 @@ class PresencePublisher:
         try:
             fd=os.open(temp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
             with os.fdopen(fd,'w') as f:json.dump(dict(schema_version='vivis-face-presence-1.0',faces=faces,
-                observed_monotonic=stamp,owner=self.owner,expression=expression),f)
+                observed_monotonic=stamp,owner=self.owner,expression=expression,person=person),f)
             temp.replace(self.path);self.last=now
         except OSError:
             try:temp.unlink(missing_ok=True)
@@ -160,11 +184,15 @@ class ReceptionGate:
         """Explicit rest should not immediately re-wake for the same visible face."""
         self.armed=False;self.absent_since=None
 
-    def observe(self,visible,mode,now=None,person_id=None):
+    def observe(self,visible,mode,now=None,person_id=None,occupied=False):
         now=time.monotonic() if now is None else now
         if not self.c['enabled']:return False
         if not visible:
             self.present_since=None
+            if occupied:
+                # A turned-away visitor is still here, but body presence alone
+                # never triggers arrival. Re-arm only after actual departure.
+                self.absent_since=None;return False
             if self.absent_since is None:self.absent_since=now
             if now-self.absent_since>=self.c['departure_hold_s'] and not self.armed:
                 self.armed=True;self.visit+=1

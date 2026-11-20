@@ -54,7 +54,7 @@ class EntryFlowTests(unittest.IsolatedAsyncioTestCase):
         folder=tempfile.TemporaryDirectory();self.addCleanup(folder.cleanup)
         self.events=[];self.s=fixtures.CloudBackendTests().service(folder.name,self.events);self.addCleanup(self.s.log.close)
         self.s.context.update(mode='standby',target='standby',ready=True,revision=1)
-        self.s.presence.visible=Mock(return_value=True);self.s.presence.single_visible=Mock(return_value=True)
+        self.s.presence.visible=Mock(return_value=True);self.s.presence.single_visible=Mock(return_value=True);self.s.presence.greeting_visible=Mock(return_value=True)
         self.s.identified_person=Mock(return_value=None)
         self.state=VoiceSession(self.s.player,self.s.log)
 
@@ -99,11 +99,11 @@ class EntryFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result['accepted']);self.assertEqual(result['status'],'greeting_source_not_current')
         self.assertFalse(self.events)
 
-    async def test_no_face_multiple_faces_and_disabled_block_both_greeting_paths(self):
-        for situation in ('no-face','multiple','disabled'):
+    async def test_no_person_and_disabled_block_both_greeting_paths(self):
+        for situation in ('no-face','disabled'):
             self.s.control_pending=False;self.s.explicit_wake_seen.clear();self.s.entry=configuration()
             self.s.presence.visible.return_value=situation!='no-face'
-            self.s.presence.single_visible.return_value=situation=='disabled'
+            self.s.presence.greeting_visible.return_value=situation=='disabled'
             if situation=='disabled':self.s.entry['visible_greeting_wake']=False
             self.assertFalse(self.s.admit_explicit_wake(self.final(),self.state))
             result=await self.call(dict(action='wake',wake_reason='greeting',explicit_wake=False),situation)
@@ -114,7 +114,7 @@ class EntryFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_face_lost_while_waiting_for_audio_permission_cancels_greeting(self):
         s=self.s;s.admit_explicit_wake(self.final(),self.state)
         s.context.update(mode='interaction',target='interaction');s.enabled=True
-        async def lose_face(*args):s.presence.single_visible.return_value=False
+        async def lose_face(*args):s.presence.greeting_visible.return_value=False
         gate=SimpleNamespace(enable=AsyncMock(side_effect=lose_face));controller=SimpleNamespace(append=AsyncMock())
         self.assertFalse(await s.complete_explicit_wake(None,self.state,controller,gate,'instructions'))
         controller.append.assert_not_awaited();self.assertFalse(s.cloud_audio_enabled)
@@ -143,12 +143,12 @@ class EntryFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.events)
 
     async def test_named_wake_still_works_without_visible_face(self):
-        self.s.presence.visible.return_value=False;self.s.presence.single_visible.return_value=False
+        self.s.presence.visible.return_value=False;self.s.presence.greeting_visible.return_value=False
         self.assertTrue(self.s.admit_explicit_wake(self.final('小帅你好'),self.state))
         self.assertGreater(self.s.presence.wake_until,time.monotonic())
 
     async def test_stop_and_rest_do_not_require_face_or_name_and_deduplicate(self):
-        self.s.presence.visible.return_value=False;self.s.presence.single_visible.return_value=False
+        self.s.presence.visible.return_value=False;self.s.presence.greeting_visible.return_value=False
         self.s.context.update(mode='task',target=next(iter(self.s.program_ids)))
         for action in ('stop','standby'):
             result=await self.call(dict(action=action),action)

@@ -24,7 +24,7 @@ pre{white-space:pre-wrap;background:#202c3b;padding:16px;border-radius:10px}</st
 <div><span class="eye"><i class="pupil"></i></span><span class="eye"><i class="pupil"></i></span></div>
 <small>下方眼球是图像方向模拟，不代表舵机实测位置。此视觉服务不驱动机器人。</small>
 <p id="robot-control">视觉服务只检测人脸，真机控制状态等待更新。</p>
-<p id="identity-status"></p></section><section>
+<p id="presence-status"></p><p id="identity-status"></p></section><section>
 <h2>交互日志</h2><p id="interaction-status">正在读取…</p><p id="business-identity"></p>
 <label><input id="log-follow" type="checkbox" checked> 自动滚动到最新</label>
 <p><small>最近100条，本机只读。回复文字不代表音频已完整播出；可能包含私人对话，请勿公开分享页面。</small></p>
@@ -68,6 +68,8 @@ finally{clearTimeout(deadline);if(pendingImage)URL.revokeObjectURL(pendingImage)
 async function refreshState(){const controller=new AbortController(),deadline=setTimeout(()=>controller.abort(),2000);
 try{let r=await fetch('/state',{cache:'no-store',signal:controller.signal});if(!r.ok)throw new Error('State unavailable');let s=await r.json();
 document.querySelector('#state').textContent=JSON.stringify(s,null,2);
+const body=s.person_detection,bodyFresh=body&&body.fresh;
+document.querySelector('#presence-status').textContent='人脸：'+(s.faces||0)+'；人体：'+(bodyFresh?body.persons:'未就绪或已过期')+'。人脸可主动唤醒；仅人体需直接招呼；无人需明确叫名字。';
 const identity=s.familiar_identity,observation=identity&&identity.observation,age=observation&&observation.age_estimate;
 const decision=observation&&observation.decision_reason,reasons={quality_low:'亮度或清晰度不足',no_feature:'未获得特征',below_threshold:'比对分数不足',ambiguous_candidates:'候选差距不足',confirming:'等待连续确认',confirmed:'已确认'};
 document.querySelector('#identity-status').textContent=identity?

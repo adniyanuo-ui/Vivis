@@ -52,6 +52,8 @@ def main():
     for row in verify_assets(Robot(args.robot), args.from_dir):
         print('Verified ' + row['path'])
     print('Verified ' + str(verify_model()))
+    from vivis.vision.person import configuration,verify_model as verify_person_model
+    print('Verified ' + str(verify_person_model(configuration())))
 
 
 if __name__ == '__main__':

@@ -283,7 +283,8 @@ class CloudManagedVoice(ManagedVoice):
                     or target not in {'standby','interaction',*self.program_ids} or type(command.get('ready')) is not bool):return
             if (mode=='task')!=(target in self.program_ids) or (mode!='task' and mode!=target):return
             previous=self.context
-            if mode=='standby' and previous['mode']!='standby' and self.presence.visible():
+            if mode=='standby':self.presence.clear_greeting()
+            if mode=='standby' and previous['mode']!='standby' and self.presence.greeting_visible():
                 self.reception.dismiss_current_visit()
             if mode=='interaction':
                 if previous['mode']=='standby':self.announcement_kind='welcome'
@@ -715,28 +716,35 @@ class CloudManagedVoice(ManagedVoice):
         self.recovered_expression=None
         self.question_onset=dict(item=item_id,generation=self.input_generation,revision=self.context['revision'],
             connection=self.message_connection,person=self.turn_person,quiet=quiet,outputs=outputs,
-            single_face=self.presence.single_visible(),
+            visible_person=self.presence.greeting_visible(),
             eligible=self.context['mode']=='interaction' and self.context['ready'] and self.presence.visible() and self.can_speak())
 
     def greeting_wake_allowed(self,require_ready=True):
         return (self.entry['enabled'] and self.entry['visible_greeting_wake']
                 and self.context['mode'] in ('standby','interaction') and (self.context['ready'] or not require_ready)
-                and self.presence.single_visible())
+                and self.presence.greeting_visible())
 
-    def verify_greeting_source(self):
-        """A model proposal cannot turn reported speech into a direct greeting."""
+    def verify_wake_source(self,greeting=True):
+        """Model proposals need the same final-text/source gate as wake recovery."""
         from vivis.interaction.presence_entry import whole_greeting
+        from vivis.speech.explicit_wake import addressed_wake
         source=self.question_onset
         if (not source or source['generation']!=self.input_generation
                 or source['revision']!=self.context['revision'] or source['connection'] is not self.message_connection
                 or source['person']!=(self.identified_person() or self.anonymous)
-                or source.get('single_face') is not True):
+                or (greeting and source.get('visible_person') is not True)):
             raise GreetingAdmissionError('greeting_source_not_current')
         turn=self.memory_turns.get(source['item'])
         text=turn.get('text') if turn else None
         if not text and source['item']==self.turn_item_id:text=self.pending_user_text
         if not text:raise GreetingAdmissionError('greeting_final_text_pending')
-        if not whole_greeting(text,self.entry):raise GreetingAdmissionError('not_a_direct_greeting')
+        ended=self.turn_ended_at
+        if not ended and self.invalid_question and self.invalid_question['item']==source['item']:
+            ended=self.invalid_question['ended']
+        if self.in_speech or ended is None or time.monotonic()-ended>policy()['message_extract_s']:
+            raise GreetingAdmissionError('wake_final_turn_pending_or_expired')
+        if greeting and not whole_greeting(text,self.entry):raise GreetingAdmissionError('not_a_direct_greeting')
+        if not greeting and not addressed_wake(text,self.wake_words):raise GreetingAdmissionError('not_a_direct_name_call')
         if not source['quiet']:
             from vivis.speech.invalid_question import distinct_from_playback
             state=self.cloud_state
@@ -750,7 +758,7 @@ class CloudManagedVoice(ManagedVoice):
         item=event.get('item_id');text=event.get('transcript');source=self.question_onset
         named=addressed_wake(text,self.wake_words)
         greeting=(whole_greeting(text,self.entry) and self.greeting_wake_allowed()
-                  and source is not None and source.get('single_face') is True)
+                  and source is not None and source.get('visible_person') is True)
         if (not (named or greeting) or item in self.explicit_wake_seen
                 or not source or item!=source['item'] or self.context['mode'] not in ('standby','interaction')
                 or source['generation']!=self.input_generation or source['revision']!=self.context['revision']
@@ -766,6 +774,8 @@ class CloudManagedVoice(ManagedVoice):
         self.explicit_wake_seen.append(item)
         already_audible=self.can_speak() and self.cloud_audio_enabled and turn['valid']
         if named:self.presence.wake()
+        elif greeting:
+            self.presence.greet();self.reception.dismiss_current_visit()
         self.turn_engaged=True;turn['engaged']=True;turn['valid']=True
         self.turn_item_id=item;self.turn_person=source['person'];self.turn_ended_at=ended;self.pending_user_text=text
         self.invalid_question=None
@@ -791,7 +801,7 @@ class CloudManagedVoice(ManagedVoice):
             and source['connection'] is self.message_connection and source['revision']==self.context['revision']
             and source['person']==(self.identified_person() or self.anonymous)
             and self.turn_item_id==source['item']
-            and (source.get('wake_reason')!='greeting' or self.greeting_wake_allowed(require_ready=False)))
+            and (source.get('wake_reason')!='greeting' or not self.context['ready'] or self.greeting_wake_allowed(require_ready=False)))
 
     async def complete_explicit_wake(self,ws,state,controller_events,audio_gate,instructions):
         source=self.explicit_wake_pending
@@ -800,6 +810,7 @@ class CloudManagedVoice(ManagedVoice):
             self.explicit_wake_pending=None;return False
         if not self.output_ready() or self.in_speech:return False
         if source.get('wake_reason')!='greeting':self.presence.wake()
+        else:self.presence.greet()
         if state.generating:await self.cancel_inference(ws,state.generating)
         await audio_gate.enable(ws,instructions)
         if not self.explicit_wake_current(source) or self.in_speech:return False
@@ -954,6 +965,7 @@ class CloudManagedVoice(ManagedVoice):
         permission=self.presence.allowed()
         facts=dict(**self.context,unattributed_source_notice=self.unattributed_source_notice,face_visible=self.presence.last_visible,
             wake_permission=permission and not self.presence.last_visible)
+        facts['body_visible']=self.presence.person_count()>0
         facts['identity_state']='reviewing' if review else 'recognized' if confirmed else 'unknown'
         facts['identity_authorized']=confirmed is not None
         facts['message_operation']=self.message_operation()
@@ -1160,8 +1172,11 @@ class CloudManagedVoice(ManagedVoice):
                 greeting=args.get('wake_reason')=='greeting'
                 if greeting and (not self.greeting_wake_allowed() or self.in_speech
                         or self.response_inputs.get(event.get('response_id'),self.input_generation)!=self.input_generation):
-                    raise ValueError('Greeting wake needs a fresh single visible face and current finished user turn')
-                if greeting:self.verify_greeting_source()
+                    raise ValueError('Greeting wake needs a fresh visible face/body and current finished user turn')
+                if greeting or args['action']=='wake' or args.get('explicit_wake') is True:
+                    self.verify_wake_source(greeting)
+                if greeting:
+                    self.presence.greet();self.reception.dismiss_current_visit()
                 if not greeting and (intent['kind']=='wake' or args.get('explicit_wake') is True):self.presence.wake();self.turn_engaged=True
                 if args['action']=='wake' and self.context['mode']=='interaction':
                     self.announcement_kind='wake';self.announcement_revision=self.context['revision']
@@ -1255,7 +1270,7 @@ class CloudManagedVoice(ManagedVoice):
             output.update(status='identity_confirmation_required',error=str(exc))
             self.tool_repair=None;self.continue_response=self.can_speak()
         except GreetingAdmissionError as exc:
-            output.update(status=str(exc),error='泛化招呼尚未通过当前原话核验；未执行，等待最终识别或下一次明确招呼。')
+            output.update(status=str(exc),error='唤醒尚未通过本轮原话与在场条件核验；未执行，等待最终识别或下一次明确呼叫。')
             self.tool_repair=None;self.continue_response=False
         except (ValueError,TypeError) as exc:
             output['error']=str(exc);self.continue_response=self.tool_retry_budget>0
@@ -1590,7 +1605,8 @@ class CloudManagedVoice(ManagedVoice):
                         if self.turn_engaged and self.presence.wake_until>0 and (self.in_speech or state.generating or self.player.count):
                             self.presence.wake()
                         instructions,identity,permission=self.context_snapshot()
-                        if self.context['ready'] and self.reception.observe(self.presence.last_visible,self.context['mode'],person_id=self.identified_person()):
+                        if self.context['ready'] and self.reception.observe(self.presence.last_visible,self.context['mode'],
+                                person_id=self.identified_person(),occupied=self.presence.person_count()>0):
                             self.log.write('reception_arrival',mode=self.context['mode'],
                                 observed_hold_s=time.monotonic()-self.reception.present_since,
                                 configured_hold_s=self.reception.c['arrival_hold_s'])

@@ -39,6 +39,7 @@
 
 - 飞特SMS/STS SDK：`src/vivis/hardware/feetech/_vendor/scservo_sdk/`。保留固定提交的6个实现模块及MIT许可证，精简`__init__.py`为实际使用的导出；无额外SDK下载或全局路径注入。
 - YuNet人脸模型：`assets/models/yunet/face_detection_yunet_2023mar.onnx`，约228KB，附MIT许可证与固定版本/哈希清单。示例2/3按哈希核验后加载，不访问网络下载。
+- NanoDet人体模型：`assets/models/nanodet/object_detection_nanodet_2022nov.onnx`，约3.8MB，附Apache-2.0许可证及固定来源/哈希。共享设置在`configs/perception/person_detection.json`；复用同一视频流，以独立低频任务判断是否有人体，不识别姓名、不生成跟随目标。仅人体可见时还需要直接语音招呼才能唤醒；看到人脸仍走原有主动接待，画面无人仍需要明确叫名字。模型异常只关闭人体招呼入口，页面显示原因。
 - 完整来源和版本：`assets/third_party.json`。Python依赖由`pyproject.toml`安装，不把虚拟环境提交到Git。
 
 预制回放默认不读取61通道制作数据。四份作品均随包提供`assets/works/作品名/source.json`，用于显式`--round-lip-gain`运行时通道增益：0001是约8.78MB的原始60FPS数据，wz2是约914KB的原始30FPS数据，作品3是约1.32MB的原始30FPS数据，这三份源文件的原字节与哈希保留；作品4使用上述派生60FPS数据，并另存原始JSON。它们不是另一套硬件配置。30FPS源数据按逐帧保持转换到60FPS，0001保持原60FPS；只重新映射Funnel/Pucker涉及的轴，其余轨迹列保留。该功能不依赖原工程目录。

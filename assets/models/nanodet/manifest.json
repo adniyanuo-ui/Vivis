@@ -1,0 +1,12 @@
+{
+  "repository": "opencv/opencv_zoo",
+  "revision": "47534e27c9851bb1128ccc0102f1145e27f23f98",
+  "path": "models/object_detection_nanodet/object_detection_nanodet_2022nov.onnx",
+  "destination": "assets/models/nanodet/object_detection_nanodet_2022nov.onnx",
+  "url": "https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/object_detection_nanodet/object_detection_nanodet_2022nov.onnx",
+  "size": 3800954,
+  "sha256": "4b82da9944b88577175ee23a459dce2e26e6e4be573def65b1055dc2d9720186",
+  "license": "Apache-2.0",
+  "license_url": "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/object_detection_nanodet/LICENSE",
+  "implementation_reference": "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/object_detection_nanodet/nanodet.py"
+}
