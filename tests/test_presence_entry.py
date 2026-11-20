@@ -15,9 +15,10 @@ from vivis.speech.realtime import VoiceSession
 class EntryEvidenceTests(unittest.TestCase):
     def test_only_whole_direct_greeting_is_recovered_not_quotation_or_negation(self):
         c=configuration()
-        for text in ('你好','您好呀','喂！','嗨','Hi','HELLO！'):
+        for text in ('你好','您好呀','喂！','嗨','Hi','HELLO！','hello，你好。','你好，您好呀','Hi! Hello.','喂啊，你好呀'):
             self.assertTrue(whole_greeting(text,c),text)
-        for text in ('他说你好','不要说你好','你好小王','“你好”是什么意思','hello王教授','好了吗','我走了'):
+        for text in ('他说你好','不要说你好','你好小王','“你好”是什么意思','hello王教授','好了吗','我走了',
+                     '他说hello你好','不要说hello你好','hello，你好，小王','“hello，你好”','hi' * 5):
             self.assertFalse(whole_greeting(text,c),text)
         self.assertFalse(whole_greeting('你好',{**c,'enabled':False}))
 

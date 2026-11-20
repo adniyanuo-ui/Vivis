@@ -27,9 +27,12 @@ def whole_greeting(text, config):
     if (not config['enabled'] or not config['visible_greeting_wake']
             or not isinstance(text,str) or not 1 <= len(text) <= 80):
         return False
-    value = re.sub(r'[\s，,。!！?？、]+','',text).casefold()
-    value = re.sub(r'(?:呀|啊|哟|哦|哈)+$','',value)
-    return value in {v.casefold() for v in config['greetings']}
+    value = re.sub(r'[\s，,。.!！?？、；;]+','',text).casefold()
+    words='|'.join(re.escape(v.casefold()) for v in sorted(config['greetings'],key=len,reverse=True))
+    # A whole greeting can contain repeated or bilingual greetings. Keep this
+    # anchored: reports, quotations, negations and another addressee are not
+    # admitted merely because they contain a greeting word.
+    return re.fullmatch(r'(?:(?:'+words+r')(?:呀|啊|哟|哦|哈)*){1,4}',value) is not None
 
 
 def instructions(config):
@@ -40,6 +43,7 @@ def instructions(config):
         '待机时，明确呼唤配置名字可用robot_program wake，wake_reason=name且explicit_wake=true。'
         '仅当controller_state.greeting_wake_allowed=true，用户明确面对你打招呼（例如'+
         '、'.join(config['greetings'])+'），也可wake，wake_reason=greeting且explicit_wake=false。'
+        '连续、重复及中英组合的直接招呼（如hello，你好）同样先调用wake，不能只生成待机下无声的回答。'
         'greeting_wake_allowed=false时绝不能用greeting调用唤醒；“他刚才说你好”是叙述，不是对你问好，不调用wake。'
         '摄像头持续看到人脸时控制器会主动唤醒，不要求先认出姓名。'
         '仅看到人体但看不到脸时，必须听到对你的直接招呼才能唤醒；看到人体本身不会自动唤醒。'

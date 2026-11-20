@@ -135,7 +135,7 @@ class ThreeWakeRulesTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_body_greeting_wakes_and_survives_camera_handoff_until_ready(self):
         self.publish(persons=1);s=self.s
-        self.assertTrue(s.admit_explicit_wake(self.final('你好'),self.state))
+        self.assertTrue(s.admit_explicit_wake(self.final('hello，你好。'),self.state))
         self.assertEqual(self.events[-1]['arguments']['wake_reason'],'greeting')
         self.assertEqual(s.presence.wake_until,0)
         s.request(dict(kind='voice_context',revision=2,mode='interaction',target='interaction',ready=False))
@@ -150,7 +150,7 @@ class ThreeWakeRulesTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_empty_frame_greeting_cannot_wake_even_if_model_forges_name_reason(self):
         self.publish();s=self.s
-        self.assertFalse(s.admit_explicit_wake(self.final('你好'),self.state))
+        self.assertFalse(s.admit_explicit_wake(self.final('hello，你好。'),self.state))
         for reason,explicit in (('greeting',False),('name',True)):
             result=await self.tool(dict(action='wake',wake_reason=reason,explicit_wake=explicit))
             self.assertFalse(result['accepted'])
