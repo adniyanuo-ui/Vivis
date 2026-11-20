@@ -193,6 +193,7 @@ class RealtimeVoiceTests(unittest.TestCase):
                 super().__init__('rejected fake-private-key')
                 self.response=SimpleNamespace(status_code=401,body=b'{"code":"InvalidApiKey","message":"bad fake-private-key"}',headers={})
         with tempfile.TemporaryDirectory() as tmp,patch.dict('os.environ',{'DASHSCOPE_API_KEY':'fake-private-key'}), \
+             patch('vivis.speech.realtime.fcntl.flock'), \
              patch('vivis.speech.realtime.importlib.util.find_spec',return_value=object()), \
              patch('vivis.speech.realtime.AudioIO') as audio, \
              patch('asyncio.run',side_effect=lambda co:(co.close(),(_ for _ in ()).throw(Rejected()))[-1]), \

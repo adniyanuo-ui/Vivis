@@ -9,7 +9,7 @@ import tempfile
 import time
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock,patch
 import numpy as np
 
 from vivis.paths import ROOT
@@ -145,6 +145,7 @@ class CancellationTests(unittest.TestCase):
         from vivis.interaction.follow import main as follow
         receiver=SimpleNamespace(wait_ready=lambda:None,close=lambda:None,max_age=.3)
         with tempfile.TemporaryDirectory() as tmp,patch.object(Path,'is_file',return_value=True), \
+             patch('vivis.interaction.follow.fcntl.flock'),patch('vivis.interaction.follow.PreviewPublisher',return_value=Mock(finish=Mock(return_value=None))), \
              patch('vivis.interaction.follow.check_competitors'),patch('vivis.interaction.follow.vision_service',return_value=nullcontext()), \
              patch('vivis.interaction.follow.TargetReceiver',return_value=receiver), \
              patch('vivis.interaction.follow.prepare_round'),patch('vivis.interaction.follow.play',side_effect=RuntimeError('Operator stop during scheduled feedback')), \
@@ -170,6 +171,7 @@ class IdleTests(unittest.TestCase):
         from vivis.runtime.robot import Robot
         robot=Robot(ROOT/'configs/robots/xiaoshuai/robot.json')
         with tempfile.TemporaryDirectory() as tmp,redirect_stdout(io.StringIO()), \
+             patch('vivis.interaction.standby.fcntl.flock'),patch('vivis.interaction.standby.PreviewPublisher',return_value=Mock(finish=Mock(return_value=None))), \
              patch('vivis.interaction.standby.prepare_round') as prepare, \
              patch('vivis.interaction.standby.play',return_value={'completed':True}):
             self.assertEqual(standby(['--robot',str(robot.path),'--seconds','1','--tracking','off','--smile','off',

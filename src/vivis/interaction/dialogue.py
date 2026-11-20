@@ -398,7 +398,7 @@ def main(argv=None):
                         try:events.put_nowait(event)
                         except queue.Full:pass
                         continue
-                    if event.get('kind') not in ('asr_final','asr_control','asr_error','ready','voice_state','voice_warning','cloud_error','cloud_transcript','cloud_action','mouth_error','voice_health'):continue
+                    if event.get('kind') not in ('asr_final','asr_control','asr_error','ready','voice_state','voice_warning','cloud_error','cloud_transcript','cloud_action','mouth_error','voice_health','voice_reply_done'):continue
                     while not quitting:
                         try:events.put(event,timeout=.05);break
                         except queue.Full:
@@ -430,7 +430,7 @@ def main(argv=None):
                     if not voice_available:
                         phase='voice_recovering';session.desired=STANDBY;session.pending_prompt=None
                         if worker:worker.cancel()
-                        if voice:voice.enable(False)
+                        if voice:voice.transition_reply_id=None;voice.enable(False)
                         print('语音链路恢复中；停止当前任务并保持扭矩，管理器继续运行。原因：'+event['reason'],flush=True)
                     else:
                         print('语音链路已恢复；等待新的唤醒或接待，不续播旧节目、不重放旧指令。',flush=True)
@@ -464,16 +464,22 @@ def main(argv=None):
                     try:requested=controller_intent(event.get('arguments'),session.programs,session.mode)
                     except ValueError as exc:
                         record('cloud_action_rejected',reason=str(exc));continue
+                    reply=event.get('transition_reply_id')
+                    voice.transition_reply_id=(reply if requested['kind']=='standby' and isinstance(reply,str) and 1<=len(reply)<=64 else None)
                     event=dict(kind='asr_final',text=event.get('text','Qwen command'),source='qwen_tool',
                         controller_intent=requested,captured_end_monotonic=time.monotonic())
-                if event.get('kind') in ('voice_state','voice_warning','cloud_error','cloud_transcript'):
+                if event.get('kind') in ('voice_state','voice_warning','cloud_error','cloud_transcript','voice_reply_done'):
                     if not voice or not voice.accept(event):
                         record('voice_stale',detail=event);continue
                     record(event['kind'],detail=event)
+                    if event['kind']=='voice_reply_done':continue
                     if event['kind']=='voice_warning':
                         print('语音提示：'+event['message'],flush=True);continue
                     if event['kind']=='voice_state' and event['status']=='ready':
-                        print('实时语音已就绪：'+('唤醒、聊天和节目控制均由Qwen理解；无脸默认静默。' if qwen_only else '可直接聊天、插话；停止／待机／节目切换仍由本地识别执行。'),flush=True)
+                        if qwen_only and session.mode==STANDBY and voice.transition_reply_id:
+                            print('待机告别语音已就绪；简短回应后保持安静。',flush=True)
+                        else:
+                            print('实时语音已就绪：'+('唤醒、聊天和节目控制均由Qwen理解；画面无人且未获唤醒许可时保持安静。' if qwen_only else '可直接聊天、插话；停止／待机／节目切换仍由本地识别执行。'),flush=True)
                     elif event['kind']=='cloud_error':
                         if qwen_only:
                             fault='Qwen语音不可用：'+event['error'];quitting=True
@@ -630,7 +636,9 @@ def main(argv=None):
                 if qwen_only:
                     session.pending_prompt=None
                     voice.context(session.mode,session.desired,bool(worker and worker.ready and worker.cancelled_at is None and active_target==session.desired and not quitting and fault is None and voice_available))
-                desired_voice=(voice_available and not quitting and not fault and session.desired==INTERACTION and active_target==INTERACTION
+                desired_voice=(voice_available and not quitting and not fault
+                    and ((session.desired==INTERACTION and active_target==INTERACTION)
+                         or (session.desired==STANDBY and active_target==STANDBY and voice.transition_reply_id is not None))
                     and worker is not None and worker.ready and worker.cancelled_at is None
                     and session.pending_prompt is None and (prompt is None or prompt.clock is None)
                     and (prompt is None or not prompt.contains(time.monotonic())))

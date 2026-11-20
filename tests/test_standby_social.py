@@ -229,6 +229,7 @@ class StandbySocialTests(unittest.TestCase):
                 if fail:raise RuntimeError('Operator stop during scheduled feedback')
                 return dict(completed=True)
             with tempfile.TemporaryDirectory() as tmp,redirect_stdout(io.StringIO()), \
+                 patch('vivis.interaction.standby.fcntl.flock'),patch('vivis.interaction.standby.PreviewPublisher',return_value=Mock(finish=Mock(return_value=None))), \
                  patch.object(Path,'is_file',return_value=True),patch('vivis.interaction.standby.check_competitors'), \
                  patch('vivis.interaction.standby.vision_service',side_effect=vision), \
                  patch('vivis.interaction.standby.TargetReceiver',return_value=receiver), \
@@ -252,6 +253,7 @@ class StandbySocialTests(unittest.TestCase):
 
     def test_failed_camera_readiness_never_prepares_or_moves_actuators(self):
         with tempfile.TemporaryDirectory() as tmp,redirect_stdout(io.StringIO()), \
+             patch('vivis.interaction.standby.fcntl.flock'),patch('vivis.interaction.standby.PreviewPublisher',return_value=Mock(finish=Mock(return_value=None))), \
              patch.object(Path,'is_file',return_value=True),patch('vivis.interaction.standby.check_competitors'), \
              patch('vivis.interaction.standby.vision_service',side_effect=RuntimeError('camera readiness failed')), \
              patch('vivis.interaction.standby.prepare_round') as prepare,patch('vivis.interaction.standby.play') as play:

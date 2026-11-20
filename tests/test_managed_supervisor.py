@@ -14,7 +14,7 @@ from vivis.interaction.dialogue import main
 
 
 class ManagedSupervisorTests(unittest.TestCase):
-    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False):
+    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False):
         actual_popen=subprocess.Popen;voice_starts=[];prompts=[]
         settings=json.loads((ROOT/'configs/interaction/p1.json').read_text())
         settings['realtime_voice']['control_backend']='qwen_realtime' if qwen else 'local'
@@ -38,14 +38,14 @@ with trace.open('a') as f:f.write('end '+str(name)+'\\n')
             listener=root/'voice.py'
             listener.write_text('''import sys,time,json,threading
 from pathlib import Path
-speaker=Path(sys.argv[1]);lock=threading.Lock();epoch=0;revision=0
+speaker=Path(sys.argv[1]);lock=threading.Lock();epoch=0;revision=0;reply=None
 def emit(**e):
  with lock:print(json.dumps(e,ensure_ascii=False),flush=True)
 def commands():
- global epoch,revision
+ global epoch,revision,reply
  for line in sys.stdin:
   c=json.loads(line)
-  if c['kind']=='voice_context':revision=c['revision'];continue
+  if c['kind']=='voice_context':revision=c['revision'];reply=c.get('transition_reply_id');continue
   if c['kind']!='voice_mode':continue
   if c['enabled']:
    with speaker.with_suffix('.contexts').open('a') as f:f.write(json.dumps(c,ensure_ascii=False)+'\\n')
@@ -53,6 +53,9 @@ def commands():
   time.sleep(.04)
   if c['enabled']:
    speaker.open('x').close();emit(kind='voice_state',epoch=c['epoch'],status='ready',speaker_owned=True)
+   if reply:
+    emit(kind='cloud_transcript',epoch=c['epoch'],role='assistant',text='好，您忙。')
+    emit(kind='voice_reply_done',epoch=c['epoch'],reply_id=reply,reason='played')
    emit(kind='cloud_transcript',epoch=c['epoch'],role='assistant',text='播放白骨夫人')
    if sys.argv[5]=='True' and c['epoch']==1:
     emit(kind='voice_warning',epoch=c['epoch'],message='本句缓冲超限，交互继续')
@@ -75,7 +78,8 @@ for n,(deadline,text) in enumerate(turns,1):
  if sys.argv[5]=='True':
   actions={'小帅':('wake',''),'播放白骨夫人':('play','baigufuren'),'自己玩':('standby',''),'停止':('stop',''),'待机':('standby','')}
   if text in actions:
-   action,program=actions[text];emit(kind='cloud_action',revision=revision,arguments=dict(action=action,program=program),text=text)
+   action,program=actions[text];emit(kind='cloud_action',revision=revision,arguments=dict(action=action,program=program),text=text,
+    **({'transition_reply_id':'reply-'+str(n)} if action=='standby' and sys.argv[7]=='True' else {}))
   else:emit(kind='asr_final',utterance_id=n,text=text,captured_end_monotonic=time.monotonic())
   continue
  if sys.argv[3]=='True' and text=='停止':
@@ -105,7 +109,7 @@ time.sleep(10)
             def popen(command,**kwargs):
                 if 'vivis.speech.managed' in command:
                     voice_starts.append(command)
-                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover)],**kwargs)
+                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover),str(farewell)],**kwargs)
                 return actual_popen(command,**kwargs)
             with patch('vivis.interaction.dialogue.ROOT',root), \
                  patch('vivis.interaction.dialogue.dependencies',return_value=(speech,[])), \
@@ -134,6 +138,11 @@ time.sleep(10)
                 self.assertIn('语音提示：本句缓冲超限，交互继续',console.getvalue())
                 self.assertEqual([line for line in console.getvalue().splitlines() if line.startswith('小王-other（识别）：')],
                     ['小王-other（识别）：停止'])
+            if farewell:
+                self.assertIn('小帅：好，您忙。',console.getvalue())
+                records=[json.loads(s) for s in (root/'run/events.jsonl').read_text().splitlines()]
+                done=[s for s in records if s['kind']=='voice_reply_done']
+                self.assertEqual(len(done),2)
             self.assertNotIn('identity',prompts)  #Natural cloud answer, no duplicate cached voice.
             effective=(root/'run/effective.json').read_text();self.assertNotIn('unit-test-placeholder',effective)
             if repeated:
@@ -143,6 +152,9 @@ time.sleep(10)
 
     def test_network_outage_holds_motion_and_requires_fresh_request_after_recovery(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,recover=True)
+
+    def test_farewell_owns_speaker_once_in_ready_standby_then_releases(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,farewell=True)
 
     def test_qwen_tools_alone_execute_modes_and_cached_prompts_are_disabled(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True)

@@ -123,6 +123,17 @@ class SpeechPresence:
 
     def greeting_visible(self,now=None):return self.visible(now) or self.person_count(now)>0
 
+    def greeting_detection_pending(self,now=None):
+        """A fresh new camera owner can precede its first asynchronous body result."""
+        now=time.monotonic() if now is None else now
+        try:
+            d=json.loads(self.path.read_text());body=d.get('person');stamp=d.get('observed_monotonic')
+            return (d.get('schema_version')=='vivis-face-presence-1.0' and type(stamp) in (int,float)
+                    and 0<=now-stamp<=self.c['max_age_s'] and isinstance(body,dict)
+                    and body.get('enabled') is True and body.get('available') is True
+                    and body.get('observed_monotonic') is None)
+        except (OSError,ValueError,AttributeError):return False
+
     def greet(self):
         """Direct greeting authorizes conversation with visible people, not identity."""
         self.greeted_person=True

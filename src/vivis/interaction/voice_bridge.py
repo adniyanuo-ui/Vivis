@@ -7,6 +7,7 @@ class VoiceBridge:
     def __init__(self,stream):
         self.stream=stream;self.epoch=0;self.target=False;self.observed_epoch=0
         self.status='off';self.owned=False;self.failed=False;self.release_requested_at=None;self.last_program=None;self.context_revision=0;self.last_context=None
+        self.transition_reply_id=None
 
     @property
     def released(self):
@@ -25,14 +26,19 @@ class VoiceBridge:
                   **({'last_program':dict(self.last_program)} if value and self.last_program else {}))
 
     def context(self,mode,target,ready):
-        value=(mode,target,bool(ready))
+        reply=self.transition_reply_id if mode=='standby' else None
+        value=(mode,target,bool(ready),reply)
         if value==self.last_context:return
         self.last_context=value;self.context_revision+=1
-        self.send(kind='voice_context',revision=self.context_revision,mode=mode,target=target,ready=bool(ready))
+        self.send(kind='voice_context',revision=self.context_revision,mode=mode,target=target,ready=bool(ready),
+                  **({'transition_reply_id':reply} if reply else {}))
 
     def interrupt(self):self.send(kind='voice_interrupt',epoch=self.epoch)
 
     def accept(self,event):
+        if event.get('kind')=='voice_reply_done':
+            if event.get('reply_id')!=self.transition_reply_id or self.transition_reply_id is None:return False
+            self.transition_reply_id=None;return True
         if event.get('epoch')!=self.epoch:return False
         if event.get('kind')=='voice_state':
             self.observed_epoch=self.epoch;self.status=event['status'];self.owned=event['speaker_owned']
