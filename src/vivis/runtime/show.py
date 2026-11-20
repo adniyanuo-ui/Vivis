@@ -311,6 +311,8 @@ def _prepare_round(args,profile,ids,home_axes,hardware_preset,clearance_plan,tel
         home_all(bus,home_axes,motors,guard,report['homing'],args.home_speed,original_speeds,keep_enabled=ids,
                  telemetry_policy=telemetry_policy,position_recovery=position_policy,
                  sensor_fault_confirmation=getattr(args,'home_sensor_fault_confirmation',False))
+        if report['homing'].get('trajectory_skipped'):
+            print('HOME ALREADY SETTLED; neutral goals and two feedback passes verified; no empty trajectory',flush=True)
         print('HOME COMPLETE; original speed settings restored',flush=True)
         bus.close();bus=None
     finally:

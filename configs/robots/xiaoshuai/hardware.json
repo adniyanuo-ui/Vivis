@@ -897,7 +897,7 @@
         2047,
         2047
       ],
-      "max_speed_counts_s": 400,
+      "max_speed_counts_s": 600,
       "acceleration_raw": 0,
       "model_raw_expected": 11272,
       "register_layout_confirmed": true,
@@ -922,7 +922,7 @@
         2047,
         2047
       ],
-      "max_speed_counts_s": 300,
+      "max_speed_counts_s": 600,
       "acceleration_raw": 0,
       "model_raw_expected": 11272,
       "register_layout_confirmed": true,

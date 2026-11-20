@@ -63,7 +63,7 @@ def controller(narrow=False):
 class IndependentTrackingTests(unittest.TestCase):
     def test_all_neck_reference_and_command_bounds_use_device_limits(self):
         robot,c,p,ids,data,receiver,g,last=controller();motors={m['id']:m for m in p['motors']}
-        for sid,bounds,speed in ((32,(1650,2450),600),(33,(1500,2347),400),(34,(1800,2300),300)):
+        for sid,bounds,speed in ((32,(1650,2450),600),(33,(1500,2347),600),(34,(1800,2300),600)):
             m=motors[sid];self.assertEqual((m['safe_min'],m['safe_max']),bounds)
             self.assertEqual(m['max_speed_counts_s'],speed)
             self.assertNotIn('tracking_min',robot.axes[sid]);self.assertNotIn('tracking_max',robot.axes[sid])

@@ -196,10 +196,19 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
     if any(type(value) is not int or not 0<=value<=32767 for value in original.values()):
         raise ValueError('Invalid original speed RAM')
     disabled={s['id'] for s in snapshots if not s['torque_enable']}
+    # Already holding the exact neutral goal, at rest and within the existing
+    # encoder tolerance: verify settlement instead of running an empty curve.
+    # Recovery/disabled axes always keep the original bounded startup path.
+    neutral_hold=(not plans and not disabled and all(
+        s.get('goal_position_raw')==neutral[s['id']] and s.get('speed_raw')==0 and s.get('moving')==0
+        and abs(s['position_raw']-neutral[s['id']])<=task_motors.get(s['id'],{}).get('initial_settle_tolerance_counts',20)
+        for s in snapshots))
+    if neutral_hold:duration=0.
     temporary=disabled-set(keep_enabled)
     report.update(completed=False,ids=list(neutral),max_speed_counts_s=speed,
                   planned_duration_s=duration,original_speeds=original,temporary_enable_ids=sorted(temporary),
                   neutral_targets=neutral,initial_positions={s['id']:s['position_raw'] for s in snapshots},
+                  trajectory_skipped=neutral_hold,
                   samples=[],communication_recoveries=recoveries,ram_writes=[],restored_speeds=False)
     warning_recorder=WarningRecorder(report.setdefault('telemetry_warnings',[]))
     recovery_deadlines={};reentered=set();neutral_sent=set()
@@ -292,7 +301,7 @@ def home_all(bus,axes,task_motors,guard,report,max_speed=60,restore_speeds=None,
                 report['ram_writes'].append(write_ram_verified(bus,sid,40,1))
             if bus.read(sid,40,1)!=b'\x01':raise RuntimeError(f'ID{sid}: home torque readback failed')
         begin=last_tick=time.monotonic();poll=0;progress=0.
-        while True:
+        while not neutral_hold:
             guard();now=time.monotonic();elapsed=now-begin
             if now>deadline:raise RuntimeError('Neutral homing timeout')
             if now-last_tick<1/60:time.sleep(min(.002,1/60-(now-last_tick)));continue

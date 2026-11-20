@@ -108,7 +108,7 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
         s.report_receipt_failure(dict(kind='receipt',turn=s.input_generation-1))
         self.assertFalse(self.events);s.receipt_failure_notice.assert_not_called()
 
-    async def test_real_receive_handoff_and_receipt_gate_deliver_greeting_pcm(self):
+    async def test_real_receive_handoff_and_receipt_gate_deliver_greeting_pcm(self,early=False,invalid=False):
         s=self.s;messages=asyncio.Queue();sent=[];self.body();s.reception.c={**s.reception.c,'enabled':False}
         s.audio=Mock(output_stream=None)
         class WS:
@@ -135,15 +135,28 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
             connection=asyncio.create_task(s._connection())
             try:
                 await self.until(lambda:s.ws is not None)
+                if invalid:s.cloud_state.current_user_turn=dict(item_id='old-user',confirmed_end_monotonic=time.monotonic()-10)
                 for event in (dict(type='input_audio_buffer.speech_started',item_id='onsite-user'),
-                              dict(type='input_audio_buffer.speech_stopped',item_id='onsite-user'),
+                              dict(type='input_audio_buffer.speech_stopped',item_id='onsite-user',**({'reason':'turn_invalid'} if invalid else {})),
                               dict(type='conversation.item.input_audio_transcription.completed',item_id='onsite-user',transcript='你好。')):
                     await messages.put(event)
                 await self.until(lambda:s.explicit_wake_pending is not None)
                 s.request(dict(kind='voice_context',revision=2,mode='interaction',target='interaction',ready=False))
-                s.request(dict(kind='voice_context',revision=3,mode='interaction',target='interaction',ready=True));s.enabled=True
+                s.request(dict(kind='voice_context',revision=3,mode='interaction',target='interaction',ready=not early,
+                    **({'speech_ready':True} if early else {})));s.enabled=True
+                if early:self.pub.close()  # Actual old-camera release before the new detector is ready.
                 await self.until(lambda:s.player.count>0)
+                if early:
+                    self.assertFalse(s.context['ready']);self.assertTrue(s.can_speak())
+                    self.assertNotIn('audible-hello',s.cloud_state.blocked)
+                    count=s.player.count
+                    s.request(dict(kind='voice_context',revision=4,mode='interaction',target='interaction',ready=True))
+                    self.assertEqual(s.player.count,count)
+                    self.assertNotIn('audible-hello',s.cloud_state.blocked)
+                    self.assertIsNone(s.announcement_revision)
                 self.assertEqual(s.message_receipts.responses['audible-hello']['kind'],'ordinary')
+                self.assertEqual(s.message_receipts.responses['audible-hello']['source_item'],'onsite-user')
+                self.assertEqual(s.cloud_state.responses['audible-hello']['user_turn']['item_id'],'onsite-user')
                 self.assertNotIn('audible-hello',s.blocked);self.assertIsNone(s.message_lane)
                 s.player.render(s.player.count,time.monotonic()+.001);s.cloud_state.poll_playback()
                 await self.until(lambda:any(e.get('text')=='您好，我在呢。' for e in self.events))
@@ -151,6 +164,80 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len([e for e in sent if e['type']=='response.create']),1)
             finally:
                 connection.cancel();await asyncio.gather(connection,return_exceptions=True)
+
+    async def test_real_greeting_audio_precedes_motion_ready_without_second_welcome(self):
+        await self.test_real_receive_handoff_and_receipt_gate_deliver_greeting_pcm(early=True)
+
+    async def test_semantically_rejected_greeting_binds_new_reply_not_previous_item(self):
+        await self.test_real_receive_handoff_and_receipt_gate_deliver_greeting_pcm(invalid=True)
+
+    async def test_verified_body_greeting_uses_existing_grace_during_camera_handoff(self):
+        s=self.s;self.body();s.admit_explicit_wake(self.final('Hello'),self.state)
+        s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=False,speech_ready=True,revision=2))
+        s.enabled=True;self.pub.close()
+        gate=SimpleNamespace(enable=AsyncMock());controller=SimpleNamespace(append=AsyncMock())
+        self.assertFalse(s.presence.greeting_visible())
+        self.assertTrue(await s.complete_explicit_wake(None,self.state,controller,gate,'instructions'))
+        self.assertFalse(s.context['ready']);self.assertTrue(s.can_speak())
+        self.assertEqual(s.presence.wake_until,0)
+        directive=controller.append.call_args.args[-1]
+        self.assertNotIn('云端已确认开启语音',directive);self.assertIn('自然回应',directive)
+
+    async def test_greeting_handoff_does_not_extend_grace_without_observations(self):
+        s=self.s;self.body();s.admit_explicit_wake(self.final('Hello'),self.state)
+        self.pub.close();s.presence.last_greeted_person=time.monotonic()-s.presence.c['face_loss_grace_s']-1
+        original=s.presence.last_greeted_person;s.presence.greet()
+        self.assertEqual(s.presence.last_greeted_person,original)
+        s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=False,speech_ready=True,revision=2));s.enabled=True
+        gate=SimpleNamespace(enable=AsyncMock())
+        self.assertFalse(await s.complete_explicit_wake(None,self.state,SimpleNamespace(append=AsyncMock()),gate,'instructions'))
+        gate.enable.assert_not_awaited();self.assertFalse(s.can_speak())
+
+    async def test_hello_during_automatic_arrival_gap_preserves_original_question(self):
+        s=self.s;self.body();now=time.monotonic()
+        # Arrival was genuinely observed, then the camera owner closed.
+        s.presence.last_face=now;self.pub.close()
+        s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=False,revision=2))
+        self.assertTrue(s.admit_explicit_wake(self.final('你好'),self.state))
+        self.assertFalse(s.question_onset['visible_person']);self.assertTrue(s.question_onset['preparation_presence'])
+        self.assertEqual(self.events[-1]['arguments']['wake_reason'],'greeting')
+        s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=False,speech_ready=True,revision=3));s.enabled=True
+        controller=SimpleNamespace(append=AsyncMock())
+        self.assertTrue(await s.complete_explicit_wake(None,self.state,controller,SimpleNamespace(enable=AsyncMock()),'instructions'))
+        self.assertIn('你好',controller.append.call_args.args[-1]);self.assertTrue(s.can_speak())
+
+    async def test_human_call_during_automatic_wake_preparation_requests_early_audio(self):
+        for text in ('小帅','Hello'):
+            with self.subTest(text=text):
+                s=self.s;s.explicit_wake_seen.clear();s.enabled=False;self.body()
+                s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=False,revision=s.context['revision']+1))
+                self.assertTrue(s.admit_explicit_wake(self.final(text),self.state))
+                self.assertEqual(self.events[-1]['kind'],'cloud_action')
+                self.assertEqual(self.events[-1]['arguments']['action'],'wake')
+                s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=False,speech_ready=True,revision=s.context['revision']+1))
+                s.enabled=True
+                self.assertTrue(await s.complete_explicit_wake(None,self.state,SimpleNamespace(append=AsyncMock()),SimpleNamespace(enable=AsyncMock()),'instructions'))
+                self.assertTrue(s.can_speak());self.assertFalse(s.context['ready'])
+
+    async def test_preparation_speech_keeps_expression_disabled_and_cancellation_mutes(self):
+        s=self.s;self.body();s.admit_explicit_wake(self.final('小帅'),self.state)
+        s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=False,speech_ready=True,revision=2))
+        s.enabled=True
+        await s.complete_explicit_wake(None,self.state,SimpleNamespace(append=AsyncMock()),SimpleNamespace(enable=AsyncMock()),'instructions')
+        self.assertTrue(s.can_speak());self.assertFalse(s.context['ready'])
+        s.response_revisions['expression']=2;s.expression.publish=Mock()
+        await s.tool(SimpleNamespace(send=AsyncMock()),dict(name='set_expression',call_id='too-early',response_id='expression',
+            arguments='{"expression":"smile","intensity":0.5}'))
+        s.expression.publish.assert_not_called()
+        s.request(dict(kind='voice_context',mode='interaction',target='interaction',ready=False,revision=3))
+        self.assertFalse(s.output_ready())
+
+    def test_bridge_speech_permission_does_not_mark_motion_ready_or_enable_standby(self):
+        stream=io.StringIO();bridge=VoiceBridge(stream)
+        bridge.context('interaction','interaction',False,speech_ready=True)
+        event=json.loads(stream.getvalue().splitlines()[-1]);self.assertFalse(event['ready']);self.assertTrue(event['speech_ready'])
+        bridge.context('standby','standby',False,speech_ready=True)
+        self.assertNotIn('speech_ready',json.loads(stream.getvalue().splitlines()[-1]))
 
     async def test_body_warmup_wait_is_bounded_and_does_not_grant_named_permission(self):
         s=self.s;self.body();s.admit_explicit_wake(self.final('你好'),self.state)

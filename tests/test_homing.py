@@ -407,6 +407,47 @@ class HomingTests(unittest.TestCase):
         self.assertTrue(all(address==46 for _,address,_ in restores))
         self.assertTrue(all(1600<=v<=2300 for _,goals,_ in writes for v in goals.values()))
 
+    def test_stable_neutral_hold_skips_empty_curve_but_verifies_two_passes(self):
+        axes,bus,clock,pos,speeds,enabled,writes,restores=self.fixture();report={}
+        goals={a['id']:a['neutral'] for a in axes}
+        pos.update({4:1808,18:2145});enabled[18]=1
+        original_snapshot=bus.snapshot
+        bus.snapshot=lambda sid:dict(original_snapshot(sid),goal_position_raw=goals[sid],speed_raw=0,moving=0)
+        original_read=bus.read
+        bus.read=lambda sid,address,count:goals[sid].to_bytes(2,'little') if address==42 else original_read(sid,address,count)
+        with patch('vivis.runtime.homing.time',clock):
+            home_all(bus,axes,{},lambda:None,report,max_speed=60)
+        self.assertTrue(report['completed']);self.assertTrue(report['trajectory_skipped'])
+        self.assertEqual(report['planned_duration_s'],0)
+        self.assertEqual(writes,[]);self.assertEqual(len(report['samples']),2*len(axes))
+        self.assertEqual(pos,{4:1808,18:2145});self.assertEqual(speeds,{4:900,18:0})
+
+    def test_neutral_shortcut_still_rejects_drift_and_wrong_goal_readback(self):
+        for fault in ('drift','goal'):
+            with self.subTest(fault=fault):
+                axes,bus,clock,pos,speeds,enabled,writes,restores=self.fixture();report={}
+                goals={a['id']:a['neutral'] for a in axes};pos.update(goals);enabled[18]=1
+                original_snapshot=bus.snapshot
+                bus.snapshot=lambda sid:dict(original_snapshot(sid),goal_position_raw=goals[sid],speed_raw=0,moving=0)
+                original_feedback=bus.feedback;original_read=bus.read
+                if fault=='drift':
+                    bus.feedback=lambda sid:dict(original_feedback(sid),position=goals[sid]+30)
+                bus.read=lambda sid,address,count:(goals[sid]+int(fault=='goal')).to_bytes(2,'little') if address==42 else original_read(sid,address,count)
+                with patch('vivis.runtime.homing.time',clock),self.assertRaisesRegex(RuntimeError,'home did not settle|neutral goal RAM'):
+                    home_all(bus,axes,{},lambda:None,report,max_speed=60)
+                self.assertFalse(report['completed']);self.assertEqual(writes,[])
+
+    def test_near_neutral_with_other_goal_or_motion_keeps_bounded_curve(self):
+        for other_goal,moving in ((True,0),(False,1)):
+            with self.subTest(other_goal=other_goal,moving=moving):
+                axes,bus,clock,pos,speeds,enabled,writes,restores=self.fixture();report={}
+                goals={a['id']:a['neutral'] for a in axes};pos.update(goals);enabled[18]=1
+                original_snapshot=bus.snapshot
+                bus.snapshot=lambda sid:dict(original_snapshot(sid),goal_position_raw=goals[sid]+int(other_goal),speed_raw=0,moving=moving)
+                with patch('vivis.runtime.homing.time',clock):
+                    home_all(bus,axes,{},lambda:None,report,max_speed=60)
+                self.assertTrue(report['completed']);self.assertFalse(report['trajectory_skipped']);self.assertTrue(writes)
+
     def test_stop_keeps_low_speed_and_restores_temporary_enable(self):
         axes,bus,clock,pos,speeds,enabled,writes,restores=self.fixture();report={}
         def guard():

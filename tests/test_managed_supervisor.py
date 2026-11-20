@@ -14,7 +14,7 @@ from vivis.interaction.dialogue import main
 
 
 class ManagedSupervisorTests(unittest.TestCase):
-    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False):
+    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False,early=False):
         actual_popen=subprocess.Popen;voice_starts=[];prompts=[]
         settings=json.loads((ROOT/'configs/interaction/p1.json').read_text())
         settings['realtime_voice']['control_backend']='qwen_realtime' if qwen else 'local'
@@ -25,10 +25,12 @@ class ManagedSupervisorTests(unittest.TestCase):
             worker=root/'worker.py'
             worker.write_text('''import sys,time
 from pathlib import Path
-folder,serial,speaker,trace,name=map(Path,sys.argv[1:]);folder.mkdir()
-assert not speaker.exists(),'Cloud still owns speaker'
+folder,serial,speaker,trace,name=map(Path,sys.argv[1:6]);folder.mkdir()
+early=sys.argv[6]=='True'
+assert (early and str(name)=='interaction') or not speaker.exists(),'Cloud still owns speaker'
 serial.open('x').close()
 with trace.open('a') as f:f.write('start '+str(name)+'\\n')
+if early and str(name)=='interaction':time.sleep(.35)
 print('STANDBY START' if str(name)=='standby' else 'INTERACTION START' if str(name)=='interaction' else 'ROUND 1/1 START',flush=True)
 start=time.monotonic()
 while not folder.with_suffix('.cancel').exists() and not(str(name)=='baigufuren' and time.monotonic()-start>.2):time.sleep(.005)
@@ -38,16 +40,17 @@ with trace.open('a') as f:f.write('end '+str(name)+'\\n')
             listener=root/'voice.py'
             listener.write_text('''import sys,time,json,threading
 from pathlib import Path
-speaker=Path(sys.argv[1]);lock=threading.Lock();epoch=0;revision=0;reply=None
+speaker=Path(sys.argv[1]);lock=threading.Lock();epoch=0;revision=0;reply=None;motion_ready=False
 def emit(**e):
  with lock:print(json.dumps(e,ensure_ascii=False),flush=True)
 def commands():
- global epoch,revision,reply
+ global epoch,revision,reply,motion_ready
  for line in sys.stdin:
   c=json.loads(line)
-  if c['kind']=='voice_context':revision=c['revision'];reply=c.get('transition_reply_id');continue
+  if c['kind']=='voice_context':revision=c['revision'];reply=c.get('transition_reply_id');motion_ready=c['ready'];continue
   if c['kind']!='voice_mode':continue
   if c['enabled']:
+   c['motion_ready']=motion_ready
    with speaker.with_suffix('.contexts').open('a') as f:f.write(json.dumps(c,ensure_ascii=False)+'\\n')
   epoch=c['epoch']
   time.sleep(.04)
@@ -78,7 +81,8 @@ for n,(deadline,text) in enumerate(turns,1):
  if sys.argv[5]=='True':
   actions={'小帅':('wake',''),'播放白骨夫人':('play','baigufuren'),'自己玩':('standby',''),'停止':('stop',''),'待机':('standby','')}
   if text in actions:
-   action,program=actions[text];emit(kind='cloud_action',revision=revision,arguments=dict(action=action,program=program),text=text,
+   action,program=actions[text];emit(kind='cloud_action',revision=revision,arguments=dict(action=action,program=program,
+    **({'explicit_wake':True} if sys.argv[8]=='True' and action=='wake' else {})),text=text,
     **({'transition_reply_id':'reply-'+str(n)} if action=='standby' and sys.argv[7]=='True' else {}))
   else:emit(kind='asr_final',utterance_id=n,text=text,captured_end_monotonic=time.monotonic())
   continue
@@ -105,11 +109,11 @@ time.sleep(10)
                 def poll(self):pass
                 def contains(self,*_):return False
             def program(program,robot,folder,*_):
-                return [sys.executable,str(worker),str(folder),str(serial),str(speaker),str(trace),program['id'] if program else 'standby']
+                return [sys.executable,str(worker),str(folder),str(serial),str(speaker),str(trace),program['id'] if program else 'standby',str(early)]
             def popen(command,**kwargs):
                 if 'vivis.speech.managed' in command:
                     voice_starts.append(command)
-                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover),str(farewell)],**kwargs)
+                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover),str(farewell),str(early)],**kwargs)
                 return actual_popen(command,**kwargs)
             with patch('vivis.interaction.dialogue.ROOT',root), \
                  patch('vivis.interaction.dialogue.dependencies',return_value=(speech,[])), \
@@ -144,11 +148,17 @@ time.sleep(10)
                 done=[s for s in records if s['kind']=='voice_reply_done']
                 self.assertEqual(len(done),2)
             self.assertNotIn('identity',prompts)  #Natural cloud answer, no duplicate cached voice.
+            if early:
+                contexts=[json.loads(s) for s in speaker.with_suffix('.contexts').read_text().splitlines()]
+                self.assertTrue(any(not c['motion_ready'] for c in contexts))
             effective=(root/'run/effective.json').read_text();self.assertNotIn('unit-test-placeholder',effective)
             if repeated:
                 contexts=[json.loads(s) for s in speaker.with_suffix('.contexts').read_text().splitlines()]
                 results=[c['last_program'] for c in contexts if 'last_program' in c]
                 self.assertEqual(results,[dict(id='wz2',title='宇飞剧本',outcome='interrupted')]*2)
+
+    def test_verified_voice_wake_enables_speaker_during_interaction_preparation(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,early=True)
 
     def test_network_outage_holds_motion_and_requires_fresh_request_after_recovery(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,recover=True)

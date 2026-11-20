@@ -8,6 +8,7 @@ class VoiceBridge:
         self.stream=stream;self.epoch=0;self.target=False;self.observed_epoch=0
         self.status='off';self.owned=False;self.failed=False;self.release_requested_at=None;self.last_program=None;self.context_revision=0;self.last_context=None
         self.transition_reply_id=None
+        self.preparation_speech=False
 
     @property
     def released(self):
@@ -25,12 +26,14 @@ class VoiceBridge:
         self.send(kind='voice_mode',enabled=value,epoch=self.epoch,
                   **({'last_program':dict(self.last_program)} if value and self.last_program else {}))
 
-    def context(self,mode,target,ready):
+    def context(self,mode,target,ready,*,speech_ready=None):
         reply=self.transition_reply_id if mode=='standby' else None
-        value=(mode,target,bool(ready),reply)
+        early=bool(speech_ready) and mode=='interaction' and not ready
+        value=(mode,target,bool(ready),reply,early)
         if value==self.last_context:return
         self.last_context=value;self.context_revision+=1
         self.send(kind='voice_context',revision=self.context_revision,mode=mode,target=target,ready=bool(ready),
+                  **({'speech_ready':True} if early else {}),
                   **({'transition_reply_id':reply} if reply else {}))
 
     def interrupt(self):self.send(kind='voice_interrupt',epoch=self.epoch)

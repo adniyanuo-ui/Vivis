@@ -137,6 +137,10 @@ class SpeechPresence:
     def greet(self):
         """Direct greeting authorizes conversation with visible people, not identity."""
         self.greeted_person=True
+        # Preserve the genuinely observed greeting across our own camera
+        # handoff, using the existing departure grace rather than a name lease.
+        now=time.monotonic()
+        if self.greeting_visible(now):self.last_greeted_person=now
 
     def clear_greeting(self):
         self.greeted_person=False;self.last_greeted_person=-float('inf')

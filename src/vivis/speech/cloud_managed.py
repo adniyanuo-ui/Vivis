@@ -27,6 +27,7 @@ from vivis.speech.message_receipts import MessageReceipts,ReceiptRejected,MESSAG
 
 
 CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负责，没有本地ASR或本地语义模型备用。'
+    'controller_state.speech_ready=true且ready=false时可先语音交流，动作尚未准备完成。准备、许可和语音链路状态只供内部控制，不向访客播报；自然回应访客原话，不声称尚未完成的动作已经执行。'
     '前台接待来人时自然主动问候，若本地稳定识别熟人，使用当前preferred_address称呼；未知访客只称您好，不猜姓名。'
     '当前状态以controller_state为准；待机按交流进退规则判断明确呼叫或当前获准的直接招呼，其他话保持安静。待机中的问候/问题必须先调用robot_program唤醒，get_robot_status不能代替唤醒。'
     '无可见人脸且没有明确唤醒许可时，不接普通话题，不主动搭话；仍接受停止和待机。'
@@ -204,7 +205,7 @@ class CloudManagedVoice(ManagedVoice):
         self.cloud_task=asyncio.create_task(self.cloud(0))
 
     def output_ready(self):
-        return (self.enabled and self.context['mode']=='interaction' and self.context['ready']
+        return (self.enabled and self.context['mode']=='interaction' and self.context.get('speech_ready',self.context['ready'])
                 and self.pending_mode is None
                 and not self.tool_repair and not self.control_pending and self.expression_pending is None
                 and self.pending_voice_switch is None and not self.awaiting_recovery_user
@@ -335,6 +336,8 @@ class CloudManagedVoice(ManagedVoice):
             revision=command.get('revision');mode=command.get('mode');target=command.get('target')
             if (type(revision) is not int or revision<=self.context['revision'] or mode not in ('standby','interaction','task')
                     or target not in {'standby','interaction',*self.program_ids} or type(command.get('ready')) is not bool):return
+            if ('speech_ready' in command and (type(command['speech_ready']) is not bool
+                    or mode!='interaction' or target!='interaction')):return
             if (mode=='task')!=(target in self.program_ids) or (mode!='task' and mode!=target):return
             previous=self.context
             reply=command.get('transition_reply_id')
@@ -350,6 +353,7 @@ class CloudManagedVoice(ManagedVoice):
                 elif previous['ready'] and not command['ready']:self.announcement_kind='quiet'
             if mode!='standby' and self.memory_task and not self.memory_task.done():self.memory_task.cancel()
             self.context={k:command[k] for k in ('revision','mode','target','ready')}
+            if 'speech_ready' in command:self.context['speech_ready']=command['speech_ready']
             if self.explicit_wake_pending:
                 if mode=='interaction' and previous['mode'] in ('standby','interaction'):
                     self.explicit_wake_pending['revision']=revision
@@ -359,7 +363,7 @@ class CloudManagedVoice(ManagedVoice):
             self.tool_repair=None;self.control_pending=False
             if mode!='interaction' or not command['ready']:
                 self.expression.clear();self.expression_pending=None;self.expression_outcome=None
-            if previous['target']!=target or not self.context['ready']:
+            if previous['target']!=target or not self.context.get('speech_ready',self.context['ready']):
                 self.continue_response=False
                 self.message_claimed=None
                 if self.message_lane:self.message_lane.reset_context()
@@ -368,7 +372,8 @@ class CloudManagedVoice(ManagedVoice):
                 self.courier_query_pending=None
                 if self.cloud_state:self.cloud_state.interrupt(source='controller_context_changed')
             if mode=='interaction' and self.context['ready'] and (previous['mode']!='interaction' or not previous['ready']):
-                self.announcement_revision=None if self.announcement_kind=='quiet' or self.explicit_wake_pending else revision
+                self.announcement_revision=None if (self.announcement_kind=='quiet' or self.explicit_wake_pending
+                    or previous.get('speech_ready',False)) else revision
             return
         if command.get('kind')=='voice_mode':
             epoch=command.get('epoch');enabled=command.get('enabled')
@@ -777,12 +782,14 @@ class CloudManagedVoice(ManagedVoice):
         self.question_onset=dict(item=item_id,generation=self.input_generation,revision=self.context['revision'],
             connection=self.message_connection,person=self.turn_person,quiet=quiet,outputs=outputs,
             visible_person=self.presence.greeting_visible(),
+            preparation_presence=self.context['mode']=='interaction' and not self.context['ready'] and self.presence.allowed(),
             eligible=self.context['mode']=='interaction' and self.context['ready'] and self.presence.visible() and self.can_speak())
 
     def greeting_wake_allowed(self,require_ready=True):
         return (self.entry['enabled'] and self.entry['visible_greeting_wake']
                 and self.context['mode'] in ('standby','interaction') and (self.context['ready'] or not require_ready)
-                and self.presence.greeting_visible())
+                and (self.presence.greeting_visible() or
+                     self.context['mode']=='interaction' and not self.context['ready'] and self.presence.allowed()))
 
     def verify_wake_source(self,greeting=True):
         """Model proposals need the same final-text/source gate as wake recovery."""
@@ -817,8 +824,8 @@ class CloudManagedVoice(ManagedVoice):
         from vivis.speech.invalid_question import distinct_from_playback
         item=event.get('item_id');text=event.get('transcript');source=self.question_onset
         named=addressed_wake(text,self.wake_words)
-        greeting=(whole_greeting(text,self.entry) and self.greeting_wake_allowed()
-                  and source is not None and source.get('visible_person') is True)
+        greeting=(whole_greeting(text,self.entry) and self.greeting_wake_allowed(require_ready=self.context['mode']!='interaction')
+                  and source is not None and (source.get('visible_person') is True or source.get('preparation_presence') is True))
         if (not (named or greeting) or item in self.explicit_wake_seen
                 or not source or item!=source['item'] or self.context['mode'] not in ('standby','interaction')
                 or source['generation']!=self.input_generation or source['revision']!=self.context['revision']
@@ -850,7 +857,9 @@ class CloudManagedVoice(ManagedVoice):
             if generation==self.input_generation:
                 state.interrupt(rid,source='explicit_wake_replace_silent_reply')
                 if rid not in self.blocked:self.blocked.append(rid)
-        if self.context['mode']=='standby' and not self.control_pending:
+        needs_audio_handoff=(self.context['mode']=='standby' or
+            (self.context['mode']=='interaction' and not self.context.get('speech_ready',self.context['ready'])))
+        if needs_audio_handoff and not self.control_pending:
             self.control_pending=True
             self.emit(dict(kind='cloud_action',revision=self.context['revision'],
                 arguments=dict(action='wake',program='',explicit_wake=named,
@@ -863,7 +872,8 @@ class CloudManagedVoice(ManagedVoice):
             and (source.get('wake_reason')=='greeting' or source['person']==(self.identified_person() or self.anonymous))
             and self.turn_item_id==source['item']
             and (not require_presence or source.get('wake_reason')!='greeting'
-                 or not self.context['ready'] or self.greeting_wake_allowed(require_ready=False)))
+                 or not self.context.get('speech_ready',self.context['ready'])
+                 or self.greeting_wake_allowed(require_ready=False)))
 
     async def complete_explicit_wake(self,ws,state,controller_events,audio_gate,instructions):
         source=self.explicit_wake_pending
@@ -872,6 +882,12 @@ class CloudManagedVoice(ManagedVoice):
             self.explicit_wake_pending=None;return False
         if not self.output_ready() or self.in_speech:return False
         if not self.explicit_wake_current(source):
+            if not self.context['ready']:
+                # The old camera may have closed before the new worker's first
+                # body result. Keep the admitted turn during bounded warmup;
+                # do not turn temporary missing evidence into either a grant
+                # or a cancelled greeting. Full-ready still uses its old gate.
+                return False
             now=time.monotonic()
             if self.presence.greeting_detection_pending():
                 if 'presence_wait_started' not in source:
@@ -894,8 +910,16 @@ class CloudManagedVoice(ManagedVoice):
         self.message_receipts.source_turns[source['item']]=self.input_generation
         restored=self.message_receipts.filter(final_event)
         self.message_receipts.released.extend(e for e in restored if e.get('type')!='conversation.item.input_audio_transcription.completed')
-        directive=('控制器已核验本话轮直接招呼的说话许可，云端已确认开启语音。原话：'+source['text']+
-            '。请回答这个原问题或理解原请求；无需再次唤醒，不重复自我介绍。不得把唤醒视为熟人身份核验。')
+        if (state.current_user_turn or {}).get('item_id')!=source['item']:
+            # Semantic VAD can reject a genuine greeting. Its validated FINAL
+            # wake must bind the reply to this item, never the previous turn.
+            state.current_user_turn=dict(item_id=source['item'],confirmed_end_monotonic=source['ended'],
+                endpoint_definition='validated_final_wake_after_semantic_rejection_not_physical_voice_end')
+        directive=('请自然回应访客这句原话：'+source['text']+
+            '。只是招呼时简短答应，例如“您好，我在呢”；有问题就直接回答。不要复述任何内部控制状态，'
+            '不要重复自我介绍，也不要要求再次唤醒。这不代表熟人身份核验。')
+        if not self.context['ready']:
+            directive+='动作尚未就绪，不要声称已执行；无需向访客解释准备过程。'
         await controller_events.append(ws,self.context,'explicit_wake',directive)
         if not self.explicit_wake_current(source) or self.in_speech:return False
         self.explicit_wake_pending=None;self.announcement_revision=None
@@ -903,6 +927,7 @@ class CloudManagedVoice(ManagedVoice):
         self.continue_response=self.message_claimed!=self.input_generation
         now=time.monotonic();admitted=source['admitted_monotonic'];ready=source.get('controller_ready_monotonic')
         self.log.write('explicit_wake_audio_ready',item_id=source['item'],original_question_preserved=True,
+            before_motion_ready=not self.context['ready'],
             final_source_restored=True,wake_to_audio_permission_s=now-admitted,
             wake_to_controller_ready_s=None if ready is None else ready-admitted,
             controller_ready_to_audio_permission_s=None if ready is None else now-ready)

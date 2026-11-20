@@ -253,7 +253,7 @@ class VoiceSession:
                         confirmed_end_to_first_dac_s=event['dac_monotonic']-turn['confirmed_end_monotonic'],
                         confirmed_end_to_first_packet_s=None if packet is None else packet-turn['confirmed_end_monotonic'],
                         first_packet_to_dac_s=None if packet is None else event['dac_monotonic']-packet,
-                        endpoint_definition='server_confirmed_speech_end_not_physical_voice_end')
+                        endpoint_definition=turn.get('endpoint_definition','server_confirmed_speech_end_not_physical_voice_end'))
             self.log.write(**event)
 
 

@@ -430,7 +430,7 @@ def main(argv=None):
                     if not voice_available:
                         phase='voice_recovering';session.desired=STANDBY;session.pending_prompt=None
                         if worker:worker.cancel()
-                        if voice:voice.transition_reply_id=None;voice.enable(False)
+                        if voice:voice.transition_reply_id=None;voice.preparation_speech=False;voice.enable(False)
                         print('语音链路恢复中；停止当前任务并保持扭矩，管理器继续运行。原因：'+event['reason'],flush=True)
                     else:
                         print('语音链路已恢复；等待新的唤醒或接待，不续播旧节目、不重放旧指令。',flush=True)
@@ -450,6 +450,7 @@ def main(argv=None):
                     continue
                 if event.get('kind')=='worker_ready' and worker and worker.cancelled_at is None and event['pid']==worker.process.pid:
                     warm_ready=True
+                    if voice:voice.preparation_speech=False
                     phase=session.mode_of(active_target);record('worker_ready',program=active_program,mode=phase)
                     print('状态：'+{STANDBY:('①接待待机（相机观察来人）' if reception_enabled else '①待机（摄像头关闭，等待唤醒）'),INTERACTION:'②交互态','task':'③任务执行'}[phase],flush=True)
                     continue
@@ -464,6 +465,9 @@ def main(argv=None):
                     try:requested=controller_intent(event.get('arguments'),session.programs,session.mode)
                     except ValueError as exc:
                         record('cloud_action_rejected',reason=str(exc));continue
+                    arguments=event.get('arguments',{})
+                    voice.preparation_speech=(requested['kind']=='wake' and
+                        (arguments.get('explicit_wake') is True or arguments.get('wake_reason')=='greeting'))
                     reply=event.get('transition_reply_id')
                     voice.transition_reply_id=(reply if requested['kind']=='standby' and isinstance(reply,str) and 1<=len(reply)<=64 else None)
                     event=dict(kind='asr_final',text=event.get('text','Qwen command'),source='qwen_tool',
@@ -633,13 +637,17 @@ def main(argv=None):
                     worker.kill_owned_group();worker.process.wait(timeout=2);worker.finish();worker=None
                     fault='Worker cancellation timed out; hold position, no automatic recovery';phase='fault';quitting=True
             if voice:
+                motion_ready=bool(worker and worker.ready and worker.cancelled_at is None and active_target==session.desired
+                    and not quitting and fault is None and voice_available)
+                early_voice=bool(voice.preparation_speech and session.desired==INTERACTION and active_target==INTERACTION
+                    and worker and worker.cancelled_at is None and not quitting and fault is None and voice_available)
                 if qwen_only:
                     session.pending_prompt=None
-                    voice.context(session.mode,session.desired,bool(worker and worker.ready and worker.cancelled_at is None and active_target==session.desired and not quitting and fault is None and voice_available))
+                    voice.context(session.mode,session.desired,motion_ready,speech_ready=motion_ready or early_voice)
                 desired_voice=(voice_available and not quitting and not fault
                     and ((session.desired==INTERACTION and active_target==INTERACTION)
                          or (session.desired==STANDBY and active_target==STANDBY and voice.transition_reply_id is not None))
-                    and worker is not None and worker.ready and worker.cancelled_at is None
+                    and worker is not None and (worker.ready or early_voice) and worker.cancelled_at is None
                     and session.pending_prompt is None and (prompt is None or prompt.clock is None)
                     and (prompt is None or not prompt.contains(time.monotonic())))
                 voice.enable(desired_voice)
