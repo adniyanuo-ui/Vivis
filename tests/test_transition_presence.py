@@ -326,7 +326,6 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
             await self.until(lambda:s.player.count>0)
             self.assertFalse(s.context['ready'])  # The fixed reply precedes successful homing.
             self.assertFalse(any(e['kind']=='voice_reply_done' for e in self.events))
-            self.assertFalse(any(e['kind']=='voice_reply_started' for e in self.events))
             count=s.player.count;self.ready_standby(reply)
             self.assertEqual(s.player.count,count)  # HOME COMPLETE cannot cut/restart the farewell.
             s.player.render(s.player.count,time.monotonic()+.02)
@@ -336,9 +335,6 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
         done=[e for e in self.events if e['kind']=='voice_reply_done']
         self.assertEqual(len(done),1);self.assertEqual(done[0]['reason'],'played')
         self.assertTrue(any(e.get('source')=='transition_farewell' for e in self.events))
-        starts=[e for e in self.events if e['kind']=='voice_reply_started']
-        self.assertEqual(len(starts),1);self.assertEqual(starts[0]['reply_id'],reply)
-        self.assertGreater(starts[0]['dac_monotonic'],0)
         s.schedule_farewell(self.state);self.assertFalse(s.can_speak())
 
     async def test_task_rest_still_requests_immediate_stop_before_farewell(self):
@@ -402,21 +398,6 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FarewellBridgeTests(unittest.TestCase):
-    def test_rest_waits_for_actual_dac_time_and_rejects_old_start_notices(self):
-        bridge=VoiceBridge(io.StringIO());bridge.transition_reply_id='rest';bridge.transition_reply_target='standby'
-        self.assertTrue(bridge.awaiting_reply_start('standby'))
-        self.assertFalse(bridge.accept(dict(kind='voice_reply_started',reply_id='old',dac_monotonic=0)))
-        self.assertFalse(bridge.accept(dict(kind='voice_reply_started',reply_id='rest',dac_monotonic=float('nan'))))
-        with patch('vivis.interaction.voice_bridge.time.monotonic',return_value=10):
-            self.assertTrue(bridge.accept(dict(kind='voice_reply_started',reply_id='rest',dac_monotonic=10.1)))
-            self.assertTrue(bridge.awaiting_reply_start('standby'))
-        with patch('vivis.interaction.voice_bridge.time.monotonic',return_value=10.2):
-            self.assertFalse(bridge.awaiting_reply_start('standby'))
-        bridge.transition_reply_id='new-rest'
-        self.assertTrue(bridge.awaiting_reply_start('standby'))
-        self.assertTrue(bridge.accept(dict(kind='voice_reply_done',reply_id='new-rest',reason='speech_failed')))
-        self.assertFalse(bridge.awaiting_reply_start('standby'))
-
     def test_task_reply_ticket_is_scoped_to_its_actual_target(self):
         stream=io.StringIO();bridge=VoiceBridge(stream)
         bridge.transition_reply_id='song-ack';bridge.transition_reply_target='baigufuren'

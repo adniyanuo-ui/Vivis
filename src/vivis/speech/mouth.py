@@ -36,6 +36,8 @@ class SpeechMouth:
 
     def add(self,rid,pcm):
         if self.error:return
+        with self.lock:
+            if self.responses.get(rid,{}).get('cached'):return
         if rid!=self.current:
             self.current=rid;self.filters.clear();self.received.clear()
             with self.lock:
@@ -54,7 +56,20 @@ class SpeechMouth:
             self.enqueue(dict(kind='audio',playback_id=rid,samples=output[start:start+4000].tolist()))
 
     def finish(self,rid):
+        with self.lock:
+            if self.responses.get(rid,{}).get('cached'):return
         if rid==self.current:self.enqueue(dict(kind='finish',playback_id=rid))
+
+    def install(self,rid,order,frames):
+        """Prime one verified static clip; keep the existing DAC clock/ownership."""
+        if list(order)!=self.order:raise ValueError('Cached mouth channel mismatch')
+        if not frames or len(frames)>self.frame_limit:raise ValueError('Invalid cached mouth frame count')
+        with self.lock:
+            if rid in self.responses:raise ValueError('Cannot replace active mouth animation')
+            if len(self.responses)>=2:self.responses.pop(next(iter(self.responses)))
+            self.responses[rid]=dict(frames=deque(frames,maxlen=self.frame_limit),done=True,cached=True,
+                created=time.monotonic())
+        self.current=rid;self.filters.clear();self.received.clear()
 
     def ready(self,rid,end_sample):
         if self.error:return True  # Voice remains usable when optional animation fails.

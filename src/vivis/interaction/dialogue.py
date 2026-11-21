@@ -335,7 +335,6 @@ def main(argv=None):
     ready=False;warm_ready=False;reported_fault=None;semantic=cloud=voice=None
     persistent_vision=None
     failure_reply_started=None
-    standby_home_pending=False
     from vivis.runtime.motion_session import MotionSession,configuration as lifecycle_configuration
     motion_policy=lifecycle_configuration(settings.get('motion_lifecycle'))
     motion_session=MotionSession.create(output/'motion_session.json',robot,motion_policy) if not args.listen_only else None
@@ -361,7 +360,7 @@ def main(argv=None):
         if voice:state['realtime_voice']=dict(status=voice.status,speaker_owned=voice.owned,epoch=voice.epoch)
         path=ROOT/'outputs/runtime/program_status.json';temp=path.with_suffix('.tmp');temp.write_text(json.dumps(state,ensure_ascii=False)+'\n');temp.replace(path)
     def start_worker(target):
-        nonlocal turn,active_target,active_program,phase,preparation,persistent_vision,standby_home_pending
+        nonlocal turn,active_target,active_program,phase,preparation,persistent_vision
         if qwen_only and reception_enabled and persistent_vision is None:
             persistent_vision=PersistentVision(robot,output)
             record('persistent_vision_started',log=str(persistent_vision.folder/'vision.log'))
@@ -376,7 +375,6 @@ def main(argv=None):
         phase='preparing';preparation=dict(state='pending')
         record('start',program=active_program,mode=session.mode_of(target),session=folder.name);print('准备：'+(program['title'] if program else '真正待机'),flush=True)
         action='startup' if not warm_ready else 'standby' if target==STANDBY else 'resume'
-        if target==STANDBY:standby_home_pending=False
         environment=motion_session.environment(action) if motion_session else {}
         if persistent_vision is not None:environment.update(persistent_vision.environment())
         return Worker(command,folder,events,environment)
@@ -419,7 +417,7 @@ def main(argv=None):
                         try:events.put_nowait(event)
                         except queue.Full:pass
                         continue
-                    if event.get('kind') not in ('asr_final','asr_control','asr_error','ready','voice_state','voice_warning','cloud_error','cloud_transcript','cloud_action','mouth_error','voice_health','voice_reply_started','voice_reply_done'):continue
+                    if event.get('kind') not in ('asr_final','asr_control','asr_error','ready','voice_state','voice_warning','cloud_error','cloud_transcript','cloud_action','mouth_error','voice_health','voice_reply_done'):continue
                     while not quitting:
                         try:events.put(event,timeout=.05);break
                         except queue.Full:
@@ -514,11 +512,11 @@ def main(argv=None):
                     voice.transition_reply_target=notice['target'] if notice else STANDBY
                     event=dict(kind='asr_final',text=event.get('text','Qwen command'),source='qwen_tool',
                         controller_intent=requested,captured_end_monotonic=time.monotonic())
-                if event.get('kind') in ('voice_state','voice_warning','cloud_error','cloud_transcript','voice_reply_started','voice_reply_done'):
+                if event.get('kind') in ('voice_state','voice_warning','cloud_error','cloud_transcript','voice_reply_done'):
                     if not voice or not voice.accept(event):
                         record('voice_stale',detail=event);continue
                     record(event['kind'],detail=event)
-                    if event['kind'] in ('voice_reply_started','voice_reply_done'):continue
+                    if event['kind']=='voice_reply_done':continue
                     if event['kind']=='voice_warning':
                         print('语音提示：'+event['message'],flush=True);continue
                     if event['kind']=='voice_state' and event['status']=='ready':
@@ -634,10 +632,6 @@ def main(argv=None):
                     print('语义辅助忙，已跳过本句；停止／退出仍随时有效。',flush=True)
                     continue
                 restart=session.request(intent)
-                if qwen_only and warm_ready and intent['kind']=='standby' and active_target!=STANDBY:
-                    # A wake during the short reply may change the desired mode,
-                    # but it must not erase the accepted standby homing request.
-                    standby_home_pending=True
                 if args.listen_only:
                     session.pending_prompt=None;phase=session.mode;continue
                 if intent['kind'] in ('wake','select','standby','interaction','prompt'):
@@ -725,11 +719,7 @@ def main(argv=None):
                 else:break
             elif not args.listen_only and ready and voice_available and worker is None and fault is None and (
                     voice is None or voice.released or qwen_only and session.desired in (STANDBY,INTERACTION)):
-                # Explicit rest starts preparing after the first audible reply,
-                # not merely after PCM was generated/queued. Failure/cancellation
-                # clears the ticket, so speech cannot prevent required homing.
-                if not (standby_home_pending and voice and voice.awaiting_reply_start(STANDBY)):
-                    worker=start_worker(STANDBY if standby_home_pending or not warm_ready else session.desired)
+                worker=start_worker(session.desired if warm_ready else STANDBY)
             if (worker and getattr(worker,'ready',False) and worker.cancelled_at is None and active_target!=session.desired
                     and not worker.standby_fault):
                 worker.cancel();phase='stopping'

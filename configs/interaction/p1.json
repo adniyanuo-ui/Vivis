@@ -24,6 +24,7 @@
     "config": "configs/perception/realtime_voice.json",
     "region": "beijing",
     "profile": "voice-preserve",
+    "fixed_replies": "assets/speech/fixed_replies",
     "board_reference_device": "DOV:",
     "lip_sync": {
       "enabled": true,

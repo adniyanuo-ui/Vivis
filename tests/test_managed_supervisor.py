@@ -14,7 +14,7 @@ from vivis.interaction.dialogue import main
 
 
 class ManagedSupervisorTests(unittest.TestCase):
-    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False,early=False,slow_initial=False,faulted=False,slow_return=False,preparations=False,fail_program=False,wake_before_notice=False,notice_failed=False):
+    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False,early=False,slow_initial=False,faulted=False,slow_return=False,preparations=False,fail_program=False):
         actual_popen=subprocess.Popen;voice_starts=[];prompts=[]
         settings=json.loads((ROOT/'configs/interaction/p1.json').read_text())
         settings['realtime_voice']['control_backend']='qwen_realtime' if qwen else 'local'
@@ -72,18 +72,13 @@ def finish_reply():
  if reply and reply not in replies and speaker.exists():
   replies.add(reply)
   reply_id,observed_ready,observed_epoch=reply,motion_ready,epoch
-  def begin():
-   with speaker.with_suffix('.timeline').open('a') as f:f.write('audible '+reply_id+'\\n')
-   emit(kind='voice_reply_started',epoch=observed_epoch,reply_id=reply_id,dac_monotonic=time.monotonic())
   def complete():
    with speaker.with_suffix('.farewells').open('a') as f:f.write(json.dumps(dict(reply=reply_id,motion_ready=observed_ready))+'\\n')
    with speaker.with_suffix('.timeline').open('a') as f:f.write('reply '+reply_id+'\\n')
    emit(kind='cloud_transcript',epoch=observed_epoch,role='assistant',text=notices.get(reply_id,'好，您忙。'))
-   emit(kind='voice_reply_done',epoch=observed_epoch,reply_id=reply_id,reason='speech_failed' if sys.argv[11]=='True' else 'played')
-  if sys.argv[9]=='True':
-   if sys.argv[11]!='True':threading.Timer(.35 if sys.argv[10]=='True' else .06,begin).start()
-   threading.Timer(.45 if sys.argv[10]=='True' else .12,complete).start()
-  else:begin();complete()
+   emit(kind='voice_reply_done',epoch=observed_epoch,reply_id=reply_id,reason='played')
+  if sys.argv[9]=='True':threading.Timer(.12,complete).start()
+  else:complete()
 def commands():
  global epoch,revision,reply,motion_ready
  for line in sys.stdin:
@@ -118,7 +113,6 @@ turns=[(.2,'小帅'),(.8,'你是谁'),(1.2,'播放白骨夫人'),(2.,'自己玩'
 if sys.argv[3]=='True':turns=[(.2,'小帅'),(.8,'呃播放剧本'),(1.2,'停止'),(1.8,'模仿我的表情'),(2.2,'待机'),(2.7,'小帅'),(3.2,'播放白骨夫人'),(4.1,'待机')]
 if sys.argv[4]=='True':turns=[(.2,'小帅'),(.8,'播放宇飞剧本'),(1.4,'停止'),(2.1,'再演一遍'),(2.8,'退出'),(3.4,'待机')]
 if sys.argv[6]=='True':turns=[(.2,'小帅'),(.8,'断网'),(1.1,'播放白骨夫人'),(1.4,'恢复'),(2.,'小帅'),(2.6,'待机')]
-if sys.argv[10]=='True':turns=[(.2,'小帅'),(.8,'待机'),(1.,'小帅')]
 for n,(deadline,text) in enumerate(turns,1):
  time.sleep(max(0,start+deadline-time.monotonic()))
  if text in ('断网','恢复'):
@@ -159,7 +153,7 @@ time.sleep(10)
             def popen(command,**kwargs):
                 if 'vivis.speech.managed' in command:
                     voice_starts.append(command)
-                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover),str(farewell),str(early),str(preparations),str(wake_before_notice),str(notice_failed)],**kwargs)
+                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover),str(farewell),str(early),str(preparations)],**kwargs)
                 return actual_popen(command,**kwargs)
             with patch('vivis.interaction.dialogue.ROOT',root), \
                  patch('vivis.interaction.dialogue.dependencies',return_value=(speech,[])), \
@@ -185,7 +179,6 @@ time.sleep(10)
             if recover:expected=['standby','interaction','standby','interaction','standby']
             if faulted:expected=['standby','interaction','baigufuren','interaction','standby']
             if fail_program:expected=['standby','interaction','baigufuren']
-            if wake_before_notice:expected=['standby','interaction','standby','interaction']
             self.assertEqual([s[6:] for s in lines if s.startswith('start ')],expected)
             if recover:
                 self.assertIn('管理器继续运行',console.getvalue())
@@ -216,7 +209,7 @@ time.sleep(10)
             if early:
                 contexts=[json.loads(s) for s in speaker.with_suffix('.contexts').read_text().splitlines()]
                 self.assertTrue(any(not c['motion_ready'] for c in contexts))
-            if preparations and not fail_program and not wake_before_notice:
+            if preparations and not fail_program:
                 timeline=speaker.with_suffix('.timeline').read_text().splitlines()
                 acknowledgement='reply reply-7' if extended else 'reply reply-3'
                 self.assertLess(timeline.index(acknowledgement),timeline.index('worker baigufuren'))
@@ -224,10 +217,6 @@ time.sleep(10)
                     self.assertLess(timeline.index('reply reply-2'),timeline.index('worker wz2'))
                     self.assertLess(timeline.index('end wz2'),timeline.index('reply reply-3'))
                     self.assertLess(timeline.index('reply reply-4'),timeline.index('worker expression-follow'))
-                rest_reply='reply-5' if extended else 'reply-4'
-                rest_start=timeline.index(('reply ' if notice_failed else 'audible ')+rest_reply)
-                home_start=timeline.index('worker standby',timeline.index('end interaction')+1)
-                self.assertLess(rest_start,home_start)
             if fail_program:
                 self.assertIn('通信读取超时',speaker.with_suffix('.failures').read_text())
                 self.assertIn('SERIAL_TIMEOUT',console.getvalue())
@@ -270,12 +259,6 @@ time.sleep(10)
 
     def test_failed_program_reports_voice_reason_then_exits_without_replay(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,preparations=True,fail_program=True)
-
-    def test_wake_before_farewell_audio_still_completes_required_standby_home(self):
-        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,preparations=True,wake_before_notice=True)
-
-    def test_failed_farewell_does_not_block_required_standby_home(self):
-        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,preparations=True,notice_failed=True)
 
     def test_qwen_tools_alone_execute_modes_and_cached_prompts_are_disabled(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True)

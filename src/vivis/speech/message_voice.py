@@ -31,9 +31,9 @@ class BoundedTTS:
 
 
 class MessageSpeaker:
-    def __init__(self,engine,player,state,valid,emit,log,tts=None,on_started=None):
+    def __init__(self,engine,player,state,valid,emit,log,tts=None):
         self.engine=engine;self.player=player;self.state=state;self.valid=valid;self.emit=emit;self.log=log;self.tts=tts or BoundedTTS(engine)
-        self.started=False;self.on_started=on_started
+        self.started=False
 
     async def say(self,text,request):
         self.started=False
@@ -46,7 +46,10 @@ class MessageSpeaker:
                 if not self.valid(request):raise StaleMessageTurn()
                 audio=await self.tts.generate(text[start:start+400])
                 if not self.valid(request):raise StaleMessageTurn()
-                pcm=await asyncio.to_thread(pcm24,audio)
+                if getattr(audio,'mouth_frames',None) is not None and self.player.mouth:
+                    self.player.mouth.install(rid,audio.mouth_order,audio.mouth_frames)
+                pcm=getattr(audio,'pcm24_bytes',None)
+                if pcm is None:pcm=await asyncio.to_thread(pcm24,audio)
                 progress=ProgressDeadline(policy()['playback_stall_s'],time.monotonic())
                 for offset in range(0,len(pcm),4800):
                     part=pcm[offset:offset+4800]
@@ -67,7 +70,6 @@ class MessageSpeaker:
                 self.state.poll_playback()
                 if not self.valid(request) or rid in self.state.blocked:raise StaleMessageTurn()
                 if not announced and rid in self.player.started_responses:
-                    if self.on_started:self.on_started(response.get('first_dac_monotonic',time.monotonic()))
                     self.emit(text);announced=True
                 if expected and self.player.consumed.get(rid,0)>=expected and response.get('empty_dac',float('inf'))<=time.monotonic():
                     complete=True;return True

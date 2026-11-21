@@ -79,17 +79,18 @@ def controller_intent(arguments,program_ids,mode):
 
 def preparation_reply(intent,programs):
     """Owned acceptance text, distinct from successful physical execution."""
+    from vivis.speech.fixed_replies import REPLIES
     if intent['kind']=='wake':
         followup=intent.get('followup')
         return preparation_reply(followup,programs) if followup else None  # Preserve natural wake replies.
     if intent['kind']=='select':
         program=programs[intent['program']]
         category=program.get('category')
-        label=('表情跟随' if program['kind']=='expression_follow' else
-               '剧本' if category=='script' else '歌曲' if category=='song' else '节目')
-        return dict(target=program['id'],text='好的，'+label+'准备中。',source='program_preparation')
-    if intent['kind']=='interaction':return dict(target='interaction',text='好的，先停下。',source='stop_acknowledgement')
-    if intent['kind']=='standby':return dict(target='standby',text='好，您忙，我这就休息。需要时再叫我。',source='transition_farewell')
+        key=('expression' if program['kind']=='expression_follow' else
+             'script' if category=='script' else 'song' if category=='song' else 'program')
+        return dict(target=program['id'],text=REPLIES[key+'_preparation'],source='program_preparation')
+    if intent['kind']=='interaction':return dict(target='interaction',text=REPLIES['stop'],source='stop_acknowledgement')
+    if intent['kind']=='standby':return dict(target='standby',text=REPLIES['standby'],source='transition_farewell')
     return None
 
 

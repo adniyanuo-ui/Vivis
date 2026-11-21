@@ -1,6 +1,5 @@
 """Supervisor-side speaker handoff; stale epochs cannot regain control."""
 import json
-import math
 import time
 
 
@@ -10,7 +9,6 @@ class VoiceBridge:
         self.status='off';self.owned=False;self.failed=False;self.release_requested_at=None;self.last_program=None;self.context_revision=0;self.last_context=None
         self.transition_reply_id=None
         self.transition_reply_target='standby'
-        self.started_reply=None
         self.preparation_speech=False
 
     @property
@@ -42,17 +40,7 @@ class VoiceBridge:
 
     def interrupt(self):self.send(kind='voice_interrupt',epoch=self.epoch)
 
-    def awaiting_reply_start(self,target):
-        if self.transition_reply_id is None or self.transition_reply_target!=target:return False
-        return (self.started_reply is None or self.started_reply[0]!=self.transition_reply_id
-                or time.monotonic()<self.started_reply[1])
-
     def accept(self,event):
-        if event.get('kind')=='voice_reply_started':
-            if event.get('reply_id')!=self.transition_reply_id or self.transition_reply_id is None:return False
-            dac=event.get('dac_monotonic')
-            if type(dac) not in (int,float) or not math.isfinite(dac) or dac<0:return False
-            self.started_reply=(self.transition_reply_id,dac);return True
         if event.get('kind')=='voice_reply_done':
             if event.get('reply_id')!=self.transition_reply_id or self.transition_reply_id is None:return False
             self.transition_reply_id=None;return True

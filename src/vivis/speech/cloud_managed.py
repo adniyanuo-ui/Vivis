@@ -136,6 +136,9 @@ class CloudManagedVoice(ManagedVoice):
         self.entry=entry_configuration()
         self.explicit_wake_pending=None;self.explicit_wake_seen=deque(maxlen=128)
         self.farewell=None;self.farewell_task=None;self.controller_reply_id=None
+        from vivis.speech.fixed_replies import FixedReplyCache
+        directory=self.speech['managed_voice'].get('fixed_replies')
+        self.fixed_replies=FixedReplyCache(ROOT/directory) if directory else None
         self.cloud_audio_enabled=False
         self.identity_reset_pending=False;self.finish_responses=set();self.speech_responses=deque(maxlen=128)
         self.input_generation=0;self.response_inputs={};self.message_receipts=MessageReceipts()
@@ -251,23 +254,32 @@ class CloudManagedVoice(ManagedVoice):
         async def speak():
             from vivis.speech.trusted_reading import RealtimeReader
             from vivis.speech.message_voice import MessageSpeaker
-            text=('机器头待机出现故障，暂时不能运动，请检查设备。系统会定期复查。' if ticket.get('fault') else
-                  ticket.get('text','好，您忙，我这就休息。需要时再叫我。'))
+            from vivis.speech.fixed_replies import REPLIES
+            text=REPLIES['standby_fault'] if ticket.get('fault') else ticket.get('text',REPLIES['standby'])
             reason='not_played'
             try:
                 # Reuse the verified Qwen reader and the SAME output/AEC/A2F
                 # path. No DB operation, personal identity or local TTS model.
-                engine=RealtimeReader(self.url,self.secret,dict(self.session,voice=self.active_voice),self.log)
-                audio=await asyncio.wait_for(engine.generate(text),policy()['playback_stall_s'])
+                engine=None;audio=None
+                if self.fixed_replies is not None:
+                    try:
+                        audio=self.fixed_replies.get(text,dict(self.session,model=self.config['model'],voice=self.active_voice),
+                            self.mouth.order if self.mouth else None)
+                    except Exception:
+                        self.log.write('fixed_reply_cache_rejected',reason='asset_validation_failed')
+                self.log.write('fixed_reply_audio',cached=audio is not None,characters=len(text),voice=self.active_voice)
+                if audio is None:
+                    # Missing or differently voiced assets keep the existing
+                    # bounded reader; never substitute another cached voice.
+                    engine=RealtimeReader(self.url,self.secret,dict(self.session,voice=self.active_voice),self.log)
+                    audio=await asyncio.wait_for(engine.generate(text),policy()['playback_stall_s'])
                 while live() and not current():await asyncio.sleep(.02)
                 if not current():raise StaleMessageTurn()
                 class PreparedAudio:
                     async def generate(self,_):return audio
                 speaker=MessageSpeaker(engine,self.player,state,lambda _:current(),
                     lambda words:self.emit(dict(kind='cloud_transcript',epoch=self.epoch,role='assistant',
-                        text=words,source='standby_fault' if ticket.get('fault') else ticket.get('source','transition_farewell'))),
-                    self.log.write,tts=PreparedAudio(),on_started=lambda dac:self.emit(dict(kind='voice_reply_started',
-                        epoch=self.epoch,reply_id=ticket['id'],dac_monotonic=dac)))
+                        text=words,source='standby_fault' if ticket.get('fault') else ticket.get('source','transition_farewell'))),self.log.write,tts=PreparedAudio())
                 complete=await speaker.say(text,ticket)
                 reason='played' if complete else 'interrupted'
             except asyncio.CancelledError:reason='cancelled'

@@ -147,6 +147,7 @@ class CloudBackendTests(unittest.IsolatedAsyncioTestCase):
     def service(self,tmp,events):
         speech=config('configs/perception/speech.json');speech['managed_voice']=config('configs/interaction/p1.json')['realtime_voice']
         speech['managed_voice']['lip_sync']['enabled']=False;speech['programs']=str(ROOT/'configs/interaction/programs.json')
+        speech['managed_voice'].pop('fixed_replies',None)  # Unit tests explicitly exercise uncached live-reader paths.
         with patch.dict('os.environ',{'DASHSCOPE_API_KEY':'unit-test-placeholder'}):
             with patch('vivis.interaction.memory.PersonMemory'):
                 service=CloudManagedVoice(speech,ROOT/'configs/robots/xiaoshuai/robot.json',Path(tmp),events.append)
