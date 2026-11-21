@@ -8,6 +8,7 @@ class VoiceBridge:
         self.stream=stream;self.epoch=0;self.target=False;self.observed_epoch=0
         self.status='off';self.owned=False;self.failed=False;self.release_requested_at=None;self.last_program=None;self.context_revision=0;self.last_context=None
         self.transition_reply_id=None
+        self.transition_reply_target='standby'
         self.preparation_speech=False
 
     @property
@@ -27,9 +28,8 @@ class VoiceBridge:
                   **({'last_program':dict(self.last_program)} if value and self.last_program else {}))
 
     def context(self,mode,target,ready,*,speech_ready=None,standby_fault=False):
-        reply=self.transition_reply_id if mode=='standby' else None
-        early=bool(speech_ready) and not ready and (mode=='interaction' or
-            mode=='standby' and reply is not None and not standby_fault)
+        reply=self.transition_reply_id if target==self.transition_reply_target else None
+        early=bool(speech_ready) and not ready and (mode=='interaction' or reply is not None and not standby_fault)
         value=(mode,target,bool(ready),reply,early,bool(standby_fault))
         if value==self.last_context:return
         self.last_context=value;self.context_revision+=1

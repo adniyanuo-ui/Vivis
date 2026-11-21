@@ -334,6 +334,7 @@ def main(argv=None):
     quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;preparation={};log=(output/'events.jsonl').open('w')
     ready=False;warm_ready=False;reported_fault=None;semantic=cloud=voice=None
     persistent_vision=None
+    failure_reply_started=None
     from vivis.runtime.motion_session import MotionSession,configuration as lifecycle_configuration
     motion_policy=lifecycle_configuration(settings.get('motion_lifecycle'))
     motion_session=MotionSession.create(output/'motion_session.json',robot,motion_policy) if not args.listen_only else None
@@ -485,6 +486,7 @@ def main(argv=None):
                     if voice:
                         voice.preparation_speech=False
                         voice.transition_reply_id=uuid.uuid4().hex
+                        voice.transition_reply_target=STANDBY
                         voice.send(kind='voice_fault_notice',reply_id=voice.transition_reply_id)
                     elif prompt:prompt.play('fault')
                     continue
@@ -497,7 +499,7 @@ def main(argv=None):
                         record('cloud_action_stale',detail=event);continue
                     if worker and worker.standby_fault:
                         record('cloud_action_blocked_motion_fault',error=worker.standby_fault);continue
-                    from vivis.interaction.cloud_control import controller_intent
+                    from vivis.interaction.cloud_control import controller_intent,preparation_reply
                     try:requested=controller_intent(event.get('arguments'),session.programs,session.mode)
                     except ValueError as exc:
                         record('cloud_action_rejected',reason=str(exc));continue
@@ -505,7 +507,9 @@ def main(argv=None):
                     voice.preparation_speech=(requested['kind']=='wake' and
                         (arguments.get('explicit_wake') is True or arguments.get('wake_reason')=='greeting'))
                     reply=event.get('transition_reply_id')
-                    voice.transition_reply_id=(reply if requested['kind']=='standby' and isinstance(reply,str) and 1<=len(reply)<=64 else None)
+                    notice=preparation_reply(requested,{p['id']:p for p in catalog['programs']})
+                    voice.transition_reply_id=(reply if notice and isinstance(reply,str) and 1<=len(reply)<=64 else None)
+                    voice.transition_reply_target=notice['target'] if notice else STANDBY
                     event=dict(kind='asr_final',text=event.get('text','Qwen command'),source='qwen_tool',
                         controller_intent=requested,captured_end_monotonic=time.monotonic())
                 if event.get('kind') in ('voice_state','voice_warning','cloud_error','cloud_transcript','voice_reply_done'):
@@ -516,8 +520,8 @@ def main(argv=None):
                     if event['kind']=='voice_warning':
                         print('语音提示：'+event['message'],flush=True);continue
                     if event['kind']=='voice_state' and event['status']=='ready':
-                        if qwen_only and session.mode==STANDBY and voice.transition_reply_id:
-                            print('待机告别语音已就绪；简短回应后保持安静。',flush=True)
+                        if qwen_only and voice.transition_reply_id:
+                            print('切换提示语音已就绪；执行状态以准备及任务结果为准。',flush=True)
                         else:
                             print('实时语音已就绪：'+('唤醒、聊天和节目控制均由Qwen理解；画面无人且未获唤醒许可时保持安静。' if qwen_only else '可直接聊天、插话；停止／待机／节目切换仍由本地识别执行。'),flush=True)
                     elif event['kind']=='cloud_error':
@@ -632,7 +636,8 @@ def main(argv=None):
                     session.pending_prompt=None;phase=session.mode;continue
                 if intent['kind'] in ('wake','select','standby','interaction','prompt'):
                     if voice and session.desired!=INTERACTION and not (
-                            session.desired==STANDBY and voice.transition_reply_id is not None and active_target==INTERACTION):
+                            voice.transition_reply_id is not None and voice.transition_reply_target==session.desired
+                            and active_target in (None,STANDBY,INTERACTION)):
                         voice.enable(False)
                     if prompt:prompt.stop()
                     if worker and (session.desired!=active_target or restart) and not (active_target==STANDBY and not worker.ready):
@@ -671,27 +676,36 @@ def main(argv=None):
                                 # play() first cancels the unfinished welcome/menu.
                                 prompt.play('fault');prompt.finish(lambda:quitting)
                             except Exception as exc:record('fault_prompt_error',error=str(exc))
-                        quitting=True
+                        if voice and voice_available and not quitting:
+                            voice.transition_reply_id=uuid.uuid4().hex;voice.transition_reply_target=session.desired
+                            voice.send(kind='voice_execution_notice',reply_id=voice.transition_reply_id,target=session.desired,
+                                text='任务失败，'+failure['message']+'。请查看日志。')
+                            failure_reply_started=now
+                        quitting=failure_reply_started is None
                 elif worker.cancelled_at is not None and now-worker.cancelled_at>settings['cancel_timeout_s']:
                     worker.kill_owned_group();worker.process.wait(timeout=2);worker.finish();worker=None
                     fault='Worker cancellation timed out; hold position, no automatic recovery';phase='fault';quitting=True
             if voice:
+                if failure_reply_started is not None and (voice.transition_reply_id is None or not voice_available
+                        or now-failure_reply_started>=settings['cancel_timeout_s']):quitting=True
+                failure_notice=bool(failure_reply_started is not None and voice.transition_reply_id is not None
+                    and not quitting and voice_available)
                 motion_ready=bool(worker and worker.ready and worker.cancelled_at is None and active_target==session.desired
                     and not quitting and fault is None and voice_available)
                 early_voice=bool(warm_ready and voice.preparation_speech and session.desired==INTERACTION
                     and (worker is None or active_target in (STANDBY,INTERACTION))
                     and not quitting and fault is None and voice_available)
                 standby_fault=bool(worker and worker.standby_fault)
-                early_farewell=bool(warm_ready and voice.transition_reply_id is not None and session.desired==STANDBY
+                early_notice=bool(warm_ready and voice.transition_reply_id is not None and session.desired==voice.transition_reply_target
                     and active_target in (None,STANDBY,INTERACTION) and not standby_fault
                     and not quitting and fault is None and voice_available)
-                early_output=early_voice or early_farewell
+                early_output=early_voice or early_notice or failure_notice
                 if qwen_only:
                     session.pending_prompt=None
                     voice.context(session.mode,session.desired,motion_ready,speech_ready=motion_ready or early_output,standby_fault=standby_fault)
-                desired_voice=(voice_available and not quitting and not fault
+                desired_voice=(voice_available and not quitting and (not fault or failure_notice)
                     and ((session.desired==INTERACTION and (active_target==INTERACTION or early_voice))
-                         or (session.desired==STANDBY and voice.transition_reply_id is not None and (active_target==STANDBY or early_farewell)))
+                         or voice.transition_reply_id is not None and (early_notice or failure_notice or active_target==STANDBY))
                     and (early_output or worker is not None and (worker.ready or standby_fault) and worker.cancelled_at is None)
                     and session.pending_prompt is None and (prompt is None or prompt.clock is None)
                     and (prompt is None or not prompt.contains(time.monotonic())))

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from vivis.paths import ROOT
 from vivis.speech.runtime_policy import policy,VoiceTransportError,bounded_send
-from vivis.interaction.cloud_control import SpeechPresence,controller_intent,normalize_program,ReceptionGate
+from vivis.interaction.cloud_control import SpeechPresence,controller_intent,normalize_program,ReceptionGate,preparation_reply
 from vivis.interaction.expression_intent import IntentWriter,configuration as expression_configuration
 from vivis.interaction.speech_dialect import SpeechDialect
 from vivis.speech.managed import ManagedVoice,session_with_program_context
@@ -108,6 +108,7 @@ class CloudManagedVoice(ManagedVoice):
         self.identity_stability=IdentityStability(self.presence.c['identity_uncertain_reset_s'])
         from pathlib import Path
         catalog=json.loads(Path(self.speech['programs']).read_text())
+        self.programs={p['id']:p for p in catalog['programs']}
         self.program_ids={p['id'] for p in catalog['programs']}
         reception=json.loads((ROOT/self.speech['managed_voice']['reception_config']).read_text())
         self.reception=ReceptionGate(reception)
@@ -210,6 +211,7 @@ class CloudManagedVoice(ManagedVoice):
 
     def output_ready(self):
         return (self.enabled and self.context['mode']=='interaction' and self.context.get('speech_ready',self.context['ready'])
+                and self.farewell is None
                 and self.pending_mode is None
                 and not self.tool_repair and not self.control_pending and self.expression_pending is None
                 and self.pending_voice_switch is None and not self.awaiting_recovery_user
@@ -232,7 +234,7 @@ class CloudManagedVoice(ManagedVoice):
         self.finish_farewell(ticket,reason)
 
     def schedule_farewell(self,state):
-        """One controller-authorized farewell; standby chat remains muted."""
+        """One bounded transition/incident reply; never ordinary task/idle chat."""
         ticket=self.farewell
         if ticket is None:return
         if ticket['connection'] is not self.message_connection or ticket['generation']!=self.input_generation:
@@ -242,7 +244,7 @@ class CloudManagedVoice(ManagedVoice):
             return (self.farewell is ticket and ticket['connection'] is self.message_connection
                     and ticket['generation']==self.input_generation and self.cloud_state is state)
         def current():
-            return (live() and self.context['mode']=='standby'
+            return (live() and self.context['target']==ticket.get('target','standby')
                 and (self.context.get('standby_fault') if ticket.get('fault') else self.context.get('speech_ready',self.context['ready']))
                 and self.controller_reply_id==ticket['id']
                 and self.enabled and self.pending_mode is None)
@@ -250,20 +252,20 @@ class CloudManagedVoice(ManagedVoice):
             from vivis.speech.trusted_reading import RealtimeReader
             from vivis.speech.message_voice import MessageSpeaker
             text=('机器头待机出现故障，暂时不能运动，请检查设备。系统会定期复查。' if ticket.get('fault') else
-                  '好，您忙，我这就休息。需要时再叫我。')
+                  ticket.get('text','好，您忙，我这就休息。需要时再叫我。'))
             reason='not_played'
             try:
                 # Reuse the verified Qwen reader and the SAME output/AEC/A2F
                 # path. No DB operation, personal identity or local TTS model.
                 engine=RealtimeReader(self.url,self.secret,dict(self.session,voice=self.active_voice),self.log)
-                audio=await engine.generate(text)  # Speech ownership is independent of neutral homing.
+                audio=await asyncio.wait_for(engine.generate(text),policy()['playback_stall_s'])
                 while live() and not current():await asyncio.sleep(.02)
                 if not current():raise StaleMessageTurn()
                 class PreparedAudio:
                     async def generate(self,_):return audio
                 speaker=MessageSpeaker(engine,self.player,state,lambda _:current(),
                     lambda words:self.emit(dict(kind='cloud_transcript',epoch=self.epoch,role='assistant',
-                        text=words,source='standby_fault' if ticket.get('fault') else 'transition_farewell')),self.log.write,tts=PreparedAudio())
+                        text=words,source='standby_fault' if ticket.get('fault') else ticket.get('source','transition_farewell'))),self.log.write,tts=PreparedAudio())
                 complete=await speaker.say(text,ticket)
                 reason='played' if complete else 'interrupted'
             except asyncio.CancelledError:reason='cancelled'
@@ -272,7 +274,7 @@ class CloudManagedVoice(ManagedVoice):
                 reason='speech_failed';self.log.write('transition_reply_failed',error_type=type(exc).__name__)
                 self.emit(dict(kind='voice_warning',epoch=self.epoch,message=(
                     '待机故障语音未完整播出；故障记录保留，下轮继续检查。' if ticket.get('fault') else
-                    '告别语音未完整播出；待机结果请查看控制状态，语音监听继续。')))
+                    '准备提示未完整播出；执行结果请查看控制状态，语音监听继续。')))
             finally:self.finish_farewell(ticket,reason)
         self.farewell_task=asyncio.create_task(speak())
 
@@ -340,6 +342,14 @@ class CloudManagedVoice(ManagedVoice):
                 and not self.presence.allowed(now))
 
     def request(self,command):
+        if command.get('kind')=='voice_execution_notice':
+            reply=command.get('reply_id');text=command.get('text');target=command.get('target')
+            if (not isinstance(reply,str) or not 1<=len(reply)<=64 or not isinstance(text,str) or not 1<=len(text)<=200
+                    or target not in {'standby','interaction',*self.program_ids}):return
+            self.cancel_farewell('execution_notice_replaced')
+            self.farewell=dict(id=reply,generation=self.input_generation,connection=self.message_connection,
+                target=target,text=text,source='execution_failure')
+            return
         if command.get('kind')=='voice_fault_notice':
             reply=command.get('reply_id')
             if not isinstance(reply,str) or not 1<=len(reply)<=64:return
@@ -351,20 +361,21 @@ class CloudManagedVoice(ManagedVoice):
             if (type(revision) is not int or revision<=self.context['revision'] or mode not in ('standby','interaction','task')
                     or target not in {'standby','interaction',*self.program_ids} or type(command.get('ready')) is not bool):return
             if ('speech_ready' in command and (type(command['speech_ready']) is not bool or not (
-                    mode=='interaction' and target=='interaction' or mode=='standby' and target=='standby'
-                    and isinstance(reply,str) and 1<=len(reply)<=64 and not command.get('standby_fault')))):return
+                    mode=='interaction' and target=='interaction' or
+                    isinstance(reply,str) and 1<=len(reply)<=64 and not command.get('standby_fault')))):return
             if 'standby_fault' in command and (type(command['standby_fault']) is not bool or mode!='standby'):return
             if (mode=='task')!=(target in self.program_ids) or (mode!='task' and mode!=target):return
             previous=self.context
-            self.controller_reply_id=reply if isinstance(reply,str) and 1<=len(reply)<=64 and mode=='standby' else None
-            if self.farewell and (mode!='standby' or self.controller_reply_id!=self.farewell['id']
+            self.controller_reply_id=reply if isinstance(reply,str) and 1<=len(reply)<=64 else None
+            if self.farewell and (target!=self.farewell.get('target','standby') or self.controller_reply_id!=self.farewell['id']
                     or self.farewell.get('fault') and not command.get('standby_fault')):
                 self.cancel_farewell('controller_changed')
             if mode=='standby':self.presence.clear_greeting()
             if mode=='standby' and previous['mode']!='standby' and self.presence.greeting_visible():
                 self.reception.dismiss_current_visit()
             if mode=='interaction':
-                if previous['mode']=='standby':self.announcement_kind='welcome'
+                if reply is not None:self.announcement_kind='quiet'
+                elif previous['mode']=='standby':self.announcement_kind='welcome'
                 elif previous['mode']=='task':self.announcement_kind='return'
                 elif previous['ready'] and not command['ready']:self.announcement_kind='quiet'
             if mode!='standby' and self.memory_task and not self.memory_task.done():self.memory_task.cancel()
@@ -1341,9 +1352,10 @@ class CloudManagedVoice(ManagedVoice):
                 else:
                     if not already_requested:
                         reply=None
-                        if args['action']=='standby' and self.question_onset and self.question_onset['generation']==self.input_generation:
+                        notice=preparation_reply(intent,self.programs)
+                        if notice and self.question_onset and self.question_onset['generation']==self.input_generation:
                             self.cancel_farewell('replaced')
-                            self.farewell=dict(id=uuid.uuid4().hex,generation=self.input_generation,connection=self.message_connection)
+                            self.farewell=dict(id=uuid.uuid4().hex,generation=self.input_generation,connection=self.message_connection,**notice)
                             reply=self.farewell['id']
                         self.emit(dict(kind='cloud_action',revision=revision,arguments=args,text='Qwen: '+args['action'],
                             **({'transition_reply_id':reply} if reply else {})))

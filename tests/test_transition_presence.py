@@ -341,6 +341,43 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
         await self.farewell('task')
         self.assertIsNone(self.s.farewell_task)
 
+    async def test_song_expression_and_stop_get_owned_preparation_speech(self):
+        from vivis.interaction.cloud_control import preparation_reply
+        for action,program,word in [('play','baigufuren','歌曲'),('play','wz2','剧本'),
+                                    ('play','expression-follow','表情跟随'),('stop','','停下')]:
+            with self.subTest(action=action,program=program):
+                s=self.s;s.context.update(mode='task' if action=='stop' else 'interaction',
+                    target='baigufuren' if action=='stop' else 'interaction',ready=True)
+                self.body();s.presence.greet();self.final('请开始表演');s.response_revisions['prepare']=s.context['revision']
+                await s.tool(SimpleNamespace(send=AsyncMock()),dict(name='robot_program',call_id=action+program,
+                    response_id='prepare',arguments=json.dumps(dict(action=action,program=program))))
+                ticket=s.farewell;self.assertIsNotNone(ticket);self.assertIn(word,ticket['text'])
+                event=self.events[-1];self.assertEqual(event['transition_reply_id'],ticket['id'])
+                mode='task' if program else 'interaction';target=program or 'interaction'
+                s.request(dict(kind='voice_context',revision=s.context['revision']+1,mode=mode,target=target,
+                    ready=False,speech_ready=True,transition_reply_id=ticket['id']));s.enabled=True
+                engine=SimpleNamespace(generate=AsyncMock(return_value=SimpleNamespace(samples=np.ones(1200)*.01,sample_rate=24000)))
+                with patch('vivis.speech.trusted_reading.RealtimeReader',return_value=engine):
+                    s.schedule_farewell(self.state);await self.until(lambda:s.player.count>0)
+                    self.assertFalse(s.can_speak());self.assertFalse(s.context['ready'])
+                    s.player.render(s.player.count,time.monotonic()+.02)
+                    await asyncio.wait_for(s.farewell_task,1)
+                self.assertEqual(self.events[-1]['reason'],'played')
+                self.assertIsNone(s.farewell)
+
+    async def test_failed_execution_can_explain_reason_without_enabling_chat(self):
+        s=self.s;s.context.update(mode='interaction',target='interaction',ready=True)
+        s.request(dict(kind='voice_execution_notice',reply_id='failure',target='baigufuren',text='节目未能完成，舵机通信读取超时。'))
+        s.request(dict(kind='voice_context',revision=2,mode='task',target='baigufuren',ready=False,
+            speech_ready=True,transition_reply_id='failure'));s.enabled=True
+        engine=SimpleNamespace(generate=AsyncMock(return_value=SimpleNamespace(samples=np.ones(1200)*.01,sample_rate=24000)))
+        with patch('vivis.speech.trusted_reading.RealtimeReader',return_value=engine):
+            s.schedule_farewell(self.state);await self.until(lambda:s.player.count>0)
+            self.assertFalse(s.can_speak());self.assertFalse(s.context['ready'])
+            s.player.render(s.player.count,time.monotonic()+.02);await asyncio.wait_for(s.farewell_task,1)
+            self.assertIn('通信读取超时',engine.generate.call_args.args[0])
+            self.assertTrue(any(e.get('source')=='execution_failure' for e in self.events))
+
     async def test_new_user_input_cancels_queued_farewell_and_releases_ticket(self):
         reply=await self.farewell();self.ready_standby(reply);self.s.enabled=True
         self.s.input_generation+=1;self.s.schedule_farewell(self.state)
@@ -361,6 +398,15 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FarewellBridgeTests(unittest.TestCase):
+    def test_task_reply_ticket_is_scoped_to_its_actual_target(self):
+        stream=io.StringIO();bridge=VoiceBridge(stream)
+        bridge.transition_reply_id='song-ack';bridge.transition_reply_target='baigufuren'
+        bridge.context('task','baigufuren',False,speech_ready=True)
+        message=json.loads(stream.getvalue().splitlines()[-1])
+        self.assertEqual(message['transition_reply_id'],'song-ack');self.assertTrue(message['speech_ready'])
+        bridge.context('task','wz2',False,speech_ready=True)
+        self.assertNotIn('transition_reply_id',json.loads(stream.getvalue().splitlines()[-1]))
+        self.assertNotIn('speech_ready',json.loads(stream.getvalue().splitlines()[-1]))
     def test_preparation_speech_for_standby_requires_an_explicit_reply_ticket(self):
         stream=io.StringIO();bridge=VoiceBridge(stream)
         bridge.context('standby','standby',False,speech_ready=True)

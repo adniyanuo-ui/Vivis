@@ -77,6 +77,22 @@ def controller_intent(arguments,program_ids,mode):
     return dict(kind='interaction' if action=='stop' else 'standby')
 
 
+def preparation_reply(intent,programs):
+    """Owned acceptance text, distinct from successful physical execution."""
+    if intent['kind']=='wake':
+        followup=intent.get('followup')
+        return preparation_reply(followup,programs) if followup else None  # Preserve natural wake replies.
+    if intent['kind']=='select':
+        program=programs[intent['program']]
+        category=program.get('category')
+        label=('表情跟随' if program['kind']=='expression_follow' else
+               '剧本' if category=='script' else '歌曲' if category=='song' else '节目')
+        return dict(target=program['id'],text='好的，'+label+'准备中。',source='program_preparation')
+    if intent['kind']=='interaction':return dict(target='interaction',text='好的，先停下。',source='stop_acknowledgement')
+    if intent['kind']=='standby':return dict(target='standby',text='好，您忙，我这就休息。需要时再叫我。',source='transition_farewell')
+    return None
+
+
 def validate_presence_config(c):
     if (c.get('schema_version')!='vivis-speech-presence-1.0'
             or not isinstance(c.get('state_file'),str) or not c['state_file']

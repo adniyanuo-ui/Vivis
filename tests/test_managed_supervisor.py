@@ -14,7 +14,7 @@ from vivis.interaction.dialogue import main
 
 
 class ManagedSupervisorTests(unittest.TestCase):
-    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False,early=False,slow_initial=False,faulted=False,slow_return=False):
+    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False,early=False,slow_initial=False,faulted=False,slow_return=False,preparations=False,fail_program=False):
         actual_popen=subprocess.Popen;voice_starts=[];prompts=[]
         settings=json.loads((ROOT/'configs/interaction/p1.json').read_text())
         settings['realtime_voice']['control_backend']='qwen_realtime' if qwen else 'local'
@@ -30,7 +30,9 @@ early=sys.argv[6]=='True'
 slow_initial=sys.argv[7]=='True'
 faulted=sys.argv[8]=='True'
 slow_return=sys.argv[9]=='True'
-assert str(name)=='standby' or (early and str(name)=='interaction') or not speaker.exists(),'Cloud still owns speaker'
+fail_program=sys.argv[10]=='True'
+preparations=sys.argv[11]=='True'
+assert str(name)=='standby' or ((early or preparations) and str(name)=='interaction') or not speaker.exists(),'Cloud still owns speaker'
 serial.open('x').close()
 action=os.environ.get('VIVIS_MOTION_ACTION')
 with trace.with_suffix('.actions').open('a') as f:f.write(json.dumps(dict(name=str(name),action=action))+'\\n')
@@ -38,6 +40,11 @@ if slow_initial and action=='startup':
  time.sleep(.5)
  assert not folder.with_suffix('.cancel').exists(),'Wake bypassed mandatory boot initialization'
 with trace.open('a') as f:f.write('start '+str(name)+'\\n')
+with speaker.with_suffix('.timeline').open('a') as f:f.write('worker '+str(name)+'\\n')
+if fail_program and str(name)=='baigufuren':
+ serial.unlink()
+ with trace.open('a') as f:f.write('end '+str(name)+'\\n')
+ raise RuntimeError('Official SDK ID 2: read timeout')
 if early and str(name)=='interaction':time.sleep(.35)
 if slow_return and action=='standby' and folder.name.startswith('0005_'):
  time.sleep(.8)
@@ -53,23 +60,33 @@ start=time.monotonic()
 while not folder.with_suffix('.cancel').exists() and not(str(name)=='baigufuren' and time.monotonic()-start>.2):time.sleep(.005)
 serial.unlink()
 with trace.open('a') as f:f.write('end '+str(name)+'\\n')
+with speaker.with_suffix('.timeline').open('a') as f:f.write('end '+str(name)+'\\n')
 ''')
             listener=root/'voice.py'
             listener.write_text('''import sys,time,json,threading
 from pathlib import Path
-speaker=Path(sys.argv[1]);lock=threading.Lock();epoch=0;revision=0;reply=None;motion_ready=False;replies=set()
+speaker=Path(sys.argv[1]);lock=threading.Lock();epoch=0;revision=0;reply=None;motion_ready=False;replies=set();notices={}
 def emit(**e):
  with lock:print(json.dumps(e,ensure_ascii=False),flush=True)
 def finish_reply():
  if reply and reply not in replies and speaker.exists():
   replies.add(reply)
-  with speaker.with_suffix('.farewells').open('a') as f:f.write(json.dumps(dict(reply=reply,motion_ready=motion_ready))+'\\n')
-  emit(kind='cloud_transcript',epoch=epoch,role='assistant',text='好，您忙。')
-  emit(kind='voice_reply_done',epoch=epoch,reply_id=reply,reason='played')
+  reply_id,observed_ready,observed_epoch=reply,motion_ready,epoch
+  def complete():
+   with speaker.with_suffix('.farewells').open('a') as f:f.write(json.dumps(dict(reply=reply_id,motion_ready=observed_ready))+'\\n')
+   with speaker.with_suffix('.timeline').open('a') as f:f.write('reply '+reply_id+'\\n')
+   emit(kind='cloud_transcript',epoch=observed_epoch,role='assistant',text=notices.get(reply_id,'好，您忙。'))
+   emit(kind='voice_reply_done',epoch=observed_epoch,reply_id=reply_id,reason='played')
+  if sys.argv[9]=='True':threading.Timer(.12,complete).start()
+  else:complete()
 def commands():
  global epoch,revision,reply,motion_ready
  for line in sys.stdin:
   c=json.loads(line)
+  if c['kind']=='voice_execution_notice':
+   notices[c['reply_id']]=c['text']
+   with speaker.with_suffix('.failures').open('a') as f:f.write(c['text']+'\\n')
+   continue
   if c['kind']=='voice_context':
    revision=c['revision'];reply=c.get('transition_reply_id');motion_ready=c['ready'];finish_reply();continue
   if c['kind']!='voice_mode':continue
@@ -106,7 +123,7 @@ for n,(deadline,text) in enumerate(turns,1):
   if text in actions:
    action,program=actions[text];emit(kind='cloud_action',revision=revision,arguments=dict(action=action,program=program,
     **({'explicit_wake':True} if sys.argv[8]=='True' and action=='wake' else {})),text=text,
-    **({'transition_reply_id':'reply-'+str(n)} if action=='standby' and sys.argv[7]=='True' else {}))
+    **({'transition_reply_id':'reply-'+str(n)} if action!='wake' and (sys.argv[9]=='True' or action=='standby' and sys.argv[7]=='True') else {}))
   else:emit(kind='asr_final',utterance_id=n,text=text,captured_end_monotonic=time.monotonic())
   continue
  if sys.argv[3]=='True' and text=='停止':
@@ -132,11 +149,11 @@ time.sleep(10)
                 def poll(self):pass
                 def contains(self,*_):return False
             def program(program,robot,folder,*_):
-                return [sys.executable,str(worker),str(folder),str(serial),str(speaker),str(trace),program['id'] if program else 'standby',str(early),str(slow_initial),str(faulted),str(slow_return)]
+                return [sys.executable,str(worker),str(folder),str(serial),str(speaker),str(trace),program['id'] if program else 'standby',str(early),str(slow_initial),str(faulted),str(slow_return),str(fail_program),str(preparations)]
             def popen(command,**kwargs):
                 if 'vivis.speech.managed' in command:
                     voice_starts.append(command)
-                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover),str(farewell),str(early)],**kwargs)
+                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover),str(farewell),str(early),str(preparations)],**kwargs)
                 return actual_popen(command,**kwargs)
             with patch('vivis.interaction.dialogue.ROOT',root), \
                  patch('vivis.interaction.dialogue.dependencies',return_value=(speech,[])), \
@@ -151,7 +168,7 @@ time.sleep(10)
                 camera_owner.return_value.environment.return_value={}
                 camera_owner.return_value.poll.return_value=None
                 self.assertEqual(main(['--config',str(config),'--robot',str(ROOT/'configs/robots/xiaoshuai/robot.json'),
-                    '--seconds','4.6' if extended else '3.8','--output',str(root/'run')]),0)
+                    '--seconds','4.6' if extended else '3.8','--output',str(root/'run')]),1 if fail_program else 0,console.getvalue())
             self.assertEqual(len(voice_starts),1)
             self.assertEqual(camera_owner.call_count,1 if qwen else 0)
             if qwen:camera_owner.return_value.close.assert_called_once()
@@ -161,6 +178,7 @@ time.sleep(10)
                       if extended else ['standby','interaction','baigufuren','interaction','standby','interaction','standby'])
             if recover:expected=['standby','interaction','standby','interaction','standby']
             if faulted:expected=['standby','interaction','baigufuren','interaction','standby']
+            if fail_program:expected=['standby','interaction','baigufuren']
             self.assertEqual([s[6:] for s in lines if s.startswith('start ')],expected)
             if recover:
                 self.assertIn('管理器继续运行',console.getvalue())
@@ -191,6 +209,18 @@ time.sleep(10)
             if early:
                 contexts=[json.loads(s) for s in speaker.with_suffix('.contexts').read_text().splitlines()]
                 self.assertTrue(any(not c['motion_ready'] for c in contexts))
+            if preparations and not fail_program:
+                timeline=speaker.with_suffix('.timeline').read_text().splitlines()
+                acknowledgement='reply reply-7' if extended else 'reply reply-3'
+                self.assertLess(timeline.index(acknowledgement),timeline.index('worker baigufuren'))
+                if extended:
+                    self.assertLess(timeline.index('reply reply-2'),timeline.index('worker wz2'))
+                    self.assertLess(timeline.index('end wz2'),timeline.index('reply reply-3'))
+                    self.assertLess(timeline.index('reply reply-4'),timeline.index('worker expression-follow'))
+            if fail_program:
+                self.assertIn('通信读取超时',speaker.with_suffix('.failures').read_text())
+                self.assertIn('SERIAL_TIMEOUT',console.getvalue())
+                self.assertIn('小帅：任务失败',console.getvalue())
             effective=(root/'run/effective.json').read_text();self.assertNotIn('unit-test-placeholder',effective)
             if repeated:
                 contexts=[json.loads(s) for s in speaker.with_suffix('.contexts').read_text().splitlines()]
@@ -220,6 +250,15 @@ time.sleep(10)
 
     def test_qwen_can_start_expression_follow_as_a_program_not_conversation(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,extended=True)
+
+    def test_preparation_reply_finishes_before_song_acquires_speaker(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,preparations=True)
+
+    def test_each_program_has_preparation_reply_and_stop_remains_immediate(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,preparations=True,extended=True)
+
+    def test_failed_program_reports_voice_reason_then_exits_without_replay(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,preparations=True,fail_program=True)
 
     def test_qwen_tools_alone_execute_modes_and_cached_prompts_are_disabled(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True)
