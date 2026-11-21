@@ -18,6 +18,7 @@ import uuid
 from vivis.paths import ROOT
 from vivis.runtime.robot import Robot
 from vivis.runtime.developer import check_competitors,preview_state
+from vivis.vision.persistent import PersistentVision
 from vivis.interaction.intents import IntentRouter,normalize
 from vivis.interaction.session import SessionPolicy,STANDBY,INTERACTION
 from vivis.interaction.voice_bridge import VoiceBridge
@@ -292,7 +293,7 @@ def main(argv=None):
     if not args.listen_only:
         check_competitors(True)
         if preview_state() is not None:
-            raise RuntimeError('已有独立视觉服务；请先关闭，再启动P1以保证真正待机时释放相机')
+            raise RuntimeError('已有独立视觉服务；请先关闭，再启动P1以保证唯一相机拥有者')
         try:check_serial_access(robot.motion_profile()['port'])
         except ProtocolError as exc:parser.error(str(exc))
     voice_secret=None;voice_key_env=None
@@ -332,6 +333,7 @@ def main(argv=None):
     events=queue.Queue(maxsize=64);worker=asr=None;asr_log=asr_trace=asr_thread=None;active_target=None;active_program=None
     quitting=False;fault=None;phase='starting';turn=0;started=time.monotonic();prompt=None;preparation={};log=(output/'events.jsonl').open('w')
     ready=False;warm_ready=False;reported_fault=None;semantic=cloud=voice=None
+    persistent_vision=None
     from vivis.runtime.motion_session import MotionSession,configuration as lifecycle_configuration
     motion_policy=lifecycle_configuration(settings.get('motion_lifecycle'))
     motion_session=MotionSession.create(output/'motion_session.json',robot,motion_policy) if not args.listen_only else None
@@ -357,7 +359,10 @@ def main(argv=None):
         if voice:state['realtime_voice']=dict(status=voice.status,speaker_owned=voice.owned,epoch=voice.epoch)
         path=ROOT/'outputs/runtime/program_status.json';temp=path.with_suffix('.tmp');temp.write_text(json.dumps(state,ensure_ascii=False)+'\n');temp.replace(path)
     def start_worker(target):
-        nonlocal turn,active_target,active_program,phase,preparation
+        nonlocal turn,active_target,active_program,phase,preparation,persistent_vision
+        if qwen_only and reception_enabled and persistent_vision is None:
+            persistent_vision=PersistentVision(robot,output)
+            record('persistent_vision_started',log=str(persistent_vision.folder/'vision.log'))
         turn+=1;folder=output/f'{turn:04d}_{target}'
         program=(dict(id=INTERACTION,title='交互态',kind='interaction') if target==INTERACTION else None
                  if target==STANDBY else next(p for p in catalog['programs'] if p['id']==target))
@@ -369,7 +374,9 @@ def main(argv=None):
         phase='preparing';preparation=dict(state='pending')
         record('start',program=active_program,mode=session.mode_of(target),session=folder.name);print('准备：'+(program['title'] if program else '真正待机'),flush=True)
         action='startup' if not warm_ready else 'standby' if target==STANDBY else 'resume'
-        return Worker(command,folder,events,motion_session.environment(action) if motion_session else None)
+        environment=motion_session.environment(action) if motion_session else {}
+        if persistent_vision is not None:environment.update(persistent_vision.environment())
+        return Worker(command,folder,events,environment)
     gate=EventGate(settings['max_event_age_s'])
     try:
         def optional_event(event):
@@ -432,6 +439,9 @@ def main(argv=None):
             if args.seconds is not None and now-started>=args.seconds:quitting=True
             if (ROOT/'outputs/STOP').exists():quitting=True;fault='Emergency stop file present'
             if asr is not None and asr.poll() is not None and not quitting:quitting=True;fault='Speech process ended; see asr.log'
+            if persistent_vision is not None and persistent_vision.poll() is not None and not quitting:
+                quitting=True;fault='常驻视觉进程已退出；查看 '+str(persistent_vision.folder/'vision.log')
+                print('视觉故障：'+fault+'；停止运动，管理器退出。',flush=True)
             for _ in range(32):
                 try:event=events.get_nowait()
                 except queue.Empty:break
@@ -635,6 +645,7 @@ def main(argv=None):
                 if code is not None:
                     cancelled=worker.cancelled_at is not None
                     worker.kill_owned_group();worker.finish();preparation.update(worker.preparation)
+                    if persistent_vision is not None:persistent_vision.park()
                     record('worker_exit',program=active_program,code=code,cancelled=cancelled,self_check=preparation)
                     if active_program is not None and worker.ready and code in (0,130):
                         program=next(p for p in catalog['programs'] if p['id']==active_program)
@@ -714,6 +725,7 @@ def main(argv=None):
             cleanup(wait_worker)
             cleanup(worker.kill_owned_group)
             cleanup(worker.finish)
+        if persistent_vision is not None:cleanup(persistent_vision.close)
         if asr is not None:
             def stop_asr():
                 asr.terminate()

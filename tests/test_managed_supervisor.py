@@ -138,12 +138,17 @@ time.sleep(10)
                  patch('vivis.interaction.dialogue.preview_state',return_value=None), \
                  patch('vivis.interaction.dialogue.check_serial_access'), \
                  patch('vivis.interaction.dialogue.PromptPlayer',Prompt), \
+                 patch('vivis.interaction.dialogue.PersistentVision') as camera_owner, \
                  patch('vivis.interaction.dialogue.program_command',side_effect=program), \
                  patch('vivis.interaction.dialogue.subprocess.Popen',side_effect=popen), \
                  patch.dict('os.environ',{'DASHSCOPE_API_KEY':'unit-test-placeholder'}),redirect_stdout(io.StringIO()) as console:
+                camera_owner.return_value.environment.return_value={}
+                camera_owner.return_value.poll.return_value=None
                 self.assertEqual(main(['--config',str(config),'--robot',str(ROOT/'configs/robots/xiaoshuai/robot.json'),
                     '--seconds','4.6' if extended else '3.8','--output',str(root/'run')]),0)
             self.assertEqual(len(voice_starts),1)
+            self.assertEqual(camera_owner.call_count,1 if qwen else 0)
+            if qwen:camera_owner.return_value.close.assert_called_once()
             lines=trace.read_text().splitlines()
             expected=(['standby','interaction','wz2','interaction','wz2','interaction','standby'] if repeated else
                       ['standby','interaction','wz2','interaction','expression-follow','standby','interaction','baigufuren','interaction','standby']

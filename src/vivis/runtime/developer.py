@@ -52,29 +52,34 @@ def preview_state():
 
 class VisionReadiness:
     """Non-actuating worker startup, optionally overlapped with bounded homing."""
-    def __init__(self,child,config,digest,output,ready=False):
+    def __init__(self,child,config,digest,output,ready=False,managed=None):
         self.child,self.config,self.digest,self.output=child,config,digest,output
+        self.managed=managed
         self.started=time.monotonic();self.deadline=self.started+20;self.ready=ready;self.ready_at=None
 
     def check(self):
+        if self.managed is not None:self.managed.check()
         if self.child is not None and self.child.poll() is not None:
             raise RuntimeError(self.failure('视觉服务启动失败或已退出'))
 
     def failure(self,message):
+        diagnostics=self.managed.path.parent if self.managed is not None else self.output
         try:
-            status=json.loads((self.output/'vision_startup.json').read_text())
-            if status.get('config_sha256')==self.digest:
+            status=json.loads((diagnostics/'vision_startup.json').read_text())
+            if self.managed is not None or status.get('config_sha256')==self.digest:
                 stage=status.get('stage','unknown')
                 message+='；阶段：'+str(stage)
                 if status.get('property'):message+=' / '+str(status['property'])
                 if status.get('error'):message+='；'+str(status['error'])
         except (OSError,ValueError,AttributeError):pass
-        return message+'，查看 '+str(self.output/'vision.log')
+        return message+'，查看 '+str(diagnostics/'vision.log')
 
     def wait_ready(self,guard=lambda:None):
         while True:
             guard();self.check()
-            if self.ready or compatible_vision(preview_state(),self.config,self.digest):
+            state=preview_state()
+            if self.ready or (compatible_vision(state,self.config,self.digest)
+                              and (self.managed is None or self.managed.matches(state))):
                 self.ready=True;self.ready_at=time.monotonic();return
             if time.monotonic()>=self.deadline:raise RuntimeError(self.failure('视觉服务20秒内未就绪'))
             time.sleep(.1)
@@ -84,13 +89,20 @@ class VisionReadiness:
 def vision_service(config_path, output, required, python=None,wait_ready=True):
     """Stop only our own child. Reuse an external service only after hash match."""
     child = log = readiness = None
+    previous_request=os.environ.get('VIVIS_VISION_REQUEST')
     primary_error=None
     try:
         if required:
             wanted = hashlib.sha256(config_path.read_bytes()).hexdigest()
             config=json.loads(config_path.read_text())
-            current = preview_state()
-            if current is not None:
+            managed=None;current=None
+            if os.environ.get('VIVIS_VISION_OWNER'):
+                from vivis.vision.persistent import PersistentClient
+                managed=PersistentClient(os.environ['VIVIS_VISION_OWNER'],os.environ.get('VIVIS_VISION_TOKEN'))
+                managed.request(config_path);os.environ['VIVIS_VISION_REQUEST']=managed.request_id
+            else:current=preview_state()
+            if managed is not None:pass
+            elif current is not None:
                 if os.environ.get('VIVIS_MANAGED_SESSION')=='1':
                     raise RuntimeError('P1受管会话需要独立持有相机；请先关闭已有独立视觉服务')
                 if not compatible_vision(current,config,wanted):
@@ -102,7 +114,7 @@ def vision_service(config_path, output, required, python=None,wait_ready=True):
                                          cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                          env={**os.environ, 'PYTHONPATH': str(ROOT / 'src'),'PYTHONNOUSERSITE':'1'},
                                          start_new_session=os.environ.get('VIVIS_MANAGED_SESSION')!='1')
-            readiness=VisionReadiness(child,config,wanted,output,ready=current is not None)
+            readiness=VisionReadiness(child,config,wanted,output,ready=current is not None,managed=managed)
             if wait_ready:readiness.wait_ready()
             print('监控：http://127.0.0.1:8765/', flush=True)
         yield readiness
@@ -128,6 +140,8 @@ def vision_service(config_path, output, required, python=None,wait_ready=True):
         finally:
             if log is not None:
                 log.close()
+            if previous_request is None:os.environ.pop('VIVIS_VISION_REQUEST',None)
+            else:os.environ['VIVIS_VISION_REQUEST']=previous_request
 
 
 def check_competitors(camera_required):

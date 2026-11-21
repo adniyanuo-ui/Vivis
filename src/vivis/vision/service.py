@@ -33,12 +33,18 @@ def main(argv=None):
     parser.add_argument('--mirror-x', action=argparse.BooleanOptionalAction, default=None,
                         help='Flip the corrected image horizontally for visual calibration')
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--managed-owner',type=Path,help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.seconds is not None and (not math.isfinite(args.seconds) or args.seconds <= 0):
         parser.error('--seconds must be finite and positive')
     config = read_json(args.config)
     config_digest=hashlib.sha256(args.config.read_bytes()).hexdigest()
     validate_config(config)
+    managed=None
+    if args.managed_owner is not None:
+        from vivis.vision.persistent import ModeControl,validate_mode
+        managed=ModeControl(args.managed_owner,config)
+        validate_mode(config,managed.base,managed.landmarker)
     camera_config, detector = config['camera'], config['detector']
     if args.rotation is not None:
         camera_config['rotation_deg'] = args.rotation
@@ -73,6 +79,7 @@ def main(argv=None):
     previous_handlers = {s: signal.signal(s, lambda *_: stop.set()) for s in (signal.SIGINT, signal.SIGTERM)}
     processing, ages = [], []
     frames = with_face = 0
+    landmark_inference_frames=0;mode_ack_pending=False
     jpeg = None
     begin = time.monotonic()
     def startup(stage,**details):
@@ -114,10 +121,10 @@ def main(argv=None):
                 familiar=FamiliarFaces(config['familiar_faces'],ROOT)
                 resources.callback(familiar.close)
             social=landmarker=None
-            if social_config.get('enabled') or expression_config.get('enabled'):
+            if managed is not None or social_config.get('enabled') or expression_config.get('enabled'):
                 startup('face_landmarker_init')
                 from vivis.vision.landmarks import FaceLandmarkerDetector
-                wanted=expression_config if expression_config.get('enabled') else social_config
+                wanted=managed.landmarker if managed is not None else expression_config if expression_config.get('enabled') else social_config
                 if social_config.get('enabled') and expression_config.get('enabled'):
                     if any(expression_config[k]!=social_config[k] for k in ('model','sha256')):
                         raise ValueError('One camera service requires a single shared landmark model')
@@ -146,6 +153,24 @@ def main(argv=None):
             tick = time.monotonic()
             printed = tick - 1
             while not stop.is_set() and (args.seconds is None or time.monotonic() - begin < args.seconds):
+                change=managed.poll() if managed is not None else None
+                if change is not None:
+                    config,config_digest,request_id=change
+                    social_config=config.get('social_smile',{});expression_config=config.get('face_expression',{})
+                    vision.config=config;policy=GazePolicy(config)
+                    identity.update(config_sha256=config_digest,target_features=['face_xy','eye_line_roll'],
+                                    vision_request_id=request_id,vision_pid=os.getpid(),
+                                    camera_eye=config['control'].get('camera_eye'))
+                    social=None
+                    if social_config.get('enabled'):
+                        from vivis.interaction.smile import SmileGate,selected_face_allowed
+                        social=SmileGate(social_config['gate'],max_gap_s=config['transport']['max_age_s'])
+                        identity['target_features'].append('social_smile')
+                    if expression_config.get('enabled'):identity['target_features'].append('face_expression')
+                    mode_ack_pending=True
+                    print(json.dumps(dict(event='vision_mode_applied',request_id=request_id,
+                        landmark_inference_enabled=bool(social is not None or expression_config.get('enabled')),
+                        camera_reopened=False,models_reloaded=False)),flush=True)
                 sample = camera.get()
                 now = time.monotonic()
                 if sample is None or now - sample[1] > config['transport']['max_age_s']:
@@ -161,12 +186,16 @@ def main(argv=None):
                 cycle_begin = now
                 people.submit(sample)
                 packet, jpeg, metrics = vision.detect(sample)
+                if managed is not None:
+                    packet['vision_request_id']=managed.request_id
+                    metrics.update(vision_pid=os.getpid(),landmarker_loaded=landmarker is not None,
+                        landmark_inference_enabled=bool(social is not None or expression_config.get('enabled')))
                 metrics['person_detection']=people.observation()
                 body=metrics['person_detection'];body_stamp=body['observed_monotonic']
                 body['fresh']=(body['available'] and type(body_stamp) in (int,float)
                                and 0<=time.monotonic()-body_stamp<=presence.c['max_age_s'])
                 if frames==0:startup('first_frame_detected')
-                if familiar is not None:
+                if familiar is not None and config.get('familiar_faces',{}).get('enabled'):
                     recognized=familiar.step(sample,vision.selected_face_row,faces=metrics['faces'])
                     familiar.publish(recognized)
                     metrics['familiar_recognition_available']=familiar.available
@@ -175,12 +204,14 @@ def main(argv=None):
                     if 'observation' in recognized:metrics['familiar_identity']['observation']=recognized['observation']
                     if 'confirmed_monotonic' in recognized:metrics['familiar_identity']['confirmed_monotonic']=recognized['confirmed_monotonic']
                     if familiar.error:metrics['familiar_recognition_error']=familiar.error
-                if landmarker is not None:
+                observation=None
+                if landmarker is not None and (social is not None or expression_config.get('enabled')):
                     # Expression-follow uses the SAME selected largest-face ROI.
                     # Standby follows and responds to this SAME selected ROI.
                     # Legacy/P0 defaults retain the single-face requirement.
                     social_selected=social is not None and selected_face_allowed(social_config,metrics['faces'])
                     selected=expression_config.get('enabled') or social_selected
+                    if selected and packet['target'] is not None:landmark_inference_frames+=1
                     observation=landmarker.observe(sample,packet['target'] if selected else None)
                     if expression_config.get('enabled'):packet['face_expression']=observation
                     if social is not None:
@@ -188,7 +219,7 @@ def main(argv=None):
                         packet['social_smile']=social.step(weights.get('mouthSmileLeft',0.),weights.get('mouthSmileRight',0.),
                             observation['timestamp_monotonic'],observation['valid'] and social_selected)
                 expression=None
-                if landmarker is not None and observation['valid'] and metrics['faces']==1:
+                if observation is not None and observation['valid'] and metrics['faces']==1:
                     expression=dict(bilateral_smile=round(min(observation['weights'].get('mouthSmileLeft',0.),
                         observation['weights'].get('mouthSmileRight',0.)),1),observation_only=True)
                 presence.publish(metrics['faces'],sample[1],expression=expression,person=metrics['person_detection'])
@@ -228,6 +259,8 @@ def main(argv=None):
                         control={'active':False,'state':'not_running'}
                     current['robot_control']=control
                 preview.update(current, jpeg)
+                if fresh and mode_ack_pending:
+                    managed.applied_frame(config_digest);mode_ack_pending=False
                 records.write(json.dumps({**packet, 'metrics': metrics, 'frame_age_ms': age * 1000}) + '\n')
                 if now - printed >= 1:
                     records.flush()
@@ -248,6 +281,9 @@ def main(argv=None):
             signal.signal(sig, handler)
         elapsed = time.monotonic() - begin
         summary.update(frames=frames, frames_with_face=with_face, elapsed_s=elapsed,
+                       managed=managed is not None,camera_open_count=int('camera_actual' in summary),
+                       landmark_inference_frames=landmark_inference_frames,
+                       mode_switches=managed.applied if managed is not None else 0,
                        detection_hz_measured=frames / elapsed,
                        processing_p50_ms=None if not processing else float(np.median(processing)),
                        host_frame_age_p95_ms=None if not ages else float(np.percentile(ages, 95)))

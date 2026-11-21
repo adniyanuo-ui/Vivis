@@ -1,6 +1,7 @@
 """Nonblocking local person targets and bounded eye policy; no serial I/O."""
 import json
 import math
+import os
 import socket
 import time
 import numpy as np
@@ -51,6 +52,7 @@ class TargetReceiver:
         validate_config(config)
         self.max_age = config['transport']['max_age_s']
         self.expected_transform = {k: config['camera'][k] for k in ('rotation_deg', 'mirror_x')}
+        self.expected_request=os.environ.get('VIVIS_VISION_REQUEST') if os.environ.get('VIVIS_VISION_OWNER') else None
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             self.socket.bind((config['transport']['host'], config['transport']['port']))
@@ -72,6 +74,8 @@ class TargetReceiver:
                 if source[0] != '127.0.0.1':
                     raise ValueError('Nonlocal target sender')
                 packet = validate_packet(json.loads(data), now, self.max_age)
+                if self.expected_request is not None and packet.get('vision_request_id')!=self.expected_request:
+                    raise ValueError('Camera packet belongs to a previous managed mode')
                 if packet.get('camera_transform') != self.expected_transform:
                     raise ValueError('Camera orientation differs from the playback configuration')
                 if self.latest and packet['timestamp_monotonic'] <= self.latest['timestamp_monotonic']:
