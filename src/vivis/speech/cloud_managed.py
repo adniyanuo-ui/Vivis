@@ -265,7 +265,9 @@ class CloudManagedVoice(ManagedVoice):
                     async def generate(self,_):return audio
                 speaker=MessageSpeaker(engine,self.player,state,lambda _:current(),
                     lambda words:self.emit(dict(kind='cloud_transcript',epoch=self.epoch,role='assistant',
-                        text=words,source='standby_fault' if ticket.get('fault') else ticket.get('source','transition_farewell'))),self.log.write,tts=PreparedAudio())
+                        text=words,source='standby_fault' if ticket.get('fault') else ticket.get('source','transition_farewell'))),
+                    self.log.write,tts=PreparedAudio(),on_started=lambda dac:self.emit(dict(kind='voice_reply_started',
+                        epoch=self.epoch,reply_id=ticket['id'],dac_monotonic=dac)))
                 complete=await speaker.say(text,ticket)
                 reason='played' if complete else 'interrupted'
             except asyncio.CancelledError:reason='cancelled'

@@ -31,9 +31,9 @@ class BoundedTTS:
 
 
 class MessageSpeaker:
-    def __init__(self,engine,player,state,valid,emit,log,tts=None):
+    def __init__(self,engine,player,state,valid,emit,log,tts=None,on_started=None):
         self.engine=engine;self.player=player;self.state=state;self.valid=valid;self.emit=emit;self.log=log;self.tts=tts or BoundedTTS(engine)
-        self.started=False
+        self.started=False;self.on_started=on_started
 
     async def say(self,text,request):
         self.started=False
@@ -67,6 +67,7 @@ class MessageSpeaker:
                 self.state.poll_playback()
                 if not self.valid(request) or rid in self.state.blocked:raise StaleMessageTurn()
                 if not announced and rid in self.player.started_responses:
+                    if self.on_started:self.on_started(response.get('first_dac_monotonic',time.monotonic()))
                     self.emit(text);announced=True
                 if expected and self.player.consumed.get(rid,0)>=expected and response.get('empty_dac',float('inf'))<=time.monotonic():
                     complete=True;return True
