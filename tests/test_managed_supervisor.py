@@ -30,7 +30,7 @@ early=sys.argv[6]=='True'
 slow_initial=sys.argv[7]=='True'
 faulted=sys.argv[8]=='True'
 slow_return=sys.argv[9]=='True'
-assert (early and str(name)=='interaction') or not speaker.exists(),'Cloud still owns speaker'
+assert str(name)=='standby' or (early and str(name)=='interaction') or not speaker.exists(),'Cloud still owns speaker'
 serial.open('x').close()
 action=os.environ.get('VIVIS_MOTION_ACTION')
 with trace.with_suffix('.actions').open('a') as f:f.write(json.dumps(dict(name=str(name),action=action))+'\\n')
@@ -57,14 +57,21 @@ with trace.open('a') as f:f.write('end '+str(name)+'\\n')
             listener=root/'voice.py'
             listener.write_text('''import sys,time,json,threading
 from pathlib import Path
-speaker=Path(sys.argv[1]);lock=threading.Lock();epoch=0;revision=0;reply=None;motion_ready=False
+speaker=Path(sys.argv[1]);lock=threading.Lock();epoch=0;revision=0;reply=None;motion_ready=False;replies=set()
 def emit(**e):
  with lock:print(json.dumps(e,ensure_ascii=False),flush=True)
+def finish_reply():
+ if reply and reply not in replies and speaker.exists():
+  replies.add(reply)
+  with speaker.with_suffix('.farewells').open('a') as f:f.write(json.dumps(dict(reply=reply,motion_ready=motion_ready))+'\\n')
+  emit(kind='cloud_transcript',epoch=epoch,role='assistant',text='好，您忙。')
+  emit(kind='voice_reply_done',epoch=epoch,reply_id=reply,reason='played')
 def commands():
  global epoch,revision,reply,motion_ready
  for line in sys.stdin:
   c=json.loads(line)
-  if c['kind']=='voice_context':revision=c['revision'];reply=c.get('transition_reply_id');motion_ready=c['ready'];continue
+  if c['kind']=='voice_context':
+   revision=c['revision'];reply=c.get('transition_reply_id');motion_ready=c['ready'];finish_reply();continue
   if c['kind']!='voice_mode':continue
   if c['enabled']:
    c['motion_ready']=motion_ready
@@ -73,9 +80,7 @@ def commands():
   time.sleep(.04)
   if c['enabled']:
    speaker.open('x').close();emit(kind='voice_state',epoch=c['epoch'],status='ready',speaker_owned=True)
-   if reply:
-    emit(kind='cloud_transcript',epoch=c['epoch'],role='assistant',text='好，您忙。')
-    emit(kind='voice_reply_done',epoch=c['epoch'],reply_id=reply,reason='played')
+   finish_reply()
    emit(kind='cloud_transcript',epoch=c['epoch'],role='assistant',text='播放白骨夫人')
    if sys.argv[5]=='True' and c['epoch']==1:
     emit(kind='voice_warning',epoch=c['epoch'],message='本句缓冲超限，交互继续')
@@ -96,7 +101,8 @@ for n,(deadline,text) in enumerate(turns,1):
  if text in ('断网','恢复'):
   emit(kind='voice_health',available=text=='恢复',reason='synthetic network');continue
  if sys.argv[5]=='True':
-  actions={'小帅':('wake',''),'播放白骨夫人':('play','baigufuren'),'自己玩':('standby',''),'停止':('stop',''),'待机':('standby','')}
+  actions={'小帅':('wake',''),'播放白骨夫人':('play','baigufuren'),'呃播放剧本':('play','wz2'),
+   '模仿我的表情':('play','expression-follow'),'自己玩':('standby',''),'停止':('stop',''),'待机':('standby','')}
   if text in actions:
    action,program=actions[text];emit(kind='cloud_action',revision=revision,arguments=dict(action=action,program=program,
     **({'explicit_wake':True} if sys.argv[8]=='True' and action=='wake' else {})),text=text,
@@ -170,6 +176,8 @@ time.sleep(10)
                 records=[json.loads(s) for s in (root/'run/events.jsonl').read_text().splitlines()]
                 done=[s for s in records if s['kind']=='voice_reply_done']
                 self.assertEqual(len(done),2)
+                replies=[json.loads(s) for s in speaker.with_suffix('.farewells').read_text().splitlines()]
+                self.assertTrue(any(not r['motion_ready'] for r in replies))
             if faulted:
                 self.assertIn('STANDBY RECOVERED injected recovery',console.getvalue())
                 records=[json.loads(s) for s in (root/'run/events.jsonl').read_text().splitlines()]
@@ -206,6 +214,12 @@ time.sleep(10)
 
     def test_farewell_owns_speaker_once_in_ready_standby_then_releases(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,farewell=True)
+
+    def test_farewell_precedes_slow_home_and_new_wake_does_not_cancel_home(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,farewell=True,early=True,slow_return=True)
+
+    def test_qwen_can_start_expression_follow_as_a_program_not_conversation(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,extended=True)
 
     def test_qwen_tools_alone_execute_modes_and_cached_prompts_are_disabled(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True)

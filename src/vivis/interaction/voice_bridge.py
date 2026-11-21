@@ -28,7 +28,8 @@ class VoiceBridge:
 
     def context(self,mode,target,ready,*,speech_ready=None,standby_fault=False):
         reply=self.transition_reply_id if mode=='standby' else None
-        early=bool(speech_ready) and mode=='interaction' and not ready
+        early=bool(speech_ready) and not ready and (mode=='interaction' or
+            mode=='standby' and reply is not None and not standby_fault)
         value=(mode,target,bool(ready),reply,early,bool(standby_fault))
         if value==self.last_context:return
         self.last_context=value;self.context_revision+=1

@@ -631,7 +631,9 @@ def main(argv=None):
                 if args.listen_only:
                     session.pending_prompt=None;phase=session.mode;continue
                 if intent['kind'] in ('wake','select','standby','interaction','prompt'):
-                    if voice and session.desired!=INTERACTION:voice.enable(False)
+                    if voice and session.desired!=INTERACTION and not (
+                            session.desired==STANDBY and voice.transition_reply_id is not None and active_target==INTERACTION):
+                        voice.enable(False)
                     if prompt:prompt.stop()
                     if worker and (session.desired!=active_target or restart) and not (active_target==STANDBY and not worker.ready):
                         worker.cancel();phase='stopping'
@@ -680,13 +682,17 @@ def main(argv=None):
                     and (worker is None or active_target in (STANDBY,INTERACTION))
                     and not quitting and fault is None and voice_available)
                 standby_fault=bool(worker and worker.standby_fault)
+                early_farewell=bool(warm_ready and voice.transition_reply_id is not None and session.desired==STANDBY
+                    and active_target in (None,STANDBY,INTERACTION) and not standby_fault
+                    and not quitting and fault is None and voice_available)
+                early_output=early_voice or early_farewell
                 if qwen_only:
                     session.pending_prompt=None
-                    voice.context(session.mode,session.desired,motion_ready,speech_ready=motion_ready or early_voice,standby_fault=standby_fault)
+                    voice.context(session.mode,session.desired,motion_ready,speech_ready=motion_ready or early_output,standby_fault=standby_fault)
                 desired_voice=(voice_available and not quitting and not fault
                     and ((session.desired==INTERACTION and (active_target==INTERACTION or early_voice))
-                         or (session.desired==STANDBY and active_target==STANDBY and voice.transition_reply_id is not None))
-                    and (early_voice or worker is not None and (worker.ready or standby_fault) and worker.cancelled_at is None)
+                         or (session.desired==STANDBY and voice.transition_reply_id is not None and (active_target==STANDBY or early_farewell)))
+                    and (early_output or worker is not None and (worker.ready or standby_fault) and worker.cancelled_at is None)
                     and session.pending_prompt is None and (prompt is None or prompt.clock is None)
                     and (prompt is None or not prompt.contains(time.monotonic())))
                 voice.enable(desired_voice)

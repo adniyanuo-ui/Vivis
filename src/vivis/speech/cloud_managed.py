@@ -35,6 +35,10 @@ CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负�
     '用户说停止、结束、不用播了等，请调用robot_program stop回交互；待机/自己玩去吧则standby。'
     'stop/standby只需action字段；不能因为没有人脸或没叫名字而拒绝停止。play才需要program。'
     '任何点播必须调用robot_program，不能只口头答应；笼统的节目类别唯一时可选择，否则先澄清。'
+    '实时表情跟随是独立节目：用户要你学表情、模仿我的表情、跟着我做表情时，调用robot_program(action=play,program=expression-follow)。'
+    '它不同于聊天中的自动微笑，也不同于set_expression做一次表情。意思明确或用户肯定你的表情跟随提议后立即调用，不再空口反复确认。'
+    '只问你会不会学表情是能力询问，不等于要求启动；不要模仿、先别开始等否定同样不能启动。'
+    '只有controller_state.mode=task且target=expression-follow、ready=true才表示表情跟随已运行；否则不能说准备好了、已经跟着学。'
     '用户本句明确呼唤唤醒词时explicit_wake必须为true，否则为false；同句点播可用play加explicit_wake=true，或wake中填写program。仅唤醒时program填空字符串。'
     '你认识我吗、我是谁、我的年龄或职业等问题必须先调用get_robot_status，按当前身份回答；未知时不猜。'
     '个人记忆只按稳定单人身份归属；记忆关闭或身份未确认时，不承诺已经建立可跨次找回的个人记录。'
@@ -239,20 +243,20 @@ class CloudManagedVoice(ManagedVoice):
                     and ticket['generation']==self.input_generation and self.cloud_state is state)
         def current():
             return (live() and self.context['mode']=='standby'
-                and (self.context.get('standby_fault') if ticket.get('fault') else self.context['ready'])
+                and (self.context.get('standby_fault') if ticket.get('fault') else self.context.get('speech_ready',self.context['ready']))
                 and self.controller_reply_id==ticket['id']
                 and self.enabled and self.pending_mode is None)
         async def speak():
             from vivis.speech.trusted_reading import RealtimeReader
             from vivis.speech.message_voice import MessageSpeaker
             text=('机器头待机出现故障，暂时不能运动，请检查设备。系统会定期复查。' if ticket.get('fault') else
-                  '好，您忙，我先休息。需要时再叫我。')
+                  '好，您忙，我这就休息。需要时再叫我。')
             reason='not_played'
             try:
                 # Reuse the verified Qwen reader and the SAME output/AEC/A2F
                 # path. No DB operation, personal identity or local TTS model.
                 engine=RealtimeReader(self.url,self.secret,dict(self.session,voice=self.active_voice),self.log)
-                audio=await engine.generate(text)  # Synthesize while homing; no speaker ownership yet.
+                audio=await engine.generate(text)  # Speech ownership is independent of neutral homing.
                 while live() and not current():await asyncio.sleep(.02)
                 if not current():raise StaleMessageTurn()
                 class PreparedAudio:
@@ -268,7 +272,7 @@ class CloudManagedVoice(ManagedVoice):
                 reason='speech_failed';self.log.write('transition_reply_failed',error_type=type(exc).__name__)
                 self.emit(dict(kind='voice_warning',epoch=self.epoch,message=(
                     '待机故障语音未完整播出；故障记录保留，下轮继续检查。' if ticket.get('fault') else
-                    '告别语音未完整播出；待机动作已执行，语音监听继续。')))
+                    '告别语音未完整播出；待机结果请查看控制状态，语音监听继续。')))
             finally:self.finish_farewell(ticket,reason)
         self.farewell_task=asyncio.create_task(speak())
 
@@ -343,15 +347,15 @@ class CloudManagedVoice(ManagedVoice):
             self.farewell=dict(id=reply,generation=self.input_generation,connection=self.message_connection,fault=True)
             return
         if command.get('kind')=='voice_context':
-            revision=command.get('revision');mode=command.get('mode');target=command.get('target')
+            revision=command.get('revision');mode=command.get('mode');target=command.get('target');reply=command.get('transition_reply_id')
             if (type(revision) is not int or revision<=self.context['revision'] or mode not in ('standby','interaction','task')
                     or target not in {'standby','interaction',*self.program_ids} or type(command.get('ready')) is not bool):return
-            if ('speech_ready' in command and (type(command['speech_ready']) is not bool
-                    or mode!='interaction' or target!='interaction')):return
+            if ('speech_ready' in command and (type(command['speech_ready']) is not bool or not (
+                    mode=='interaction' and target=='interaction' or mode=='standby' and target=='standby'
+                    and isinstance(reply,str) and 1<=len(reply)<=64 and not command.get('standby_fault')))):return
             if 'standby_fault' in command and (type(command['standby_fault']) is not bool or mode!='standby'):return
             if (mode=='task')!=(target in self.program_ids) or (mode!='task' and mode!=target):return
             previous=self.context
-            reply=command.get('transition_reply_id')
             self.controller_reply_id=reply if isinstance(reply,str) and 1<=len(reply)<=64 and mode=='standby' else None
             if self.farewell and (mode!='standby' or self.controller_reply_id!=self.farewell['id']
                     or self.farewell.get('fault') and not command.get('standby_fault')):

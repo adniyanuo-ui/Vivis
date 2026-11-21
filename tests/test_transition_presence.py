@@ -286,9 +286,10 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.events[-1]['arguments']['action'],'standby')  # Motion is not delayed for speech.
         return self.events[-1]['transition_reply_id']
 
-    def ready_standby(self,reply,ready=True):
+    def ready_standby(self,reply,ready=True,early=False):
         self.s.request(dict(kind='voice_context',revision=self.s.context['revision']+1,
-            mode='standby',target='standby',ready=ready,transition_reply_id=reply))
+            mode='standby',target='standby',ready=ready,transition_reply_id=reply,
+            **({'speech_ready':True} if early else {})))
 
     async def test_fault_notice_can_speak_while_motion_is_faulted_without_wake_permission(self):
         s=self.s;self.pub.close()
@@ -319,11 +320,14 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
             s.schedule_farewell(self.state);self.assertIsNotNone(s.farewell_task)
             await asyncio.sleep(.01)
             engine.generate.assert_awaited_once();self.assertEqual(s.player.count,0)
-            self.ready_standby(reply);s.enabled=True
+            self.ready_standby(reply,False,early=True);s.enabled=True
             self.assertFalse(s.can_speak())  # No general standby chat permission.
             s.schedule_farewell(self.state);s.schedule_farewell(self.state)
             await self.until(lambda:s.player.count>0)
+            self.assertFalse(s.context['ready'])  # The fixed reply precedes successful homing.
             self.assertFalse(any(e['kind']=='voice_reply_done' for e in self.events))
+            count=s.player.count;self.ready_standby(reply)
+            self.assertEqual(s.player.count,count)  # HOME COMPLETE cannot cut/restart the farewell.
             s.player.render(s.player.count,time.monotonic()+.02)
             await asyncio.wait_for(s.farewell_task,1)
             self.assertEqual(reader.call_args.args[2]['voice'],'longanyang_v3.1')
@@ -357,6 +361,15 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FarewellBridgeTests(unittest.TestCase):
+    def test_preparation_speech_for_standby_requires_an_explicit_reply_ticket(self):
+        stream=io.StringIO();bridge=VoiceBridge(stream)
+        bridge.context('standby','standby',False,speech_ready=True)
+        self.assertNotIn('speech_ready',json.loads(stream.getvalue().splitlines()[-1]))
+        bridge.transition_reply_id='farewell';bridge.context('standby','standby',False,speech_ready=True)
+        self.assertTrue(json.loads(stream.getvalue().splitlines()[-1])['speech_ready'])
+        bridge.context('standby','standby',False,speech_ready=True,standby_fault=True)
+        self.assertNotIn('speech_ready',json.loads(stream.getvalue().splitlines()[-1]))
+
     def test_reply_ticket_is_sent_only_for_standby_and_old_completion_cannot_clear_new_one(self):
         stream=io.StringIO();bridge=VoiceBridge(stream)
         bridge.transition_reply_id='one';bridge.context('standby','standby',True)
