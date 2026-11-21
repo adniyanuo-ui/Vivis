@@ -52,7 +52,7 @@ class FixedReplyTests(unittest.TestCase):
     def test_complete_bundle_has_same_pcm_and_rejects_foreign_voice_text_and_channels(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder=Path(tmp);samples,_=bundle(folder);cache=FixedReplyCache(folder)
-            self.assertEqual(cache.verify(SESSION,ORDER)['replies'],7)
+            self.assertEqual(cache.verify(SESSION,ORDER)['replies'],len(REPLIES))
             audio=cache.get(REPLIES['standby'],SESSION,ORDER)
             np.testing.assert_array_equal(np.rint(audio.samples*32768).astype('<i2'),samples)
             self.assertIs(audio,cache.get(REPLIES['standby'],SESSION,ORDER))

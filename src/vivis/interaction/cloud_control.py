@@ -18,6 +18,14 @@ def tools(program_ids):
         parameters=dict(type='object',properties=dict(action=dict(type='string',enum=['wake','play','stop','standby']),
             program=dict(type='string',enum=['',*program_ids],description='节目ID。expression-follow代表持续模仿用户表情的实时节目；其他ID对应节目单中的作品。用户明确要求学表情，或肯定表情跟随提议时，用play启动该节目，不能以聊天回应代替执行。'),explicit_wake=dict(type='boolean',description='用户本句明确呼唤配置名字时为true；仅泛化招呼必须为false。stop/standby可省略，不能要求用户先唤醒再停止'),
             wake_reason=dict(type='string',enum=['name','greeting'],description='仅wake使用。greeting须摄像头当前看到人脸或人体且controller_state.greeting_wake_allowed=true；不授予画面无人时的名字呼叫权限')),required=['action'],additionalProperties=False)),
+        dict(type='function',name='program_followup',
+            description='节目期间，用户明确对机器人提出完整问题或要求做一次表情时调用。结束旧表演后由控制器接续本轮原话。年龄、能力、会不会唱某首歌等问题用question，即使提到了歌名也不点播。只在明确请求做一次已有表情时用expression。停止、待机、明确点播或持续模仿用robot_program。歌词、剧本、自播、旁人说话、否定、引用、单纯笑声或附和尚不构成请求。听不清时不要调用。',
+            parameters=dict(type='object',properties=dict(kind=dict(type='string',enum=['question','expression'])),
+                required=['kind'],additionalProperties=False)),
+        dict(type='function',name='defer_reception',
+            description='仅交互态。用户明确说想一想或等一下，用thinking暂停冷场提示，之后用户重新主动交流才恢复。明确说不想聊或先不用，用declined关闭本次来访的主动提示。不是结束交互的指令，也不拒绝用户后续主动提问。',
+            parameters=dict(type='object',properties=dict(kind=dict(type='string',enum=['thinking','declined'])),
+                required=['kind'],additionalProperties=False)),
         dict(type='function',name='set_expression',
             description='交互态52基础表情及组合：expression可选单个标准通道名，或custom并在weights给出多个通道权重。悲伤、哭脸、大笑等用custom组合已有基础表情，不要求重新标定才可试。smile温和微笑，neutral/attentive收回表情意图，auto恢复自动回应。明确口令source=command，聊天合理回应source=social。点头属于颈部动作，不在52通道内。',
             parameters=dict(type='object',properties=dict(expression=dict(type='string',enum=['smile','neutral','attentive','auto','custom',*channels]),
@@ -77,9 +85,12 @@ def controller_intent(arguments,program_ids,mode):
     return dict(kind='interaction' if action=='stop' else 'standby')
 
 
-def preparation_reply(intent,programs):
+def preparation_reply(intent,programs,interrupting=False):
     """Owned acceptance text, distinct from successful physical execution."""
     from vivis.speech.fixed_replies import REPLIES
+    if interrupting and intent['kind'] in ('select','interaction','standby'):
+        target={'interaction':'interaction','standby':'standby'}.get(intent['kind'],intent.get('program'))
+        return dict(target=target,text=REPLIES['program_interrupt'],source='program_interrupt')
     if intent['kind']=='wake':
         followup=intent.get('followup')
         return preparation_reply(followup,programs) if followup else None  # Preserve natural wake replies.
@@ -208,6 +219,8 @@ class ReceptionGate:
     """One welcome per visit, after stable arrival; no facial/gender guessing."""
     def __init__(self,config):
         self.c=config;self.present_since=None;self.absent_since=None;self.armed=True;self.last=-float('inf');self.recent={};self.visit=0
+        from vivis.interaction.reception_conversation import ReceptionConversation
+        self.conversation=ReceptionConversation(config.get('conversation',{}))
         if (config.get('schema_version')!='vivis-reception-1.0' or type(config.get('enabled')) is not bool
                 or not .5<=config['arrival_hold_s']<=5 or not 1<=config['departure_hold_s']<=30
                 or not 10<=config['greeting_cooldown_s']<=3600 or not 5<=config['return_to_standby_after_s']<=300):raise ValueError('Invalid reception policy')

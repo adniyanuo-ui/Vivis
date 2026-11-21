@@ -507,7 +507,7 @@ def main(argv=None):
                     voice.preparation_speech=(requested['kind']=='wake' and
                         (arguments.get('explicit_wake') is True or arguments.get('wake_reason')=='greeting'))
                     reply=event.get('transition_reply_id')
-                    notice=preparation_reply(requested,{p['id']:p for p in catalog['programs']})
+                    notice=preparation_reply(requested,{p['id']:p for p in catalog['programs']},interrupting=session.mode=='task')
                     voice.transition_reply_id=(reply if notice and isinstance(reply,str) and 1<=len(reply)<=64 else None)
                     voice.transition_reply_target=notice['target'] if notice else STANDBY
                     event=dict(kind='asr_final',text=event.get('text','Qwen command'),source='qwen_tool',

@@ -4,5 +4,11 @@
   "arrival_hold_s": 0.5,
   "departure_hold_s": 3.0,
   "greeting_cooldown_s": 120,
-  "return_to_standby_after_s": 60
+  "return_to_standby_after_s": 60,
+  "conversation": {
+    "enabled": true,
+    "first_prompt_s": 6,
+    "min_interval_s": 60,
+    "max_per_visit": 3
+  }
 }

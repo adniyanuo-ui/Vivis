@@ -29,10 +29,12 @@ from vivis.speech.message_receipts import MessageReceipts,ReceiptRejected,MESSAG
 CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负责，没有本地ASR或本地语义模型备用。'
     'controller_state.speech_ready=true且ready=false时可先语音交流，动作尚未准备完成。准备、许可和语音链路状态只供内部控制，不向访客播报；自然回应访客原话，不声称尚未完成的动作已经执行。'
     '前台接待来人时自然主动问候，若本地稳定识别熟人，使用当前preferred_address称呼；未知访客只称您好，不猜姓名。'
+    '用户说想一想、等一下或先不用聊天时，用defer_reception；只简短尊重要求，不追问。'
     '当前状态以controller_state为准；待机按交流进退规则判断明确呼叫或当前获准的直接招呼，其他话保持安静。待机中的问候/问题必须先调用robot_program唤醒，get_robot_status不能代替唤醒。'
     '无可见人脸且没有明确唤醒许可时，不接普通话题，不主动搭话；仍接受停止和待机。'
-    '播放期间不聊天，只理解用户的停止/退出/待机或明确换节目。'
+    '播放期间不要直接回答或播放聊天语音，先通过控制工具交接。'
     '用户说停止、结束、不用播了等，请调用robot_program stop回交互；待机/自己玩去吧则standby。'
+    '节目播放或program_followup_handoff=true时，用户明确对你提问或要求一次表情，调用program_followup保留原话。问会不会唱属于问题。明确换节目、停止、待机仍调用robot_program。'
     'stop/standby只需action字段；不能因为没有人脸或没叫名字而拒绝停止。play才需要program。'
     '任何点播必须调用robot_program，不能只口头答应；笼统的节目类别唯一时可选择，否则先澄清。'
     '实时表情跟随是独立节目：用户要你学表情、模仿我的表情、跟着我做表情时，调用robot_program(action=play,program=expression-follow)。'
@@ -65,6 +67,13 @@ WORK_POLICY=(' 留言由本地固定流程处理：最终识别文字到齐后�
     '用户问保存了吗由程序直接读账本；pending是已保存待转达，announced是完整播报后已转达，无需收件人确认；completed是历史完成或人工关闭记录，不再提醒，不能据此声称实际播过或事情办完。不要再询问是否收到，不把留言转达说成事情办完。'
     '物品采购、寄件等实际事情是否完成不在留言系统负责范围。'
     '身份未知不得读取私人历史。退件码仍使用courier_pickup的独立授权边界，不用于普通熟人留言。')
+
+PROGRAM_TURN_POLICY=(' 当前在节目或节目交接中。收到对小帅的明确问题，包括“你多大了”“会唱白骨夫人吗”，'
+    '必须先调用program_followup(kind=question)，暂时不要用文本或语音回答。'
+    '收到“大笑一下”等一次性表情请求，必须先调用program_followup(kind=expression)。'
+    '只有明确要求开始一首歌、一个剧本或持续跟随，才能调用robot_program点播。'
+    '停止和待机用robot_program。先排除否定、引用、节目自身声音及旁人讲话；例如“歌词写的是你多大了”'
+    '只是在转述歌词，绝不调用工具。只有直接对机器人说的明确请求才切换。')
 
 
 class ConversationReset(Exception):pass
@@ -112,6 +121,7 @@ class CloudManagedVoice(ManagedVoice):
         self.program_ids={p['id'] for p in catalog['programs']}
         reception=json.loads((ROOT/self.speech['managed_voice']['reception_config']).read_text())
         self.reception=ReceptionGate(reception)
+        self.public_prompt_task=None;self.public_prompt_started=False;self.thinking_generation=None
         from vivis.interaction.memory import PersonMemory
         self.memory_config=json.loads((ROOT/self.speech['managed_voice']['memory_config']).read_text())
         self.memory=PersonMemory(self.memory_config) if self.memory_config['enabled'] else None
@@ -128,6 +138,7 @@ class CloudManagedVoice(ManagedVoice):
         self.next_identity_verification=0.;self.relay_identity_hold=False;self.relay_recipients={}
         self.identity_display=None
         self.question_onset=None;self.invalid_question=None;self.recovered_query_generation=None
+        self.program_followup=None;self.followup_handoff=False;self.followup_response=None
         self.recovered_expression=None
         robot_definition=json.loads(self.robot_path.read_text())
         self.wake_words=(self.speech.get('wake_words') or robot_definition.get('identity',{}).get('wake_words')
@@ -236,6 +247,15 @@ class CloudManagedVoice(ManagedVoice):
         if self.farewell_task and not self.farewell_task.done():self.farewell_task.cancel()
         self.finish_farewell(ticket,reason)
 
+    def fixed_audio(self,text):
+        if self.fixed_replies is None:return None
+        try:
+            return self.fixed_replies.get(text,dict(self.session,model=self.config['model'],voice=self.active_voice),
+                self.mouth.order if self.mouth else None)
+        except Exception:
+            self.log.write('fixed_reply_cache_rejected',reason='asset_validation_failed')
+            return None
+
     def schedule_farewell(self,state):
         """One bounded transition/incident reply; never ordinary task/idle chat."""
         ticket=self.farewell
@@ -260,13 +280,7 @@ class CloudManagedVoice(ManagedVoice):
             try:
                 # Reuse the verified Qwen reader and the SAME output/AEC/A2F
                 # path. No DB operation, personal identity or local TTS model.
-                engine=None;audio=None
-                if self.fixed_replies is not None:
-                    try:
-                        audio=self.fixed_replies.get(text,dict(self.session,model=self.config['model'],voice=self.active_voice),
-                            self.mouth.order if self.mouth else None)
-                    except Exception:
-                        self.log.write('fixed_reply_cache_rejected',reason='asset_validation_failed')
+                engine=None;audio=self.fixed_audio(text)
                 self.log.write('fixed_reply_audio',cached=audio is not None,characters=len(text),voice=self.active_voice)
                 if audio is None:
                     # Missing or differently voiced assets keep the existing
@@ -293,6 +307,10 @@ class CloudManagedVoice(ManagedVoice):
         self.farewell_task=asyncio.create_task(speak())
 
     def can_play_response(self,rid):
+        if self.program_followup is not None and self.followup_handoff:return False
+        followup=self.followup_response
+        if (followup and self.response_inputs.get(rid)==followup['generation']
+                and not self.player.has_started([rid]) and not self.followup_current(followup)):return False
         if not self.output_ready() or rid in self.blocked:return False
         if self.cloud_state and rid in self.cloud_state.blocked:return False
         if self.can_speak():return True
@@ -380,6 +398,8 @@ class CloudManagedVoice(ManagedVoice):
             if 'standby_fault' in command and (type(command['standby_fault']) is not bool or mode!='standby'):return
             if (mode=='task')!=(target in self.program_ids) or (mode!='task' and mode!=target):return
             previous=self.context
+            if mode!='interaction' and (mode!=previous['mode'] or target!=previous['target']):
+                self.program_followup=None;self.followup_handoff=False;self.followup_response=None
             self.controller_reply_id=reply if isinstance(reply,str) and 1<=len(reply)<=64 else None
             if self.farewell and (target!=self.farewell.get('target','standby') or self.controller_reply_id!=self.farewell['id']
                     or self.farewell.get('fault') and not command.get('standby_fault')):
@@ -388,7 +408,7 @@ class CloudManagedVoice(ManagedVoice):
             if mode=='standby' and previous['mode']!='standby' and self.presence.greeting_visible():
                 self.reception.dismiss_current_visit()
             if mode=='interaction':
-                if reply is not None:self.announcement_kind='quiet'
+                if reply is not None or self.followup_handoff:self.announcement_kind='quiet'
                 elif previous['mode']=='standby':self.announcement_kind='welcome'
                 elif previous['mode']=='task':self.announcement_kind='return'
                 elif previous['ready'] and not command['ready']:self.announcement_kind='quiet'
@@ -1057,6 +1077,9 @@ class CloudManagedVoice(ManagedVoice):
 
     def begin_user_turn(self,item_id):
         self.explicit_wake_pending=None
+        self.program_followup=None;self.followup_response=None
+        if self.farewell and self.farewell.get('source')=='program_interrupt':self.cancel_farewell('new_user_turn')
+        self.reception.conversation.user_started()
         if self.message_lane:
             actor=self.identified_person() or self.anonymous
             self.message_lane.next_turn(actor,self.memory_session)
@@ -1130,6 +1153,7 @@ class CloudManagedVoice(ManagedVoice):
         facts=dict(**self.context,unattributed_source_notice=self.unattributed_source_notice,face_visible=self.presence.last_visible,
             wake_permission=permission and not self.presence.last_visible)
         facts['body_visible']=self.presence.person_count()>0
+        facts['program_followup_handoff']=self.followup_handoff
         facts['identity_state']='reviewing' if review else 'recognized' if confirmed else 'unknown'
         facts['identity_authorized']=confirmed is not None
         facts['message_operation']=self.message_operation()
@@ -1155,7 +1179,164 @@ class CloudManagedVoice(ManagedVoice):
         person=self.identified_person()
         if self.memory and person:instructions+=self.memory.context(person)
         instructions+=self.dialect.instructions()
+        if self.program_turn_only():instructions+=PROGRAM_TURN_POLICY
         return instructions,identity,permission
+
+    def program_turn_only(self):
+        return self.context['mode']=='task' or (self.followup_handoff and not self.context['ready'])
+
+    def available_tools(self):
+        if self.program_turn_only():
+            return [tool for tool in self.session['tools'] if tool['name'] in ('robot_program','program_followup')]
+        return self.session['tools']
+
+    def followup_current(self,request):
+        now=time.monotonic()
+        if (request['generation']!=self.input_generation or request['item']!=self.turn_item_id
+                or request['connection'] is not self.message_connection or request['session']!=self.memory_session
+                or self.in_speech or not 0<=now-request['ended']<=policy()['message_extract_s']):return False
+        if not (self.presence.single_visible() or (not self.presence.greeting_visible() and now<self.presence.wake_until)):
+            return False
+        raw_person=self.recognized_person()
+        # A fresh different identity overrides the old greeting's eight-second
+        # display hold for an action waiting to cross the program boundary.
+        return (raw_person is None or raw_person==request['person']) and request['person']==(self.identified_person() or self.anonymous)
+
+    def stage_program_followup(self,args,rid):
+        source=self.question_onset
+        response=self.cloud_state.responses.get(rid,{}) if self.cloud_state else {}
+        if (not isinstance(args,dict) or set(args)!={'kind'} or args['kind'] not in ('question','expression')
+                or self.context['mode']!='task' and not self.followup_handoff
+                or (self.control_pending and not self.followup_handoff) or self.program_followup is not None or not source
+                or self.response_inputs.get(rid)!=self.input_generation
+                or (response.get('user_turn') or {}).get('item_id')!=self.turn_item_id
+                or source['revision']!=self.context['revision'] or self.turn_ended_at is None):
+            raise ValueError('没有可接续的当前节目用户话轮。')
+        request=dict(source,session=self.memory_session,ended=self.turn_ended_at,kind=args['kind'],accepted=False)
+        if not self.followup_current(request):raise ValueError('来访者或话轮已变化。')
+        if self.followup_handoff and self.control_pending and self.context['mode']=='task':request['stop_already_requested']=True
+        self.program_followup=request
+        self.accept_program_followup(source.get('final_text'))
+        if self.program_followup is None:raise ValueError('本轮最终识别未提供有效的接续请求。')
+        return dict(accepted=True,status='pending_program_followup')
+
+    def accept_program_followup(self,text):
+        request=self.program_followup
+        if request is None or request['accepted'] or text is None:return
+        if not isinstance(text,str) or not 1<=len(text.strip())<=500 or not self.followup_current(request):
+            self.program_followup=None
+            return
+        from vivis.speech.message_receipts import normalized
+        compact=normalized(text)
+        quoted=compact.startswith(('歌词写的是','歌词里说','歌词唱的是','剧本里说','剧本台词是','台词说的是'))
+        incidental=compact in ('嗯','啊','哈','对','好','是','继续','不要停','不用停','不要停止','不用停止','不退出','不要退出')
+        if not compact or quoted or incidental or all(c in '哈呵嘿啊哦呃嗯' for c in compact):
+            self.program_followup=None
+            return
+        request.update(text=text,accepted=True)
+        self.announcement_revision=None
+        self.log.write('program_followup_accepted',item_id=request['item'],kind_of_request=request['kind'])
+        if self.context['mode']=='task' and not request.get('stop_already_requested'):
+            from vivis.speech.fixed_replies import REPLIES
+            self.followup_handoff=True;self.control_pending=True
+            self.cloud_state.interrupt(source='program_followup_requested')
+            self.cancel_farewell('replaced')
+            self.farewell=dict(id=uuid.uuid4().hex,generation=self.input_generation,connection=self.message_connection,
+                target='interaction',text=REPLIES['program_interrupt'],source='program_interrupt')
+            self.emit(dict(kind='cloud_action',revision=self.context['revision'],arguments=dict(action='stop'),
+                text='节目中接续用户请求',transition_reply_id=self.farewell['id']))
+
+    async def resume_program_followup(self,ws,controller_events,state):
+        request=self.program_followup
+        if request is None:return
+        if not self.followup_current(request):
+            self.program_followup=None
+            self.log.write('program_followup_skipped',reason='stale_source',item_id=request['item'])
+            return
+        if (not request['accepted'] or self.context['mode']!='interaction' or not self.context['ready']
+                or not self.can_speak() or state.generating is not None or self.response_request_pending):return
+        self.program_followup=None;self.followup_handoff=False
+        self.announcement_revision=None;self.continue_response=False
+        revision=self.context['revision']
+        directive=('旧节目已退出。接续这一条用户原话，只回答问题，可以查机器人状态，不得点播、启动动作或读写私人业务。'
+            if request['kind']=='question' else
+            '旧节目已退出。接续这一条用户原话，只能用set_expression(source=command)做一次明确要求的表情，随后按控制结果回应。')
+        directive+=' 本轮原话是 '+json.dumps(request['text'],ensure_ascii=False)+self.dialect.instructions()
+        try:await controller_events.append(ws,self.context,'program_followup',directive)
+        except ControllerAcknowledgementTimeout:
+            self.log.write('program_followup_skipped',reason='ack_timeout');return
+        if not self.followup_current(request) or revision!=self.context['revision'] or not self.can_speak() or state.generating is not None:return
+        # Context changes clear receipt provenance. Restore only the already
+        # verified original turn. This never re-enters the business dispatcher.
+        self.message_receipts.filter(dict(type='conversation.item.input_audio_transcription.completed',
+            item_id=request['item'],transcript=request['text']))
+        if MESSAGE_REQUEST.search(request['text']):self.message_receipts.decide_intent(request['item'],False)
+        self.followup_response=dict(request,revision=revision,expression_used=False)
+        self.response_request_pending=True;self.last_response_request_at=time.monotonic()
+        await bounded_send(ws,json.dumps(dict(type='response.create',response=dict(instructions=directive)),ensure_ascii=False))
+        self.log.write('program_followup_resumed',item_id=request['item'],kind_of_request=request['kind'])
+
+    def public_prompt_available(self,state):
+        latest_dac=max((r.get('empty_dac',0) for r in state.responses.values()),default=0)
+        return (self.context['ready'] and self.presence.single_visible() and self.can_speak()
+                and not self.awaiting_recovery_user and not self.user_turn_pending(state) and state.generating is None
+                and not self.player.response_ids() and time.monotonic()>=latest_dac and not self.finish_responses
+                and not self.program_followup and not (self.message_lane and self.message_lane.task and not self.message_lane.task.done())
+                and not self.relay_pending and not self.courier_offer)
+
+    def cancel_public_prompt(self):
+        if self.public_prompt_task and not self.public_prompt_task.done():self.public_prompt_task.cancel()
+
+    def schedule_public_prompt(self,state,*,welcome):
+        from vivis.interaction.reception_conversation import public_invitation
+        from vivis.speech.message_voice import MessageSpeaker
+        from vivis.speech.trusted_reading import RealtimeReader
+        conversation=self.reception.conversation
+        if not welcome:conversation.last_attempt=time.monotonic()
+        self.public_prompt_started=False
+        connection=self.message_connection;generation=self.input_generation;revision=self.context['revision']
+        session=self.memory_session;person=self.recognized_person()
+        address=self.knowledge.people.get(person,{}).get('preferred_address') if person else None
+        def current():
+            return (self.cloud_state is state and connection is self.message_connection and session==self.memory_session
+                    and (self.public_prompt_started or (generation==self.input_generation and not self.in_speech))
+                    and revision==self.context['revision']
+                    and not conversation.declined and not conversation.paused and self.context['ready'] and self.can_speak()
+                    and self.presence.single_visible() and (person is None or person==self.recognized_person())
+                    and not (self.message_lane and self.message_lane.task and not self.message_lane.task.done()))
+        async def speak():
+            try:
+                turns=()
+                if welcome and person and self.memory:
+                    try:turns=(await asyncio.to_thread(self.memory.search,person,[],session))['matches']
+                    except sqlite3.Error:self.log.write('public_prompt_history_unavailable')
+                if not current():return
+                text=public_invitation(address,turns,welcome=welcome,index=conversation.count)
+                reader=None;audio=self.fixed_audio(text)
+                if audio is None:
+                    reader=RealtimeReader(self.url,self.secret,dict(self.session,voice=self.active_voice),self.log)
+                    audio=await asyncio.wait_for(reader.generate(text),policy()['playback_stall_s'])
+                # Check again immediately before queuing speech. The same guard
+                # remains active through playback and cancellation.
+                if not current() or not self.public_prompt_available(state):return
+                class PreparedAudio:
+                    async def generate(self,_):return audio
+                def started(words):
+                    self.public_prompt_started=True
+                    if not welcome:conversation.played(time.monotonic())
+                    self.emit(dict(kind='cloud_transcript',epoch=self.epoch,role='assistant',text=words,
+                        source='public_welcome' if welcome else 'public_idle_prompt'))
+                    self.log.write('public_prompt_played',welcome=welcome,count=conversation.count)
+                speaker=MessageSpeaker(reader,self.player,state,lambda _:current(),started,self.log.write,tts=PreparedAudio())
+                try:await speaker.say(text,None)
+                finally:
+                    if not welcome and self.public_prompt_started and session==self.memory_session:
+                        # Measure the gap from the end so DAC scheduling
+                        # cannot shorten the minimum gap between invitations.
+                        conversation.last_prompt=time.monotonic()
+            except (asyncio.CancelledError,StaleMessageTurn):pass
+            except Exception as exc:self.log.write('public_prompt_failed',error_type=type(exc).__name__)
+        self.public_prompt_task=asyncio.create_task(speak())
 
     def courier_request(self,args,event):
         if not self.courier or not self.memory:raise ValueError('退件取件码功能未启用。')
@@ -1296,6 +1477,20 @@ class CloudManagedVoice(ManagedVoice):
             args=json.loads(raw)
             revision=self.response_revisions.get(event.get('response_id'))
             if revision!=self.context['revision']:raise ValueError('Stale tool result after state change')
+            generation=self.response_inputs.get(event.get('response_id'),self.input_generation)
+            if name in ('robot_program','set_expression','set_speech_dialect','program_followup','defer_reception') and generation!=self.input_generation:
+                raise ValueError('Stale tool result after a new user turn')
+            if self.program_turn_only() and name not in ('robot_program','program_followup'):
+                raise ValueError('Program handoff must finish before interaction tools can run')
+            followup=self.followup_response
+            if followup:
+                if self.response_inputs.get(event.get('response_id'))!=followup['generation']:
+                    raise ValueError('Stale tool result from a different user turn')
+                if not self.followup_current(followup) or followup['revision']!=revision:
+                    raise ValueError('The continued user turn expired')
+                if name!='get_robot_status' and not (name=='set_expression' and followup['kind']=='expression'
+                        and not followup['expression_used'] and isinstance(args,dict) and args.get('source')=='command'):
+                    raise ValueError('Only the original question or one explicit expression may be continued')
             if self.recovered_query_generation==self.input_generation:
                 source=self.recovered_expression
                 expression_recovery=(name=='set_expression' and source is not None and not source['consumed']
@@ -1312,7 +1507,7 @@ class CloudManagedVoice(ManagedVoice):
                 speaker=self.reply_people.get(event.get('response_id'))
                 if speaker and not speaker.startswith('anonymous:') and speaker!=self.identified_person():
                     raise IdentityVerificationRequired('The speaker identity is no longer confirmed')
-            if self.awaiting_recovery_user and name in ('robot_program','set_expression','set_speech_dialect'):
+            if self.awaiting_recovery_user and name in ('robot_program','set_expression','set_speech_dialect','program_followup','defer_reception'):
                 raise ValueError('After service recovery, wait for fresh user speech; never replay actions')
             if name=='courier_pickup' and (self.response_inputs.get(event.get('response_id'),self.input_generation)!=self.input_generation
                     or self.in_speech or self.message_claimed==self.input_generation):
@@ -1339,6 +1534,20 @@ class CloudManagedVoice(ManagedVoice):
                     robot_memory_scope='all_archived_conversations_via_bounded_search')
                 self.tool_repair=None
                 self.continue_response=self.can_speak()
+            elif name=='program_followup':
+                output=self.stage_program_followup(args,event.get('response_id'))
+            elif name=='defer_reception':
+                source=(self.cloud_state.responses.get(event.get('response_id'),{}).get('user_turn') or {}) if self.cloud_state else {}
+                if (not isinstance(args,dict) or set(args)!={'kind'} or self.context['mode']!='interaction'
+                        or not self.context['ready'] or self.in_speech or not self.presence.single_visible()
+                        or self.response_inputs.get(event.get('response_id'))!=self.input_generation
+                        or not self.turn_item_id or source.get('item_id')!=self.turn_item_id):
+                    raise ValueError('Need a current visitor turn to pause proactive reception')
+                self.reception.conversation.defer(args['kind'])
+                self.thinking_generation=self.input_generation
+                self.announcement_revision=None;self.cancel_public_prompt()
+                self.tool_repair=None;self.continue_response=self.can_speak()
+                output=dict(accepted=True,status='public_prompts_deferred',instruction='简短回应即可，不再问问题。')
             elif name=='robot_program':
                 args=normalize_program(args,self.program_ids)
                 intent=controller_intent(args,self.program_ids,self.context['mode'])
@@ -1348,6 +1557,8 @@ class CloudManagedVoice(ManagedVoice):
                     raise ValueError('Greeting wake needs a fresh visible face/body and current finished user turn')
                 if greeting or args['action']=='wake' or args.get('explicit_wake') is True:
                     self.verify_wake_source(greeting)
+                if args['action']!='wake':
+                    self.program_followup=None;self.followup_handoff=False
                 if greeting:
                     self.presence.greet();self.reception.dismiss_current_visit()
                 if not greeting and (intent['kind']=='wake' or args.get('explicit_wake') is True):self.presence.wake();self.turn_engaged=True
@@ -1366,7 +1577,7 @@ class CloudManagedVoice(ManagedVoice):
                 else:
                     if not already_requested:
                         reply=None
-                        notice=preparation_reply(intent,self.programs)
+                        notice=preparation_reply(intent,self.programs,interrupting=self.context['mode']=='task')
                         if notice and self.question_onset and self.question_onset['generation']==self.input_generation:
                             self.cancel_farewell('replaced')
                             self.farewell=dict(id=uuid.uuid4().hex,generation=self.input_generation,connection=self.message_connection,**notice)
@@ -1378,6 +1589,7 @@ class CloudManagedVoice(ManagedVoice):
                 if self.context['mode']!='interaction' or not self.context['ready'] or not self.presence.allowed():
                     raise ValueError('Expression is only available in ready interaction; stop the current programme first if user requested it')
                 result=self.expression.publish(args,revision)
+                if followup:followup['expression_used']=True
                 if expression_recovery:self.recovered_expression['consumed']=True
                 output=dict(accepted=True,**result)
                 self.tool_repair=None
@@ -1565,6 +1777,7 @@ class CloudManagedVoice(ManagedVoice):
         try:
             self.message_connection=object();self.courier_waiters.clear()
             self.invalid_question=None;self.question_onset=None;self.recovered_query_generation=None
+            self.program_followup=None;self.followup_handoff=False;self.followup_response=None
             self.recovered_expression=None
             self.explicit_wake_pending=None
             self.cloud_audio_enabled=False
@@ -1580,7 +1793,8 @@ class CloudManagedVoice(ManagedVoice):
             self.response_request_pending=False
             async with websocket_connection(self.url,self.secret) as ws:
                 instructions,identity,_=self.context_snapshot()
-                initial=dict(self.session,instructions=instructions,modalities=['text'],voice=self.dialect.voice(self.session['voice']))
+                initial=dict(self.session,instructions=instructions,modalities=['text'],voice=self.dialect.voice(self.session['voice']),
+                    tools=self.available_tools())
                 accepted=await connect_session(ws,initial,self.log)
                 names={t.get('name') for t in accepted.get('tools',[]) if isinstance(t,dict)}
                 if names!={t['name'] for t in initial['tools']}:raise RuntimeError('Qwen did not confirm required tools; no local fallback')
@@ -1602,6 +1816,10 @@ class CloudManagedVoice(ManagedVoice):
                     if not isinstance(text,str) or not text.strip():return
                     if role=='user':self.presence.continued_turn()
                     audible=self.can_play_response(transcript_response_id)
+                    if (role=='assistant' and audible and self.thinking_generation is not None
+                            and self.thinking_generation!=self.input_generation
+                            and self.response_inputs.get(transcript_response_id)==self.input_generation):
+                        self.reception.conversation.addressed_response();self.thinking_generation=None
                     if text and (role=='user' and self.turn_engaged or role=='assistant' and audible):
                         self.resume_history.append(dict(role=role,text=text[:2000]))
                     if role=='user' or audible:
@@ -1681,6 +1899,9 @@ class CloudManagedVoice(ManagedVoice):
                         audio_gate.observe(event)
                         if welcome_gate.user_event(event,self.player):
                             await cancel_welcome(welcome_gate.responses,event['type'])
+                        if (not self.public_prompt_started and kind in ('input_audio_buffer.speech_started','conversation.item.input_audio_transcription.delta',
+                                    'conversation.item.input_audio_transcription.completed') and event.get('item_id')):
+                            self.cancel_public_prompt()
                         if kind=='response.created' and welcome_gate.created(event['response']['id']):
                             # The user may speak before response.created reaches
                             # us; quarantine this late welcome and its output.
@@ -1742,6 +1963,11 @@ class CloudManagedVoice(ManagedVoice):
                             else:self.turn_ended_at=time.monotonic()
                         if kind=='input_audio_buffer.speech_stopped':self.response_waiting_user_end=False
                         if kind=='response.function_call_arguments.done':await self.tool(ws,event);continue
+                        if (kind=='conversation.item.input_audio_transcription.completed' and self.question_onset
+                                and event.get('item_id')==self.turn_item_id==self.question_onset['item']
+                                and self.question_onset['generation']==self.input_generation and self.turn_ended_at is not None):
+                            self.question_onset['final_text']=event.get('transcript','')
+                            self.accept_program_followup(self.question_onset['final_text'])
                         waking=(kind=='conversation.item.input_audio_transcription.completed' and self.admit_explicit_wake(event,state))
                         recovered=(not waking and kind=='conversation.item.input_audio_transcription.completed' and self.recover_invalid_question(event,state))
                         if self.ordinary_message_turn(event):self.message_receipts.expect_intent(event['item_id'])
@@ -1755,6 +1981,7 @@ class CloudManagedVoice(ManagedVoice):
                     raise VoiceTransportError('Qwen cloud voice disconnected')
                 async def context_loop():
                     previous=initial['instructions'];previous_modalities=['text']
+                    previous_tools=initial['tools']
                     while True:
                         await asyncio.sleep(self.speech['managed_voice'].get('control_poll_interval_s',.05))
                         for released in self.message_receipts.drain_released():
@@ -1793,6 +2020,12 @@ class CloudManagedVoice(ManagedVoice):
                                 configured_hold_s=self.reception.c['arrival_hold_s'])
                             self.anonymous='anonymous:'+uuid.uuid4().hex
                             self.memory_session=self.folder.parent.name+':'+uuid.uuid4().hex
+                            self.reception.conversation.reset();self.thinking_generation=None
+                            if self.reception.conversation.enabled:
+                                # A real new arrival can greet again. A nearby
+                                # user turn that has already begun takes priority.
+                                recent=self.turn_ended_at is not None and time.monotonic()-self.turn_ended_at<self.reception.conversation.delay
+                                welcome_gate.user_seen=self.in_speech or recent
                             if self.context['mode']=='standby':
                                 self.control_pending=True
                                 self.emit(dict(kind='cloud_action',revision=self.context['revision'],arguments=dict(action='wake',program=''),text='前台检测到访客'))
@@ -1816,13 +2049,34 @@ class CloudManagedVoice(ManagedVoice):
                                 previous=instructions;previous_modalities=['text','audio']
                             if self.explicit_wake_pending:continue
                         modalities=['text','audio'] if self.can_speak() or self.finish_responses else ['text']
-                        if instructions!=previous or modalities!=previous_modalities:
-                            await asyncio.wait_for(ws.send(json.dumps(dict(type='session.update',session=dict(instructions=instructions,modalities=modalities)),ensure_ascii=False)),timeout=policy()['send_timeout_s'])
-                            previous=instructions;previous_modalities=modalities
+                        current_tools=self.available_tools()
+                        if instructions!=previous or modalities!=previous_modalities or current_tools!=previous_tools:
+                            update=dict(instructions=instructions,modalities=modalities)
+                            if current_tools!=previous_tools:update['tools']=current_tools
+                            await bounded_send(ws,json.dumps(dict(type='session.update',session=update),ensure_ascii=False))
+                            previous=instructions;previous_modalities=modalities;previous_tools=current_tools
                             self.log.write('cloud_context_updated',revision=self.context['revision'],face_visible=self.presence.last_visible,
                                 recognized=identity['recognized'],person_id=identity['person_id'])
                         self.schedule_task_notice(state)
+                        await self.resume_program_followup(ws,controller_events,state)
+                        if (self.followup_handoff and self.program_followup is None and self.context['mode']=='interaction'
+                                and self.context['ready'] and not self.in_speech and not self.user_turn_pending(state)):
+                            self.followup_handoff=False
+                        conversation=self.reception.conversation
+                        if conversation.enabled and self.reception.c['enabled']:
+                            available=(self.public_prompt_task is None or self.public_prompt_task.done()) and self.public_prompt_available(state)
+                            welcome=self.announcement_kind=='welcome' and self.announcement_revision==self.context['revision']
+                            if welcome:
+                                if welcome_gate.user_seen:
+                                    self.announcement_revision=None
+                                elif available:
+                                    self.announcement_revision=None
+                                    self.schedule_public_prompt(state,welcome=True)
+                            elif conversation.due(time.monotonic(),available=available and self.announcement_revision is None):
+                                self.schedule_public_prompt(state,welcome=False)
                         announce=self.announcement_revision==self.context['revision'] and self.can_speak()
+                        if conversation.enabled and self.reception.c['enabled'] and self.announcement_kind=='welcome':announce=False
+                        if self.program_followup is not None or (self.public_prompt_task and not self.public_prompt_task.done()):continue
                         if self.message_claimed!=self.input_generation and not self.awaiting_recovery_user and not self.response_waiting_user_end and not self.response_request_pending and not self.in_speech and state.generating is None and not (self.message_lane and self.message_lane.task and not self.message_lane.task.done()) and (self.continue_response or (announce and self.can_speak())):
                             request_revision=self.context['revision'];request_turn=self.turn_item_id
                             self.continue_response=False
@@ -1887,6 +2141,8 @@ class CloudManagedVoice(ManagedVoice):
             self.emit(dict(kind='cloud_error',epoch=self.epoch,error=str(exc)))
             self.enabled=False;self.shutdown.set()
         finally:
+            self.cancel_public_prompt()
+            if self.public_prompt_task:await asyncio.gather(self.public_prompt_task,return_exceptions=True)
             self.cancel_farewell('connection_closed')
             if self.farewell_task:
                 self.farewell_task.cancel();await asyncio.gather(self.farewell_task,return_exceptions=True)

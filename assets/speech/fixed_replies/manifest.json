@@ -108,6 +108,15 @@
       "frames": 72,
       "duration_s": 1.2
     },
+    "program_interrupt": {
+      "text": "稍等，我先停一下。",
+      "audio": "program_interrupt-e78a1ed81910.wav",
+      "audio_sha256": "e78a1ed819101509e645834f97fbf7b7465feeef32fdb6b739b750f22000ea40",
+      "animation": "program_interrupt-8bafe9897d90.npz",
+      "animation_sha256": "8bafe9897d9037a5f13c1be9114b72472b29f8a06dd03e82ad2ed8ff5f34e769",
+      "frames": 96,
+      "duration_s": 1.6
+    },
     "standby": {
       "text": "好，您忙，我这就休息。需要时再叫我。",
       "audio": "standby-6f492bc56e0c.wav",
@@ -125,6 +134,42 @@
       "animation_sha256": "5eb74ef5ae108c9b462ae9fe75783264d043ec7ddc90f7ddf4b416804e197994",
       "frames": 370,
       "duration_s": 6.16
+    },
+    "public_welcome": {
+      "text": "您好！您想聊聊天，还是看看我会做什么？",
+      "audio": "public_welcome-f228bef4c4c0.wav",
+      "audio_sha256": "f228bef4c4c0f3fe0eb857ddaa807e4e238673cf285b2b90557ec6a5ad96b3ba",
+      "animation": "public_welcome-5802ace39ffd.npz",
+      "animation_sha256": "5802ace39ffda64dc099550bf8962670ea41bf0a486358faf8eeed35f952e4f4",
+      "frames": 212,
+      "duration_s": 3.52
+    },
+    "idle_first": {
+      "text": "您想聊聊天，还是看看我会做什么？",
+      "audio": "idle_first-5e4e3d7364b5.wav",
+      "audio_sha256": "5e4e3d7364b554ab2580c341972e9ee649beb0cf0ed86552bc6cd45587048844",
+      "animation": "idle_first-3a7fa513daf7.npz",
+      "animation_sha256": "3a7fa513daf78c4f867613a576f8e9a0a53c880a406b56722a8dcd2fb576cab3",
+      "frames": 164,
+      "duration_s": 2.72
+    },
+    "idle_second": {
+      "text": "需要我帮您介绍一下吗？",
+      "audio": "idle_second-c0d17a641da8.wav",
+      "audio_sha256": "c0d17a641da82ff4d5304946db071ad7fc93d66e7e8aff51cb523a7457263970",
+      "animation": "idle_second-82636d08d9e6.npz",
+      "animation_sha256": "82636d08d9e649b43d3cc9ee3970a7ad529df5e248e6dd0b271f64a330af64c5",
+      "frames": 96,
+      "duration_s": 1.6
+    },
+    "idle_third": {
+      "text": "想听听我有哪些节目吗？",
+      "audio": "idle_third-76d0efc5bf9a.wav",
+      "audio_sha256": "76d0efc5bf9a33aa97e71e4e61ca49a151324e6cd0dca78ed051754c5211d199",
+      "animation": "idle_third-28d089677629.npz",
+      "animation_sha256": "28d089677629ba240740416ea9fe74e82cd85ea0827d63a8fc4f8e77d2592709",
+      "frames": 111,
+      "duration_s": 1.84
     }
   },
   "animation_source": {

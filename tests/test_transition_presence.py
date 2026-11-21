@@ -344,7 +344,7 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
     async def test_song_expression_and_stop_get_owned_preparation_speech(self):
         from vivis.interaction.cloud_control import preparation_reply
         for action,program,word in [('play','baigufuren','歌曲'),('play','wz2','剧本'),
-                                    ('play','expression-follow','表情跟随'),('stop','','停下')]:
+                                    ('play','expression-follow','表情跟随'),('stop','','稍等，我先停一下')]:
             with self.subTest(action=action,program=program):
                 s=self.s;s.context.update(mode='task' if action=='stop' else 'interaction',
                     target='baigufuren' if action=='stop' else 'interaction',ready=True)

@@ -15,8 +15,13 @@ REPLIES={
     'expression_preparation':'好的，表情跟随准备中。',
     'program_preparation':'好的，节目准备中。',
     'stop':'好的，先停下。',
+    'program_interrupt':'稍等，我先停一下。',
     'standby':'好，您忙，我这就休息。需要时再叫我。',
     'standby_fault':'机器头待机出现故障，暂时不能运动，请检查设备。系统会定期复查。',
+    'public_welcome':'您好！您想聊聊天，还是看看我会做什么？',
+    'idle_first':'您想聊聊天，还是看看我会做什么？',
+    'idle_second':'需要我帮您介绍一下吗？',
+    'idle_third':'想听听我有哪些节目吗？',
 }
 FORMAT='vivis-fixed-replies-1.0'
 MAX_SECONDS=30
