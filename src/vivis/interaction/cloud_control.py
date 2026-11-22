@@ -14,7 +14,7 @@ def tools(program_ids):
     from vivis.interaction.speech_dialect import configuration as dialect_configuration
     channels=channel_names()
     return [dict(type='function',name='robot_program',
-        description='用户唤醒、点播、要求模仿/学表情、停止/退出节目或要求休息/待机时调用。学表情是启动独立节目：action=play、program=expression-follow；不是set_expression，也不是只说准备好了。stop回交互，standby回待机；这两种只需action，不要填写节目。play必须填写program。明确呼叫名字用wake_reason=name；当前看到人脸或人体且获准直接招呼时可用greeting。否定、引用及旁人讲话不执行。这里只请求状态管理器，不直接控制电机。',
+        description='用户唤醒、点播、要求模仿/学表情、停止/退出节目或要求休息/待机时调用。学表情是启动独立节目：action=play、program=expression-follow；不是set_expression，也不是只说准备好了。stop回交互，standby回待机；这两种只需action，不要填写节目。play必须填写program。节目已运行时，“不要停止、别停、继续当前节目”表示保持现状，不调用任何切换工具，也不能用play重启当前节目。明确呼叫名字用wake_reason=name；当前看到人脸或人体且获准直接招呼时可用greeting。否定、引用及旁人讲话不执行。这里只请求状态管理器，不直接控制电机。',
         parameters=dict(type='object',properties=dict(action=dict(type='string',enum=['wake','play','stop','standby']),
             program=dict(type='string',enum=['',*program_ids],description='节目ID。expression-follow代表持续模仿用户表情的实时节目；其他ID对应节目单中的作品。用户明确要求学表情，或肯定表情跟随提议时，用play启动该节目，不能以聊天回应代替执行。'),explicit_wake=dict(type='boolean',description='用户本句明确呼唤配置名字时为true；仅泛化招呼必须为false。stop/standby可省略，不能要求用户先唤醒再停止'),
             wake_reason=dict(type='string',enum=['name','greeting'],description='仅wake使用。greeting须摄像头当前看到人脸或人体且controller_state.greeting_wake_allowed=true；不授予画面无人时的名字呼叫权限')),required=['action'],additionalProperties=False)),

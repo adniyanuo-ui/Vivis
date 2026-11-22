@@ -38,6 +38,17 @@ class FailureReportTests(unittest.TestCase):
             self.assertEqual(report['code'],'SERVO_STATUS');self.assertIn('Servo 20: status 0x01',report['raw_error'])
             self.assertNotIn('私密聊天',str(report))
 
+    def test_cycle_watchdog_separates_loop_stall_from_position_hold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp)/'worker';folder.mkdir()
+            (folder/'playback_log.json').write_text(json.dumps(dict(
+                error='Playback watchdog: stalled for >100 ms',watchdog_interval_s=.121,
+                control_watchdog_clock='cycle_start',watchdog_command_gap_s=.245)))
+            text='\n'.join(failure_lines(describe_failure(folder,1,'interaction')))
+            self.assertIn('控制循环连续超过100毫秒未推进',text)
+            self.assertIn('控制循环推进间隔=121.0毫秒',text)
+            self.assertIn('位置目标发送周期起点距今=245.0毫秒',text)
+
     def test_missing_corrupt_or_oversized_artifacts_do_not_mask_exit(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder=Path(tmp)/'worker';folder.mkdir()

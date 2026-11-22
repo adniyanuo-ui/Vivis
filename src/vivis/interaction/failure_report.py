@@ -45,7 +45,9 @@ def describe_failure(folder,returncode,program=None):
     if not raw:raw=clean(summary.get('error') or playback.get('error') or preparation.get('error') or '')
     code='WORKER_EXIT';message='子程序异常退出，未取得具体异常；请查看详细日志'
     if 'Playback watchdog:' in raw:
-        code='CONTROL_WATCHDOG';message='控制目标更新间隔超过100毫秒保护阈值'
+        code='CONTROL_WATCHDOG'
+        message=('控制循环连续超过100毫秒未推进' if playback.get('control_watchdog_clock')=='cycle_start'
+            else '控制目标更新间隔超过100毫秒保护阈值')
     elif 'Feedback watchdog:' in raw:
         code='FEEDBACK_TIMEOUT';message='舵机有效反馈超时'
     elif 'Standby pursuit target exceeds command limits' in raw or 'Upstream trajectory reference exceeds motion limits' in raw:
@@ -80,7 +82,10 @@ def describe_failure(folder,returncode,program=None):
     interval=playback.get('watchdog_interval_s')
     if finite(interval):
         result['watchdog_interval_ms']=interval*1000
-        result['evidence'].append(f'最后控制目标更新间隔={interval*1000:.1f}毫秒')
+        label='最后控制循环推进间隔' if playback.get('control_watchdog_clock')=='cycle_start' else '最后控制目标更新间隔'
+        result['evidence'].append(f'{label}={interval*1000:.1f}毫秒')
+    command_gap=playback.get('watchdog_command_gap_s')
+    if finite(command_gap):result['evidence'].append(f'最后位置目标发送周期起点距今={command_gap*1000:.1f}毫秒')
     holds=playback.get('feedback_rescue_events')
     if code in ('CONTROL_WATCHDOG','FEEDBACK_TIMEOUT') and isinstance(holds,list) and holds and isinstance(holds[-1],dict):
         last=holds[-1];ids=last.get('critical_ids',[]);ages=last.get('feedback_ages_s',{})

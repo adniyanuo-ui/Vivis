@@ -17,6 +17,12 @@ class ProgramSourceTextTests(unittest.TestCase):
         self.assertIsNotNone(veto('不要播放歌曲。','play'))
         self.assertIsNotNone(veto('请别休息。','standby'))
 
+    def test_preserving_current_program_vetoes_every_mutating_route(self):
+        for text in ('不要停止。','请别停下来，继续唱。','不用退出。','不要停止，而是继续播放。'):
+            for action in ('stop','play','standby'):
+                self.assertIsNotNone(veto(text,action),(text,action))
+        self.assertIsNone(veto('不要停止，不对，换一首歌曲。','play'))
+
 
 class ProgramSourceTests(unittest.IsolatedAsyncioTestCase):
     setUp=fixtures.ProgramFollowupTests.setUp
@@ -40,6 +46,19 @@ class ProgramSourceTests(unittest.IsolatedAsyncioTestCase):
         s.question_onset['final_text']='好了，停止吧。'
         await s.resume_program_calls(self.ws);await s.resume_program_calls(self.ws);await s.tool(self.ws,event)
         self.assertEqual(len(self.events),1);self.assertEqual(self.events[0]['arguments']['action'],'stop')
+
+    async def test_negative_final_cannot_restart_song_or_take_followup_route(self):
+        s=self.service
+        for action in ('play','standby','wake'):
+            self.turn('negative-'+action,'wrong-'+action)
+            s.question_onset['final_text']='小帅，不要停止。'
+            args=dict(action=action,**({'program':s.context['target']} if action in ('play','wake') else {}))
+            await s.tool(self.ws,dict(name='robot_program',call_id=action,response_id='wrong-'+action,arguments=json.dumps(args)))
+            self.assertFalse(self.events);self.assertFalse(s.control_pending);self.assertIsNone(s.farewell)
+        self.turn('negative-change','wrong-change')
+        s.question_onset['final_text']='不要停止。'
+        await s.tool(self.ws,dict(name='program_followup',call_id='change',response_id='wrong-change',arguments='{"kind":"change_song"}'))
+        self.assertFalse(self.events);self.assertIsNone(s.farewell);self.assertIsNone(s.program_followup)
 
     async def test_new_turn_discards_unsubmitted_old_stop(self):
         s=self.service;self.turn('old','stop')

@@ -7,6 +7,8 @@ TARGETS={
     'standby':r'(?:待机|休息|休眠|睡觉|自己玩|关闭)',
     'play':r'(?:播放|放|唱|演|开始|换歌|换一首|模仿|跟随)',
 }
+NEGATION=(r'(?:不要|不用|不必|不许|不准|不能|不想|不希望|别|请勿|无需|不是让你|没让你)'
+    r'(?:你|您|再|先|马上|立刻|给我|帮我|把歌|把歌曲|把节目){0,3}')
 
 
 def veto(text,action):
@@ -15,13 +17,18 @@ def veto(text,action):
     value=re.sub(r'\s+','',text)
     if re.match(r'^(?:歌词(?:里|中|写|唱)|台词|剧本(?:里|中)|他说|她说|我只是(?:引用|转述)|如果我说)',value):
         return 'quoted_or_hypothetical_control'
+    # Asking not to stop means preserving the current performance. A mistaken
+    # play/standby proposal must not bypass the stop veto by restarting it.
+    # Only an explicit retraction discards that earlier preservation request.
+    corrected=re.split(r'不对[，,、]?|改口[，,、]?',value)[-1]
+    if action in ('play','standby') and re.search(NEGATION+TARGETS['stop'],corrected):
+        return 'preserve_current_program'
     target=TARGETS.get(action)
     # A correction can reverse a request only if it refers to this action.
     # "不要停止，而是继续播放" still vetoes stop. A positive suffix does
     # not authorize anything: the original Qwen proposal remains necessary.
     suffix=re.split(r'不对[，,、]?|改口[，,、]?|还是[，,、]?|而是[，,、]?',value)[-1]
     if target and re.search(target,suffix):value=suffix
-    if target and re.search(r'(?:不要|不用|不必|不许|不准|不能|不想|不希望|别|请勿|无需|不是让你|没让你)'
-            r'(?:你|您|再|先|马上|立刻|给我|帮我|把歌|把歌曲|把节目){0,3}'+target,value):
+    if target and re.search(NEGATION+target,value):
         return 'negated_control'
     return None

@@ -94,7 +94,7 @@ class FeedbackRescueTests(unittest.TestCase):
         bus.read.side_effect=ReadTimeout('persistent disconnection')
         with tempfile.TemporaryDirectory() as tmp,patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus):
             log=Path(tmp)/'log.json'
-            with self.assertRaisesRegex(RuntimeError,'Feedback watchdog|Playback watchdog'):
+            with self.assertRaisesRegex(RuntimeError,'Feedback watchdog'):
                 play(profile,[2],np.full((1,1),2047.),60,None,log,Path(tmp)/'STOP',
                     max_seconds=2,frame_source=source,clock_factory=lambda:MonotonicClock(None))
             result=json.loads(log.read_text())
@@ -102,6 +102,59 @@ class FeedbackRescueTests(unittest.TestCase):
         self.assertEqual(profile['feedback_max_age_s'],1.)
         self.assertTrue(all(not r['command_sent'] for r in result['feedback_rescue_events']))
         bus.close.assert_called_once()
+
+    def scheduled_playback(self,hold_ticks=(),blocked_rescue=False):
+        """Advance a virtual clock through real loop/read scheduling, with no devices."""
+        from test_runtime import PlaybackTests
+        from vivis.runtime.playback import play
+        profile,bus=PlaybackTests().continuous_fixture()
+        now=[0.];epoch=[0.];tick=[0];commands=[]
+        def advance(seconds):now[0]+=seconds
+        timer=SimpleNamespace(monotonic=lambda:now[0],sleep=advance)
+        stopped=[False]
+        event=SimpleNamespace(is_set=lambda:stopped[0],set=lambda:stopped.__setitem__(0,True),wait=advance)
+        clock=SimpleNamespace(duration=None,continuous=True,fault=None,start=lambda:epoch.__setitem__(0,now[0]),
+            time=lambda:now[0]-epoch[0],close=Mock())
+        original_read=bus.read.side_effect
+        def read(*args):
+            advance(.12 if blocked_rescue and tick[0] in hold_ticks else .0006)
+            return original_read(*args)
+        bus.read.side_effect=read
+        original_goals=bus.goals.side_effect
+        def goals(*args):
+            commands.append((now[0],dict(args[0])));advance(.001);original_goals(*args)
+        bus.goals.side_effect=goals
+        def hold(self,clocks,stamp,period):
+            tick[0]+=1
+            return [2] if tick[0] in hold_ticks else []
+        source=SimpleNamespace(sample=lambda t,stamp:np.array([2047. if t<.02 else 2200.]))
+        with tempfile.TemporaryDirectory() as tmp,patch('vivis.runtime.playback.time',timer), \
+                patch('vivis.runtime.feedback.time',timer),patch('vivis.runtime.playback.threading.Event',return_value=event), \
+                patch('vivis.hardware.feetech.sdk.OfficialSDKBus',return_value=bus), \
+                patch.object(BudgetedFeedback,'command_hold_ids',hold):
+            path=Path(tmp)/'playback.json'
+            error=None
+            try:
+                result=play(profile,[2],np.full((1,1),2047.),60,None,path,Path(tmp)/'STOP',
+                    max_seconds=.3,frame_source=source,clock_factory=lambda:clock)
+            except RuntimeError as exc:error=exc;result=json.loads(path.read_text())
+        return result,error,commands
+
+    def test_responsive_rescue_beyond_100ms_resumes_with_one_bounded_motion_step(self):
+        result,error,commands=self.scheduled_playback(hold_ticks=range(3,11))
+        self.assertIsNone(error);self.assertTrue(result['completed'])
+        self.assertEqual(result['feedback_command_holds'],8)
+        gaps=[(b[0]-a[0],b[1][2]-a[1][2]) for a,b in zip(commands,commands[1:])]
+        longest,delta=max(gaps)
+        self.assertGreater(longest,.1)
+        # Never accumulate the held time into a large catch-up goal.
+        self.assertLessEqual(abs(delta),6)
+
+    def test_actual_120ms_block_during_rescue_still_trips_control_watchdog(self):
+        for tick in (1,2):
+            result,error,_=self.scheduled_playback(hold_ticks=[tick],blocked_rescue=True)
+            self.assertIsNotNone(error);self.assertIn('Playback watchdog',str(error))
+            self.assertGreaterEqual(result['watchdog_interval_s'],.12)
 
 
 if __name__=='__main__':unittest.main()

@@ -38,6 +38,7 @@ CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负�
     '用户说停止、结束、不用播了等，请调用robot_program stop回交互；待机/自己玩去吧则standby。'
     '节目播放或program_followup_handoff=true时，用户明确对你提问或要求一次表情，调用program_followup保留原话。问会不会唱属于问题。明确换节目、停止、待机仍调用robot_program。'
     '泛指换一首、换首别的歌是继续听另一首歌，用program_followup(kind=change_song)，不能只调用stop就结束。指定歌名才直接play。'
+    '节目正在播放时，“不要停止、别停、继续当前节目”要求保持现状，不调用robot_program或program_followup；play会重新开始播放，不能当作继续。'
     'stop/standby只需action字段；不能因为没有人脸或没叫名字而拒绝停止。play才需要program。'
     '任何点播必须调用robot_program，不能只口头答应；笼统的节目类别唯一时可选择，否则先澄清。'
     '实时表情跟随是独立节目：用户要你学表情、模仿我的表情、跟着我做表情时，调用robot_program(action=play,program=expression-follow)。'
@@ -1634,7 +1635,12 @@ class CloudManagedVoice(ManagedVoice):
 
     def program_source(self,event,args):
         """Final ASR precedes every mutating program proposal, even a fast stop."""
-        if args.get('action') not in ('stop','standby','play'):return None
+        action=args.get('action')
+        # wake may carry a programme, or interrupt a currently running task.
+        # Its spelling must not bypass the same source/preservation boundary.
+        if action=='wake':
+            action='play' if args.get('program') else 'stop' if self.context['mode']=='task' else 'wake'
+        if action not in ('stop','standby','play'):return None
         source=self.question_onset;rid=event.get('response_id')
         response=self.cloud_state.responses.get(rid,{}) if self.cloud_state else {}
         if (not source or source['item']!=self.turn_item_id or source['generation']!=self.input_generation
@@ -1652,7 +1658,7 @@ class CloudManagedVoice(ManagedVoice):
             self.log.write('program_control_waiting_final',call_id=event['call_id'],item_id=self.turn_item_id)
             return 'waiting'
         from vivis.interaction.program_source import veto
-        return veto(text,args['action'])
+        return veto(text,action)
 
     async def tool(self,ws,event,*,_resuming=False,_source_error=None):
         call=event.get('call_id');name=event.get('name');raw=event.get('arguments','')

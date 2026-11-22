@@ -498,7 +498,8 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
         if fault_monitor is not None:
             print('PLAYBACK SENSOR POLICY: warn on isolated sensor faults; stop on same-axis '
                   f'consecutive samples {fault_monitor.required}; hardware protection preserved',flush=True)
-        clock.start();last_tick=time.monotonic();previous_index=-1;skipped=0;started=time.monotonic()
+        clock.start();last_control_tick=None;previous_index=-1;skipped=0;started=time.monotonic()
+        result['control_watchdog_clock']='cycle_start'
         while True:
             if should_stop():raise RuntimeError('Operator stop')
             if clock.fault:raise RuntimeError(('Audio callback fault: ' if clock_factory is None else 'Control clock fault: ')+clock.fault)
@@ -525,7 +526,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                 stop.wait(min(.001,next_command_at-now));continue
             index=min(len(trajectory)-1,max(0,int((t+profile['actuator_latency_ms']/1000)*fps)))
             if index==previous_index and not scheduled_feedback:stop.wait(.001);continue
-            dt=(1/control_hz if previous_index<0 else now-last_tick)
+            dt=(1/control_hz if last_control_tick is None else now-last_control_tick)
             if scheduled_feedback:
                 if next_command_at is None:next_command_at=now
                 next_command_at+=1/control_hz
@@ -533,7 +534,12 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
             # A blocked USB call must not cause an unbounded jump on its return.
             if dt>.1:
                 result['watchdog_interval_s']=dt
+                if events:result['watchdog_command_gap_s']=now-events[-1]['sent_monotonic']
                 raise RuntimeError('Playback watchdog: stalled for >100 ms')
+            # Read-only feedback rescue is a responsive control cycle too.
+            # Keep the 100ms stall check, and never accumulate held cycles into
+            # a larger motion step when position transmission resumes.
+            last_control_tick=now
             if feedback_age_limit is not None and not record_only:
                 stale=[sid for sid in ids if now-last_good_feedback[sid]>feedback_age_limit]
                 if stale:
@@ -587,7 +593,7 @@ def play(profile,ids,trajectory,fps,audio_path,log_path,stop_file,max_seconds=No
                                for j,sid in enumerate(ids))):
                     raise ValueError('Live gaze target exceeds command limits')
             gaze_done=time.monotonic() if mojia_gaze else None
-            last=limit_step(last,target,speed_limits,max(dt,1e-6));last_tick=now
+            last=limit_step(last,target,speed_limits,max(dt,1e-6))
             if direct_ids:
                 nominal=np.asarray(target)[direct_columns]
                 if not np.isfinite(nominal).all() or np.any(nominal<direct_low) or np.any(nominal>direct_high):
