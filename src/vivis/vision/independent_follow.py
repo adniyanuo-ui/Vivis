@@ -109,7 +109,7 @@ class IndependentFaceFollower:
         for sid in (self.eye_id,33,34):self.observe(sid,measured[sid],now)
 
     def step(self,packet,state,dt,now,returning=False):
-        age=self.config['transport']['max_age_s'];velocity={33:0.,34:0.}
+        age=self.config['transport']['max_age_s'];velocity={33:0.,34:0.};roll_target=None
         fresh=all(sid in self.observations and 0<=now-self.observations[sid][1]<=age for sid in (self.eye_id,33,34))
         visible=(state=='tracking' and packet is not None and packet.get('target') is not None
                  and 0<=now-packet['timestamp_monotonic']<=age)
@@ -129,6 +129,7 @@ class IndependentFaceFollower:
             ref=self.reference.planners[34];extent=min(2047-ref.low,ref.high-2047)
             offset=max(-1.,min(1.,self.filtered_roll/self.plan['roll_reference_rad']))
             target=2047+self.plan['roll']['sign']*extent*self.plan['roll_follow_ratio']*offset
+            roll_target=target
             if self.plan.get('roll_control_mode','position')=='visual_velocity':
                 # A head-fixed camera measures residual image tilt. Restoring
                 # toward a neutral-anchored absolute position opposes the lean.
@@ -148,6 +149,7 @@ class IndependentFaceFollower:
         goals=self.reference.step(velocity,dt,returning=should_return and fresh)
         self.diagnostic=dict(enabled=True,topology='independent',reason=reason,requested_velocity=velocity,
             roll_control_mode=self.plan.get('roll_control_mode','position'),
+            roll_target_counts=roll_target,roll_feedback_counts=self.observations.get(34,(None,None))[0],
             image_roll_rad=self.filtered_roll,eye_reference_id=self.eye_id,
             eye_motion_source='encoder',feedback_age_s={str(s):now-v[1] for s,v in self.observations.items()},
             axes={str(s):dict(p.last_diagnostic) for s,p in self.reference.planners.items()})

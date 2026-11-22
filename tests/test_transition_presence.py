@@ -427,10 +427,14 @@ class FarewellBridgeTests(unittest.TestCase):
         self.assertFalse(bridge.accept(dict(kind='voice_reply_done',reply_id='one',epoch=0)))
         self.assertEqual(bridge.transition_reply_id,'two')
         self.assertTrue(bridge.accept(dict(kind='voice_reply_done',reply_id='two',epoch=0)))
+        revision=bridge.context_revision;packets=len(stream.getvalue().splitlines())
         bridge.context('standby','standby',True)
-        self.assertNotIn('transition_reply_id',json.loads(stream.getvalue().splitlines()[-1]))
+        self.assertEqual(len(stream.getvalue().splitlines()),packets)
+        self.assertEqual(bridge.context_revision,revision)
+        self.assertIsNone(bridge.last_context[3])
         bridge.transition_reply_id='three';bridge.context('interaction','interaction',True)
         self.assertNotIn('transition_reply_id',json.loads(stream.getvalue().splitlines()[-1]))
+        self.assertEqual(bridge.context_revision,revision+1)
 
 
 if __name__=='__main__':unittest.main()

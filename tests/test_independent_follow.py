@@ -73,6 +73,8 @@ class IndependentTrackingTests(unittest.TestCase):
             held.append(last[roll])
         self.assertGreater(abs(held[239]-2047),5)
         self.assertLess(abs(held[-1]-2047),1)
+        self.assertEqual(g.platform.diagnostic['roll_target_counts'],2047)
+        self.assertLess(abs(g.platform.diagnostic['roll_feedback_counts']-2047),1)
         self.assertLess(max(abs(b-a) for a,b in zip(held,held[1:])),600/60+1e-6)
         self.assertLess(max(held[:240])-min(held[180:240]),30)
 

@@ -73,9 +73,10 @@ class ProgramFollowupTests(unittest.IsolatedAsyncioTestCase):
         self.ready_interaction()
         await s.resume_program_followup(self.ws, controller, self.state)
         await s.resume_program_followup(self.ws, controller, self.state)
-        controller.append.assert_awaited_once()
-        self.assertIn('会唱白骨夫人吗', controller.append.await_args.args[3])
+        controller.append.assert_not_called()  # Original ASR already exists on the server.
         instructions=json.loads(self.ws.send.await_args.args[0])['response']['instructions']
+        self.assertIn('会唱白骨夫人吗',instructions)
+        self.assertEqual(json.loads(self.ws.send.await_args.args[0])['response']['modalities'],['text','audio'])
         self.assertIn(s.session['instructions'],instructions)
         self.assertIn('20',instructions)
         self.assertIn('current_weekday',instructions)
@@ -187,18 +188,98 @@ class ProgramFollowupTests(unittest.IsolatedAsyncioTestCase):
         controller.append.assert_not_called()
         self.assertIsNone(s.program_followup)
 
-    async def test_new_input_during_network_ack_does_not_send_old_response(self):
+    async def test_new_input_before_resume_does_not_send_old_response(self):
         s = self.service
         self.turn('old','first')
         s.question_onset['final_text'] = '大笑一下。'
         await self.tool('first','program_followup',kind='expression')
         self.ready_interaction()
-        def replace(*_):self.turn('new','later')
-        controller = SimpleNamespace(append=AsyncMock(side_effect=replace))
+        self.turn('new','later')
+        controller = SimpleNamespace(append=AsyncMock())
         count = self.ws.send.await_count
         await s.resume_program_followup(self.ws,controller,self.state)
         self.assertEqual(self.ws.send.await_count,count)
         self.assertIsNone(s.followup_response)
+
+    async def test_reply_id_removal_cannot_drop_ready_question(self):
+        s=self.service;self.turn('question','decision');s.question_onset['final_text']='今天星期几呀？'
+        await self.tool('decision','program_followup',kind='question')
+        self.ready_interaction()
+        s.request(dict(kind='voice_context',revision=5,mode='interaction',target='interaction',ready=True))
+        controller=SimpleNamespace(append=AsyncMock(side_effect=AssertionError('redundant controller item')))
+        await s.resume_program_followup(self.ws,controller,self.state)
+        request=json.loads(self.ws.send.await_args.args[0])
+        self.assertEqual(request['type'],'response.create')
+        self.assertIn('今天星期几呀',request['response']['instructions'])
+        self.assertEqual(s.followup_response['revision'],5)
+
+    async def test_generic_song_change_and_wrong_stop_both_select_another_song_once(self):
+        for wrong_stop in (False,True):
+            s=self.service;self.events.clear();s.control_pending=False;s.followup_handoff=False
+            s.context.update(mode='task',target='baigufuren',ready=True,revision=s.context['revision']+1)
+            self.turn('change'+str(wrong_stop),'decision'+str(wrong_stop));rid='decision'+str(wrong_stop)
+            if wrong_stop:
+                await self.tool(rid,'robot_program',action='stop')
+                self.assertEqual(len(self.events),1)  # Stop precedes ASR/classification.
+                self.assertFalse(s.program_followup['accepted'])
+                s.accept_program_followup('换一首歌曲。')
+                with patch('vivis.speech.program_followup.classify',new=AsyncMock(return_value='change_song')):
+                    await s.resume_program_followup(self.ws,None,self.state)
+                    await s.program_check_task
+            else:
+                s.question_onset['final_text']='换一首歌曲。'
+                await self.tool(rid,'program_followup',kind='change_song')
+            ticket=s.farewell
+            s.request(dict(kind='voice_context',revision=s.context['revision']+1,mode='interaction',target='interaction',
+                ready=True,transition_reply_id=ticket['id']))
+            s.finish_farewell(ticket,'played');s.enabled=True
+            await s.resume_program_followup(self.ws,None,self.state)
+            await s.resume_program_followup(self.ws,None,self.state)
+            actions=[e['arguments'] for e in self.events if e['kind']=='cloud_action']
+            self.assertEqual(len(actions),2)
+            self.assertEqual(actions[0]['action'],'stop');self.assertEqual(actions[1]['action'],'play')
+            self.assertNotEqual(actions[1]['program'],'baigufuren')
+            self.assertEqual(s.programs[actions[1]['program']]['category'],'song')
+
+    async def test_plain_stop_review_does_not_start_a_new_program(self):
+        s=self.service;self.turn('stop','decision');s.question_onset['final_text']='好了，可以了。'
+        await self.tool('decision','robot_program',action='stop')
+        with patch('vivis.speech.program_followup.classify',new=AsyncMock(return_value='ignore')):
+            await s.resume_program_followup(self.ws,None,self.state);await s.program_check_task
+        self.assertIsNone(s.program_followup);self.assertFalse(s.followup_handoff)
+        self.assertEqual(len(self.events),1)
+
+    async def test_late_program_tool_in_interaction_does_not_leave_speech_muted(self):
+        s=self.service;s.context.update(mode='interaction',target='interaction',ready=True);s.enabled=True
+        self.turn('weather','answer')
+        self.assertNotIn('program_followup',{t['name'] for t in s.available_tools()})
+        result=await self.tool('answer','program_followup',kind='question')
+        self.assertEqual(result['status'],'already_in_interaction')
+        self.assertIsNone(s.tool_repair);self.assertTrue(s.can_speak());self.assertTrue(s.continue_response)
+
+    async def test_audible_public_invitation_survives_one_missing_face_frame_and_is_context(self):
+        from types import SimpleNamespace
+        s=self.service;s.context.update(mode='interaction',target='interaction',ready=True);s.enabled=True
+        pcm=b'\x01\x00'*2400
+        s.fixed_audio=Mock(return_value=SimpleNamespace(pcm24_bytes=pcm,samples=[],sample_rate=24000))
+        s.schedule_public_prompt(self.state,welcome=False)
+        async def until(predicate):
+            deadline=time.monotonic()+1
+            while not predicate():
+                if time.monotonic()>deadline:raise AssertionError('Public prompt timed out')
+                await asyncio.sleep(.005)
+        await until(lambda:s.player.count>0)
+        s.player.render(240,time.monotonic()+.01)
+        await until(lambda:s.public_prompt_started)
+        s.presence.single_visible.return_value=False
+        s.player.render(s.player.count,time.monotonic()+.01)
+        await asyncio.wait_for(s.public_prompt_task,1)
+        self.assertEqual(s.public_prompt_context['playback_state'],'completed')
+        facts=s.context_snapshot()[0]
+        self.assertIn('spoken_public_invitation',facts)
+        self.assertIn(s.public_prompt_context['text'],facts)
+        s.input_generation+=2
+        self.assertNotIn('"spoken_public_invitation"',s.context_snapshot()[0])
 
     async def test_expression_cannot_act_until_ready_and_executes_once(self):
         s = self.service

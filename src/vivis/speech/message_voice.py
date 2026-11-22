@@ -31,15 +31,16 @@ class BoundedTTS:
 
 
 class MessageSpeaker:
-    def __init__(self,engine,player,state,valid,emit,log,tts=None):
+    def __init__(self,engine,player,state,valid,emit,log,tts=None,*,source='trusted_message_tts'):
         self.engine=engine;self.player=player;self.state=state;self.valid=valid;self.emit=emit;self.log=log;self.tts=tts or BoundedTTS(engine)
         self.started=False
+        self.source=source
 
     async def say(self,text,request):
         self.started=False
         rid='message_'+uuid.uuid4().hex;complete=False;announced=False
         response=dict(created=time.monotonic(),received_audio_s=0.,transcript=text,status='in_progress',
-            source='trusted_message_tts',user_turn=None)
+            source=self.source,user_turn=None)
         self.state.responses[rid]=response
         try:
             for start in range(0,len(text),400):
@@ -78,4 +79,4 @@ class MessageSpeaker:
         finally:
             self.started=rid in self.player.started_responses
             if not complete:self.state.interrupt(rid,source='message_speech_interrupted')
-            self.log('message_tts_finished',response_id=rid,complete=complete,audio_started=self.started)
+            self.log('message_tts_finished',response_id=rid,complete=complete,audio_started=self.started,source=self.source)

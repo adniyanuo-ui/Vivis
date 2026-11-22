@@ -32,6 +32,12 @@ class VoiceBridge:
         early=bool(speech_ready) and not ready and (mode=='interaction' or reply is not None and not standby_fault)
         value=(mode,target,bool(ready),reply,early,bool(standby_fault))
         if value==self.last_context:return
+        if (self.last_context is not None and reply is None and self.last_context[3] is not None
+                and value[:3]+value[4:]==self.last_context[:3]+self.last_context[4:]):
+            # The worker already completed this reply ID. Removing bookkeeping
+            # does not change mode, readiness or speaker authority, and must not
+            # invalidate a user question that is being resumed concurrently.
+            self.last_context=value;return
         self.last_context=value;self.context_revision+=1
         self.send(kind='voice_context',revision=self.context_revision,mode=mode,target=target,ready=bool(ready),
                   **({'speech_ready':True} if early else {}),

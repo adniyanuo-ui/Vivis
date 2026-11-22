@@ -20,7 +20,8 @@ def tools(program_ids):
             wake_reason=dict(type='string',enum=['name','greeting'],description='仅wake使用。greeting须摄像头当前看到人脸或人体且controller_state.greeting_wake_allowed=true；不授予画面无人时的名字呼叫权限')),required=['action'],additionalProperties=False)),
         dict(type='function',name='program_followup',
             description='节目期间，用户明确对机器人提出完整问题或要求做一次表情时调用。结束旧表演后由控制器接续本轮原话。所有直接问题都用question，包括今天星期几、现在几点、天气、年龄、能力、会不会唱某首歌等；不能先直接回答，即使知道答案。提到歌名也不点播。只在明确请求做一次已有表情时用expression。停止、待机、明确点播或持续模仿用robot_program。歌词、剧本、自播、旁人说话、否定、引用、单纯笑声或附和尚不构成请求。听不清时不要调用。',
-            parameters=dict(type='object',properties=dict(kind=dict(type='string',enum=['question','expression'])),
+            parameters=dict(type='object',properties=dict(kind=dict(type='string',enum=['question','expression','change_song'],
+                description='泛指换一首、换首别的歌用change_song；不是仅停止。指定歌名仍用robot_program play。')),
                 required=['kind'],additionalProperties=False)),
         dict(type='function',name='defer_reception',
             description='仅交互态。用户明确说想一想或等一下，用thinking暂停冷场提示，之后用户重新主动交流才恢复。明确说不想聊或先不用，用declined关闭本次来访的主动提示。不是结束交互的指令，也不拒绝用户后续主动提问。',
@@ -68,6 +69,14 @@ def normalize_program(arguments,program_ids):
     result=dict(action=action,program=program,explicit_wake=wake)
     if action=='wake' and 'wake_reason' in arguments:result['wake_reason']=reason
     return result
+
+
+def next_song(programs,current):
+    """An explicit generic change request uses catalogue order, excluding the old song."""
+    songs=[p['id'] for p in programs.values() if p.get('category')=='song' and p['kind']=='prerecorded']
+    if current not in songs:return songs[0] if songs else None
+    if len(songs)<2:return None
+    return songs[(songs.index(current)+1)%len(songs)]
 
 
 def controller_intent(arguments,program_ids,mode):

@@ -239,6 +239,30 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
             self.service.verify_identity(self.state)
         self.assertEqual(self.service.conversation_person,'alice')
 
+    async def test_current_public_turn_is_enriched_without_reassigning_anonymous_history(self):
+        s=self.service;original_session=s.memory_session;s.turn_person=s.anonymous
+        s.turn_item_id='current';s.turn_ended_at=time.monotonic();s.presence.single_visible=Mock(return_value=True)
+        s.question_onset=dict(person=s.anonymous,generation=s.input_generation,item='current',
+            connection=s.message_connection,final_text='今天星期几？')
+        s.resume_history.append(dict(role='user',text='今天星期几？'))
+        s.verify_identity(self.state)
+        self.state.interrupt.assert_not_called()
+        self.assertEqual(s.turn_person,s.anonymous);self.assertEqual(s.memory_session,original_session)
+        self.assertEqual(s.conversation_person,'alice')
+        s.conversation_person=None;s.question_onset['final_text']='给小王留言，请他买东西。'
+        with self.assertRaises(ConversationReset):s.verify_identity(self.state)
+
+    async def test_public_cached_speech_defers_identity_loss_until_dac_end(self):
+        s=self.service;s.conversation_person='alice';self.person=None
+        self.state.responses['local']=dict(source='public_reception',received_audio_s=.02,status='completed',empty_dac=10.5)
+        s.player.add('local',(np.ones(480,dtype='<i2')*1000).tobytes())
+        s.player.finish('local')
+        with patch('vivis.speech.cloud_managed.time.monotonic',return_value=10.) as clock:
+            s.verify_identity(self.state);clock.return_value=self.identity_deadline
+            s.verify_identity(self.state);self.state.interrupt.assert_not_called()
+            s.player.render(s.player.count,10.1)
+            with self.assertRaisesRegex(ConversationReset,'identity_uncertain'):s.verify_identity(self.state)
+
     async def test_initial_identification_preserves_welcome_audio_and_dac_tail(self):
         service=self.service;service.cloud_state=self.state
         service.resume_history.append(dict(role='assistant',text='您好！请问怎么称呼您？'))
