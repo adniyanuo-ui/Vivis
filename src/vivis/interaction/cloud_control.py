@@ -10,7 +10,7 @@ from vivis.paths import ROOT
 
 
 def tools(program_ids):
-    from vivis.interaction.expression_intent import channel_names
+    from vivis.interaction.expression_intent import channel_names,PRESETS
     from vivis.interaction.speech_dialect import configuration as dialect_configuration
     channels=channel_names()
     return [dict(type='function',name='robot_program',
@@ -28,8 +28,8 @@ def tools(program_ids):
             parameters=dict(type='object',properties=dict(kind=dict(type='string',enum=['thinking','declined'])),
                 required=['kind'],additionalProperties=False)),
         dict(type='function',name='set_expression',
-            description='交互态52基础表情及组合：expression可选单个标准通道名，或custom并在weights给出多个通道权重。悲伤、哭脸、大笑等用custom组合已有基础表情，不要求重新标定才可试。smile温和微笑，neutral/attentive收回表情意图，auto恢复自动回应。明确口令source=command，聊天合理回应source=social。点头属于颈部动作，不在52通道内。',
-            parameters=dict(type='object',properties=dict(expression=dict(type='string',enum=['smile','neutral','attentive','auto','custom',*channels]),
+            description='交互态表情：joy开心、concern温和关切、listening认真倾听、surprise惊喜，均为已有52通道的固定组合。smile温和微笑；neutral/attentive收回；auto恢复自动回应。也可选单个标准通道或custom和weights组合，悲伤/哭脸/大笑用custom。明确口令source=command，聊天合理回应source=social。点头属于颈部动作，不在52通道内。',
+            parameters=dict(type='object',properties=dict(expression=dict(type='string',enum=['smile','neutral','attentive','auto','custom',*PRESETS,*channels]),
                 intensity=dict(type='number',minimum=0,maximum=1),duration_s=dict(type='number',minimum=1,maximum=30),
                 weights=dict(type='object',properties={name:dict(type='number',minimum=0,maximum=1) for name in channels},additionalProperties=False,minProperties=1),
                 source=dict(type='string',enum=['command','social'])),required=['expression'],additionalProperties=False)),

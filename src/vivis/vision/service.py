@@ -20,6 +20,7 @@ from vivis.motion.mapping import ROOT, read_json
 from vivis.vision.policy import GazePolicy, validate_config, VERSION
 from vivis.vision.detection import FaceVision, LatestCamera
 from vivis.vision.preview import Preview
+from vivis.interaction.social_expression import observation as social_observation
 
 
 def main(argv=None):
@@ -218,6 +219,7 @@ def main(argv=None):
                         weights=observation['weights']
                         packet['social_smile']=social.step(weights.get('mouthSmileLeft',0.),weights.get('mouthSmileRight',0.),
                             observation['timestamp_monotonic'],observation['valid'] and social_selected)
+                        packet['social_expression']=social_observation(observation,single=metrics['faces']==1)
                 expression=None
                 if observation is not None and observation['valid'] and metrics['faces']==1:
                     expression=dict(bilateral_smile=round(min(observation['weights'].get('mouthSmileLeft',0.),
@@ -246,6 +248,7 @@ def main(argv=None):
                            'mount': config['control']['camera_mount']}
                 current['camera_eye']=config['control'].get('camera_eye')
                 if social is not None:current['social_smile']=packet['social_smile']
+                if social is not None:current['social_expression']=packet['social_expression']
                 if expression_config.get('enabled'):current['face_expression']=packet['face_expression']
                 if config.get('schema_version') in ('mojia-person-gaze-1.0','vivis-person-gaze-1.0'):
                     # The camera service has no actuator feedback; show image direction,

@@ -164,7 +164,7 @@ class ProgramFollowupTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_short_negation_false_laughter_and_superseded_tool_do_not_stop_program(self):
         s = self.service
-        for i, text in enumerate(('不要停','哈哈哈','嗯','歌词写的是你多大了。','剧本里说大笑一下。')):
+        for i, text in enumerate(('不要停','哈哈哈','嗯','歌词写的是你多大了。','剧本里说大笑一下。','请不要停止，继续唱吧。')):
             self.turn('item'+str(i),'rid'+str(i))
             s.question_onset['final_text'] = text
             self.assertFalse((await self.tool('rid'+str(i),'program_followup',kind='expression'))['accepted'])
@@ -220,9 +220,10 @@ class ProgramFollowupTests(unittest.IsolatedAsyncioTestCase):
             self.turn('change'+str(wrong_stop),'decision'+str(wrong_stop));rid='decision'+str(wrong_stop)
             if wrong_stop:
                 await self.tool(rid,'robot_program',action='stop')
-                self.assertEqual(len(self.events),1)  # Stop precedes ASR/classification.
-                self.assertFalse(s.program_followup['accepted'])
-                s.accept_program_followup('换一首歌曲。')
+                self.assertFalse(self.events)  # Final source precedes every state change.
+                s.question_onset['final_text']='换一首歌曲。'
+                await s.resume_program_calls(self.ws)
+                self.assertEqual(len(self.events),1)
                 with patch('vivis.speech.program_followup.classify',new=AsyncMock(return_value='change_song')):
                     await s.resume_program_followup(self.ws,None,self.state)
                     await s.program_check_task

@@ -55,8 +55,9 @@ CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负�
     'controller_state.unattributed_source_notice=true表示识别片段没有可靠的话轮归属，不能据此办理业务或宣称已记录；请用户完整表达当前请求，只问缺项，不把查询误说成登记取件码失败。'
     '交互态用户说笑一个/别笑了/认真一点/恢复自然时，调用set_expression，source=command；不能只口头答应。'
     '聊天自动回应使用同一个set_expression，source=social，结合当前话语、上下文和可观察表情；不要机械模仿。'
+    '已有四种固定组合：joy开心、concern温和关切、listening认真倾听、surprise惊喜。用户明确要求用source=command；聊天语义适合时可用source=social。它们是标定通道组合，不是新舵机动作；本轮不因视觉变化额外主动起话题。'
     '用户苦笑、抱怨、表达难过或谈严肃事情时，优先attentive或neutral收起笑容；愉快交流可温和smile，不每句都调用。'
-    '视觉数据只是嘴角动作观察，不证明内心情绪。52基础表情均可调用：单通道用标准通道名，多通道用custom和weights。'
+    '视觉数据只是面部动作观察，不证明内心情绪。52基础表情均可调用：单通道用标准通道名，多通道用custom和weights。'
     '用户要求悲伤、哭脸、大笑、惊讶等，实时选择已有通道组合，不以需要重新标定为由拒绝。悲伤可组合BrowInnerUp和MouthFrown；大笑可组合MouthSmile、CheekSquint、JawOpen；哭脸是面部组合，不声称已专门验收。'
     '需要闭嘴/收回下颌时可用custom权重JawOpen=0；MouthClose通道在某些标定中没有有效位移，不要把通道名称当作动作已经成功。'
     '通道存在不保证都有非零映射或独立可见动作，按本体反馈如实说明。点头是颈部姿态，不在52表情通道内，仍未开放。'
@@ -137,6 +138,7 @@ class CloudManagedVoice(ManagedVoice):
         self.task_cache=None;self.task_refresh_at=0.;self.task_cache_version=-1
         self.task_visit_announced=set();self.task_notice_attempts={};self.relay_pending={};self.turn_item_id=None;self.turn_message_id=None;self.turn_ended_at=None
         self.memory_turns={}
+        self.program_waiters={}
         self.response_request_pending=False;self.last_response_request_at=None
         self.memory_task=None;self.memory_retry_at=0.;self.anonymous='anonymous:'+uuid.uuid4().hex
         self.turn_person=self.anonymous;self.turn_engaged=False;self.turn_saved=False;self.pending_user_text=None;self.reply_people={};self.pending_memories={}
@@ -233,6 +235,7 @@ class CloudManagedVoice(ManagedVoice):
     def output_ready(self):
         return (self.enabled and self.context['mode']=='interaction' and self.context.get('speech_ready',self.context['ready'])
                 and self.farewell is None
+                and not self.program_waiters
                 and self.pending_mode is None
                 and not self.tool_repair and not self.control_pending and self.expression_pending is None
                 and self.pending_voice_switch is None and not self.awaiting_recovery_user
@@ -1349,10 +1352,12 @@ class CloudManagedVoice(ManagedVoice):
             self.program_followup=None
             return
         from vivis.speech.message_receipts import normalized
+        from vivis.interaction.program_source import veto
         compact=normalized(text)
         quoted=compact.startswith(('歌词写的是','歌词里说','歌词唱的是','剧本里说','剧本台词是','台词说的是'))
         incidental=compact in ('嗯','啊','哈','对','好','是','继续','不要停','不用停','不要停止','不用停止','不退出','不要退出')
-        if not compact or quoted or incidental or all(c in '哈呵嘿啊哦呃嗯' for c in compact):
+        action='play' if request['kind']=='change_song' else 'stop'
+        if not compact or quoted or incidental or veto(text,action) or all(c in '哈呵嘿啊哦呃嗯' for c in compact):
             self.program_followup=None
             return
         request.update(text=text,accepted=True)
@@ -1612,6 +1617,43 @@ class CloudManagedVoice(ManagedVoice):
             self.courier_waiters.pop(call,None)
             await self.tool(ws,waiting['event'],_resuming=True,_source_error=error)
 
+    async def resume_program_calls(self,ws):
+        for call,waiting in list(self.program_waiters.items()):
+            live=(waiting['connection'] is self.message_connection and waiting['generation']==self.input_generation
+                and waiting['revision']==self.context['revision'] and waiting['item']==self.turn_item_id)
+            final=self.question_onset.get('final_text') if self.question_onset else None
+            if live and not final and time.monotonic()<waiting['deadline']:continue
+            self.program_waiters.pop(call,None)
+            if live and final:
+                await self.tool(ws,waiting['event'],_resuming=True)
+            else:
+                await bounded_send(ws,json.dumps(dict(type='conversation.item.create',item=dict(type='function_call_output',
+                    call_id=call,output=json.dumps(dict(accepted=False,status='program_source_expired',
+                        instruction='本轮完整原话未核验或话轮已变化，未执行节目切换；等待新的明确请求。'),ensure_ascii=False))),ensure_ascii=False))
+                self.log.write('program_control_discarded',call_id=call,reason='stale_or_missing_source')
+
+    def program_source(self,event,args):
+        """Final ASR precedes every mutating program proposal, even a fast stop."""
+        if args.get('action') not in ('stop','standby','play'):return None
+        source=self.question_onset;rid=event.get('response_id')
+        response=self.cloud_state.responses.get(rid,{}) if self.cloud_state else {}
+        if (not source or source['item']!=self.turn_item_id or source['generation']!=self.input_generation
+                or source['connection'] is not self.message_connection or self.in_speech or self.turn_ended_at is None
+                or self.response_inputs.get(rid)!=self.input_generation
+                or (response.get('user_turn') or {}).get('item_id')!=self.turn_item_id):
+            return 'unbound_program_source'
+        if time.monotonic()-self.turn_ended_at>policy()['message_extract_s']:return 'expired_program_source'
+        text=source.get('final_text')
+        if not text:
+            if self.program_waiters and event['call_id'] not in self.program_waiters:return 'program_source_already_pending'
+            self.program_waiters[event['call_id']]=dict(event=dict(event),item=self.turn_item_id,
+                generation=self.input_generation,revision=self.context['revision'],connection=self.message_connection,
+                deadline=self.turn_ended_at+policy()['message_extract_s'])
+            self.log.write('program_control_waiting_final',call_id=event['call_id'],item_id=self.turn_item_id)
+            return 'waiting'
+        from vivis.interaction.program_source import veto
+        return veto(text,args['action'])
+
     async def tool(self,ws,event,*,_resuming=False,_source_error=None):
         call=event.get('call_id');name=event.get('name');raw=event.get('arguments','')
         if not isinstance(call,str) or not 1<=len(call)<=128 or (call in self.calls and not _resuming):return
@@ -1699,6 +1741,16 @@ class CloudManagedVoice(ManagedVoice):
                 output=dict(accepted=True,status='public_prompts_deferred',instruction='简短回应即可，不再问问题。')
             elif name=='robot_program':
                 args=normalize_program(args,self.program_ids)
+                source_error=self.program_source(event,args)
+                if source_error=='waiting':return
+                if source_error:
+                    output=dict(accepted=False,status=source_error,
+                        instruction='原话否定、引用了该动作，或来源未核验；保持当前节目，不执行该工具，不宣称已停止。')
+                    self.tool_repair=None;self.continue_response=False
+                    self.log.write('program_control_vetoed',call_id=call,action=args['action'],reason=source_error)
+                    await bounded_send(ws,json.dumps(dict(type='conversation.item.create',item=dict(type='function_call_output',
+                        call_id=call,output=json.dumps(output,ensure_ascii=False))),ensure_ascii=False))
+                    return
                 intent=controller_intent(args,self.program_ids,self.context['mode'])
                 greeting=args.get('wake_reason')=='greeting'
                 if greeting and (not self.greeting_wake_allowed() or self.in_speech
@@ -1928,6 +1980,7 @@ class CloudManagedVoice(ManagedVoice):
         tasks=[];state=None;preserve_output=False
         try:
             self.message_connection=object();self.courier_waiters.clear()
+            self.program_waiters.clear()
             self.invalid_question=None;self.question_onset=None;self.recovered_query_generation=None
             self.program_followup=None;self.followup_handoff=False;self.followup_response=None
             self.program_responses.clear()
@@ -2123,6 +2176,7 @@ class CloudManagedVoice(ManagedVoice):
                                 and self.question_onset['generation']==self.input_generation and self.turn_ended_at is not None):
                             self.question_onset['final_text']=event.get('transcript','')
                             self.accept_program_followup(self.question_onset['final_text'])
+                            await self.resume_program_calls(ws)
                         waking=(kind=='conversation.item.input_audio_transcription.completed' and self.admit_explicit_wake(event,state))
                         recovered=(not waking and kind=='conversation.item.input_audio_transcription.completed' and self.recover_invalid_question(event,state))
                         if self.ordinary_message_turn(event):self.message_receipts.expect_intent(event['item_id'])
@@ -2150,6 +2204,7 @@ class CloudManagedVoice(ManagedVoice):
                         if self.pending_voice_switch and self.pending_voice_switch['ready']:raise SpeechVoiceSwitch()
                         self.remember({})
                         await self.resume_courier_calls(ws)
+                        await self.resume_program_calls(ws)
                         self.check_task_delivery(state)
                         self.check_courier_delivery(state)
                         if self.message_lane and self.message_lane.task and self.message_lane.task.done():
@@ -2314,6 +2369,7 @@ class CloudManagedVoice(ManagedVoice):
             if self.memory_task:
                 self.memory_task.cancel();await asyncio.gather(self.memory_task,return_exceptions=True)
             self.message_connection=object();self.courier_waiters.clear()
+            self.program_waiters.clear()
             self.invalid_question=None;self.question_onset=None;self.recovered_query_generation=None
             self.recovered_expression=None
             self.explicit_wake_pending=None

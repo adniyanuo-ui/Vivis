@@ -42,6 +42,7 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
     def final(self,text):
         s=self.s;s.input_generation+=1;s.begin_user_turn('user');s.question_started('user',self.state)
         s.memory_turns['user']['text']=text;s.turn_ended_at=time.monotonic()
+        s.question_onset['final_text']=text
         return dict(item_id='user',transcript=text)
 
     async def until(self,condition):
@@ -282,6 +283,7 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
     async def farewell(self,mode='interaction'):
         s=self.s;s.context.update(mode=mode,target='interaction' if mode=='interaction' else next(iter(s.program_ids)))
         self.final('你休息吧');s.response_revisions['r']=1
+        s.response_inputs['r']=s.input_generation;self.state.responses['r']=dict(user_turn=dict(item_id='user'))
         await s.tool(SimpleNamespace(send=AsyncMock()),dict(call_id='rest',response_id='r',name='robot_program',arguments='{"action":"standby"}'))
         self.assertEqual(self.events[-1]['arguments']['action'],'standby')  # Motion is not delayed for speech.
         return self.events[-1]['transition_reply_id']
@@ -349,6 +351,7 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
                 s=self.s;s.context.update(mode='task' if action=='stop' else 'interaction',
                     target='baigufuren' if action=='stop' else 'interaction',ready=True)
                 self.body();s.presence.greet();self.final('请开始表演');s.response_revisions['prepare']=s.context['revision']
+                s.response_inputs['prepare']=s.input_generation;self.state.responses['prepare']=dict(user_turn=dict(item_id='user'))
                 # Exercise the audible handoff deterministically; the five-way
                 # choice and its silent branch have separate regression tests.
                 with patch('vivis.speech.fixed_replies.interruption_reply',return_value='稍等，我先停一下。'):

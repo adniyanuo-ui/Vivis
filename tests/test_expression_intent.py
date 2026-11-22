@@ -119,6 +119,12 @@ class CloudIntentTests(unittest.IsolatedAsyncioTestCase):
             events=[];service=self.service(Path(tmp),events);sent=[]
             async def send(text):sent.append(json.loads(text))
             service.context.update(revision=2,mode='task',target='expression-follow',ready=True);service.response_revisions['r']=2
+            from vivis.speech.realtime import VoiceSession
+            service.cloud_state=VoiceSession(service.player,service.log)
+            service.begin_user_turn('control');service.question_started('control',service.cloud_state)
+            service.turn_ended_at=time.monotonic();service.question_onset['final_text']='停止。'
+            service.response_inputs['r']=service.input_generation
+            service.cloud_state.responses['r']=dict(user_turn=dict(item_id='control'))
             ws=SimpleNamespace(send=send)
             try:
                 await service.tool(ws,dict(name='robot_program',call_id='bad',response_id='r',arguments='{}'))

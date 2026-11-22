@@ -12,7 +12,8 @@ from vivis.paths import ROOT
 
 
 CONFIG = 'configs/interaction/expression_intent.json'
-NAMES = ('smile', 'neutral', 'attentive', 'auto', 'custom')
+PRESETS = ('joy','concern','listening','surprise')
+NAMES = ('smile', 'neutral', 'attentive', 'auto', 'custom', *PRESETS)
 
 
 @lru_cache(maxsize=1)
@@ -35,6 +36,11 @@ def configuration(root=ROOT):
             raise ValueError('Invalid expression intent ' + key)
     if c['default_duration_s'] > c['max_duration_s']:
         raise ValueError('Expression duration exceeds maximum')
+    presets=c.get('presets',{})
+    if (set(presets)!=set(PRESETS) or any(not isinstance(weights,dict) or not weights
+            or not set(weights)<=set(channel_names()) or any(type(v) not in (int,float)
+                or not math.isfinite(v) or not 0<=v<=1 for v in weights.values()) for weights in presets.values())):
+        raise ValueError('Need four bounded, canonical social expression presets')
     return c
 
 
@@ -49,7 +55,7 @@ def arguments(value, c):
             or any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1 for v in supplied.values())):
         raise ValueError('Weights must name canonical52channels with finite values0..1')
     if name=='custom' and not supplied:raise ValueError('Custom expression needs nonempty weights')
-    expected={name:1.} if name in channel_names() else supplied if name=='custom' else {}
+    expected={name:1.} if name in channel_names() else supplied if name=='custom' else c['presets'][name] if name in PRESETS else {}
     # Canonical on-disk packets include derived weights; do not accept a second,
     # conflicting definition for a named single channel or scalar smile intent.
     if 'weights' in value and supplied!=expected:raise ValueError('Weights do not match named expression')

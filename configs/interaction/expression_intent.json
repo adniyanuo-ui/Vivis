@@ -5,5 +5,35 @@
   "max_duration_s": 30.0,
   "attack_s": 0.4,
   "release_s": 1.0,
-  "ack_timeout_s": 3.0
+  "ack_timeout_s": 3.0,
+  "presets": {
+    "joy": {
+      "MouthSmileLeft": 0.5,
+      "MouthSmileRight": 0.5,
+      "CheekSquintLeft": 0.25,
+      "CheekSquintRight": 0.25,
+      "BrowOuterUpLeft": 0.18,
+      "BrowOuterUpRight": 0.18
+    },
+    "concern": {
+      "BrowInnerUp": 0.5,
+      "BrowOuterUpLeft": 0.1,
+      "BrowOuterUpRight": 0.1,
+      "MouthPressLeft": 0.1,
+      "MouthPressRight": 0.1
+    },
+    "listening": {
+      "BrowInnerUp": 0.28,
+      "BrowDownLeft": 0.12,
+      "BrowDownRight": 0.12
+    },
+    "surprise": {
+      "BrowInnerUp": 0.45,
+      "BrowOuterUpLeft": 0.35,
+      "BrowOuterUpRight": 0.35,
+      "EyeWideLeft": 0.3,
+      "EyeWideRight": 0.3,
+      "JawOpen": 0.18
+    }
+  }
 }

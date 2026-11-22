@@ -197,6 +197,10 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
         service=self.service;self.person=None
         service.context.update(mode='task',target=next(iter(service.program_ids)))
         service.presence.visible.return_value=False;service.response_revisions['reply']=1
+        service.cloud_state=self.state;service.begin_user_turn('stop-user');service.question_started('stop-user',self.state)
+        service.turn_ended_at=time.monotonic();service.question_onset['final_text']='停止。'
+        service.response_inputs['reply']=service.input_generation
+        self.state.responses['reply']=dict(user_turn=dict(item_id='stop-user'))
         sent=[]
         async def send(value):sent.append(json.loads(value))
         with patch.object(service,'emit') as emit:

@@ -30,6 +30,15 @@
     "filter_tau_s": 0.08,
     "missing_hold_s": 0.25,
     "missing_release_s": 0.8,
+    "expression_responses": {
+      "enabled": true,
+      "enter": 0.45,
+      "exit": 0.3,
+      "sustain_s": 0.6,
+      "hold_s": 0.8,
+      "filter_tau_s": 0.18,
+      "invalid_hold_s": 0.25
+    },
     "gate": {
       "response_mode": "sustained",
       "enter": 0.45,

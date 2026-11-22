@@ -95,7 +95,7 @@ class FrameMapper:
         self.expression_axes={name:{sid for j,sid in enumerate(self.expression_mapping.active)
             if sid in self.ids and abs(mapped[i+1,j]-mapped[0,j])>1e-8} for i,name in enumerate(self.order[:52])}
 
-    def apply_expression(self,result,base_weights,weights,blend,source):
+    def apply_expression(self,result,base_weights,weights,blend,source,*,protected_ids=()):
         """Map explicit52-channel poses through the same compiled calibration."""
         self.last_expression_ids=[];self.last_expression_eye_ids=[]
         if not weights or blend<1e-5:return result
@@ -104,7 +104,7 @@ class FrameMapper:
         eyes={axis['id'] for axis in self.profile.get('gaze_axes',[])}
         # Profiles expose gaze ownership as IDs; neck axes are not in expression mapping.
         eyes|=set(self.profile.get('gaze_owner_ids',[]))&set(self.expression_mapping.active)
-        if source=='social':affected-=set(self.speech_owned_ids)|eyes
+        if source=='social':affected-=set(self.speech_owned_ids)|eyes|set(protected_ids)
         value=np.zeros((1,61));value[0,:52]=np.clip(np.asarray(base_weights)*self.gains,0,1)
         if source=='command':
             # Clear competing contributions only in this candidate. Untouched

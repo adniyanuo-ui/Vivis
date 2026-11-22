@@ -62,11 +62,13 @@ class EntryFlowTests(unittest.IsolatedAsyncioTestCase):
     def final(self,text='你好',transcribed=True):
         s=self.s;s.input_generation+=1;s.begin_user_turn('u');s.question_started('u',self.state)
         s.turn_ended_at=time.monotonic()
-        if transcribed:s.memory_turns['u']['text']=text
+        if transcribed:s.memory_turns['u']['text']=text;s.question_onset['final_text']=text
         return dict(item_id='u',transcript=text)
 
     async def call(self,args,call_id='call'):
         s=self.s;s.response_revisions['r']=s.context['revision'];sent=[]
+        s.response_inputs['r']=s.input_generation
+        if s.turn_item_id:self.state.responses['r']=dict(user_turn=dict(item_id=s.turn_item_id))
         async def send(text):sent.append(json.loads(text))
         await s.tool(SimpleNamespace(send=send),dict(call_id=call_id,response_id='r',name='robot_program',arguments=json.dumps(args)))
         return json.loads(sent[-1]['item']['output']) if sent else None
@@ -151,12 +153,14 @@ class EntryFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_stop_and_rest_do_not_require_face_or_name_and_deduplicate(self):
         self.s.presence.visible.return_value=False;self.s.presence.greeting_visible.return_value=False
         self.s.context.update(mode='task',target=next(iter(self.s.program_ids)))
+        self.s.cloud_state=self.state
         for action in ('stop','standby'):
+            self.final('停止。' if action=='stop' else '你休息吧。')
             result=await self.call(dict(action=action),action)
             self.assertTrue(result['accepted'])
-        self.assertEqual([e['arguments']['action'] for e in self.events],['stop','standby'])
+        self.assertEqual([e['arguments']['action'] for e in self.events if e['kind']=='cloud_action'],['stop','standby'])
         self.assertIsNone(await self.call(dict(action='stop'),'stop'))
-        self.assertEqual(len(self.events),2)
+        self.assertEqual(len([e for e in self.events if e['kind']=='cloud_action']),2)
 
     async def test_explicit_rest_holds_current_visit_until_real_departure(self):
         s=self.s;s.context.update(mode='interaction',target='interaction')

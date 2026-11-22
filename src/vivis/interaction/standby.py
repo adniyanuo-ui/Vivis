@@ -56,6 +56,16 @@ class IdleFrames:
             if type(tau) not in (int,float) or not math.isfinite(tau) or not .01<=tau<=1:
                 raise ValueError('Invalid standby response filter')
         self.response_tau=self.response['filter_tau_s'] if self.response['enabled'] else .08
+        self.expression_response=None
+        response_policy=self.response.get('expression_responses',{'enabled':False})
+        if response_policy.get('enabled') and self.response['enabled']:
+            if self.behavior!='interaction':raise ValueError('Rich social expressions require interaction mode')
+            from vivis.interaction.expression_intent import configuration
+            from vivis.interaction.social_expression import SocialExpressionResponse
+            expressions=configuration()
+            self.expression_response=SocialExpressionResponse(response_policy,expressions['presets'],
+                expressions['attack_s'],expressions['release_s'],tracking['transport']['max_age_s'] if tracking else .3)
+            mapper.prepare_expression_mapping()
         self.missing_hold=self.response.get('missing_hold_s',0.)
         self.missing_release=self.response.get('missing_release_s',.08)
         if (any(type(v) not in (int,float) or not math.isfinite(v) for v in (self.missing_hold,self.missing_release))
@@ -90,11 +100,13 @@ class IdleFrames:
                 phase=u/.4 if u<.4 else (1-u)/.6
                 value=c['blink_peak']*self.smooth(max(0.,min(1.,phase)))
                 for name in ('EyeBlinkLeft','EyeBlinkRight'):weights[self.mapper.order.index(name)]=value
-        desired=0.;observed=False
+        desired=0.;observed=False;pattern=None
         if self.receiver is not None and self.response['enabled']:
             packet=self.receiver.poll(now)
             try:
                 validate_packet(packet,now,self.receiver.max_age)
+                pattern=packet.get('social_expression')
+                if pattern is not None and pattern.get('timestamp_monotonic')!=packet['timestamp_monotonic']:pattern=None
                 event=packet['social_smile'];strength=event['strength'];stamp=event['timestamp_monotonic']
                 if (packet['target'] is not None and event.get('schema_version')=='vivis-smile-event-1.0'
                         and event.get('valid') is True and type(strength) in (int,float)
@@ -108,6 +120,8 @@ class IdleFrames:
             u=max(0.,min(1.,(now-self.missing_since-self.missing_hold)/self.missing_release))
             desired=self.missing_origin*(1-self.smooth(u))
         dt=1/60 if self.last_time is None else max(0.,min(.1,now-self.last_time));self.last_time=now
+        automatic=self.expression_response.step(pattern,now) if self.expression_response else {}
+        if self.expression_response and self.expression_response.state in ('concern','listening'):desired=0.
         if getattr(self,'expression_intent',None) is not None:
             desired=self.expression_intent.step(desired,now)
         self.smile+=(desired-self.smile)*(-math.expm1(-dt/self.response_tau))
@@ -121,10 +135,29 @@ class IdleFrames:
             target=mouth_gain_targets(self.mapper.profile,self.mapper.ids,target[None,:],
                 self.mapper.profile['mouth_motion_gain'])[0][0]
         envelope=getattr(self,'expression_intent',None)
+        blink_axes=set()
+        if automatic or envelope is not None:
+            self.mapper.prepare_expression_mapping()
+            for name in ('EyeBlinkLeft','EyeBlinkRight'):
+                if weights[self.mapper.order.index(name)]>0:blink_axes|=self.mapper.expression_axes[name]
+        if automatic:
+            # Keep the accepted fast smile and speech articulation untouched.
+            # Add brow/eyelid responses through the same calibrated mapper.
+            amount=1-(envelope.blend if envelope is not None else 0.)
+            expression={name:value*amount for name,value in automatic.items()
+                if not name.startswith(('Mouth','Jaw','Tongue')) and name not in self.mapper.social}
+            # last_fused already includes channel gains; the shared expression
+            # mapper applies them once to its unscaled input.
+            base=np.asarray(self.mapper.last_fused)/self.mapper.gains
+            target=self.mapper.apply_expression(target,base,expression,1.,'social',protected_ids=blink_axes)
+            self.expression_response.diagnostic.update(control_target_only=True,
+                target_actuator_ids=list(self.mapper.last_expression_ids),
+                speech_owned_ids=list(self.mapper.speech_owned_ids),blink_owned_ids=sorted(blink_axes))
         if envelope is not None:
-            target=self.mapper.apply_expression(target,weights,envelope.channel_weights,envelope.channel_blend,envelope.channel_source)
+            target=self.mapper.apply_expression(target,weights,envelope.channel_weights,envelope.channel_blend,envelope.channel_source,
+                protected_ids=blink_axes)
             if envelope.active and envelope.active['weights']:self.mapper.prepare_expression_mapping()
-            blocked=(set(self.mapper.speech_owned_ids)|set(self.mapper.profile.get('gaze_owner_ids',[]))) if envelope.channel_source=='social' else set()
+            blocked=(set(self.mapper.speech_owned_ids)|set(self.mapper.profile.get('gaze_owner_ids',[]))|blink_axes) if envelope.channel_source=='social' else set()
             envelope.acknowledge(self.mapper.expression_axes,blocked)
         self.smile_ticks+=int(self.smile>.01);self.smile_peak=max(self.smile_peak,self.smile)
         for sid,delta in zip(self.mapper.ids,self.mapper.last_social_delta):
@@ -145,6 +178,7 @@ class IdleFrames:
 
     def publish(self,now,target,diagnostic):
         if self.publisher is not None and now-self.last_publish>=.2:
+            if self.expression_response:diagnostic=dict(diagnostic,automatic_expression=self.expression_response.diagnostic)
             self.publisher.submit(dict(active=True,program=self.behavior,updated_monotonic=now,
                 **diagnostic,command_ids=self.mapper.profile['diagnostic_command_ids'],social_smile_strength=self.smile,
                 social_response_ticks=self.smile_ticks,nominal_goals=dict(zip(self.mapper.ids,map(float,target)))))
@@ -155,7 +189,9 @@ class IdleFrames:
             attention_enabled=self.attention.enabled,attention_aversion_count=self.attention.count,
             smile_enabled=self.response['enabled'],smile_channel_gain=self.mapper.smile_strength,
             social_response_ticks=self.smile_ticks,social_envelope_peak=self.smile_peak,
-            social_target_delta_peak_by_id=self.social_delta_by_id)
+            social_target_delta_peak_by_id=self.social_delta_by_id,
+            expression_responses_enabled=self.expression_response is not None,
+            automatic_expression=self.expression_response.diagnostic if self.expression_response else None)
 
 
 class StandbyGaze(MojiaPlaybackGaze):
@@ -209,6 +245,7 @@ class StandbyGaze(MojiaPlaybackGaze):
                 result[col]+=(base[col]-result[col])*envelope.channel_blend
             d['expression_eye_override_ids']=self.source.mapper.last_expression_eye_ids
         d.update(standby_glance_blend=self.glance_blend,tracking_active=d['state'] in ('tracking','holding'))
+        if getattr(self.source,'expression_response',None):d['automatic_expression']=dict(self.source.expression_response.diagnostic)
         self.source.publish(now,result,d)
         return result
 
@@ -284,6 +321,7 @@ def main(argv=None,default_config=None):
     parser.add_argument('--config',type=Path,default=default_config or ROOT/'configs/interaction/standby.json')
     parser.add_argument('--seconds',type=float,default=600);parser.add_argument('--session-stop-file',type=Path)
     parser.add_argument('--tracking',choices=('on','off'),help='交互态可对照关闭跟随；真正待机固定关闭')
+    parser.add_argument('--expression-responses',choices=('on','off'),help='交互态丰富表情回应开关；不改变原微笑参数')
     parser.add_argument('--smile',choices=('on','off'),help='交互态可对照关闭微笑；真正待机固定关闭')
     parser.add_argument('--smile-strength',type=float,help='单次微笑增量0..0.5，不保存配置')
     parser.add_argument('--overlap-warmup',action='store_true',help=argparse.SUPPRESS)
@@ -299,6 +337,11 @@ def main(argv=None,default_config=None):
     if args.smile_strength is not None and (not math.isfinite(args.smile_strength) or not 0<=args.smile_strength<=.5):
         parser.error('微笑增量须为有限数0..0.5')
     if args.tracking is not None:settings['tracking_enabled']=args.tracking=='on'
+    if args.expression_responses is not None:
+        response=settings.get('social_response',{})
+        if settings.get('behavior')!='interaction' or 'expression_responses' not in response:
+            parser.error('Rich expression responses require the interaction configuration')
+        response['expression_responses']['enabled']=args.expression_responses=='on'
     if args.smile is not None:settings.setdefault('social_response',{})['enabled']=args.smile=='on'
     if args.smile_strength is not None:settings.setdefault('social_response',{})['strength']=args.smile_strength
     profile,ids,home,mapper,source,neutral=plan(robot,settings,1. if args.continuous else args.seconds)
