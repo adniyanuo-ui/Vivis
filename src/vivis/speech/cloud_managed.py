@@ -24,6 +24,7 @@ from vivis.interaction.message_delivery import (MessageService,MessageRequest,Id
 from vivis.interaction.message_status import message_view,operation_failure
 from vivis.interaction.message_lane import MessageLane,StaleMessageTurn,extract_qwen
 from vivis.speech.message_receipts import MessageReceipts,ReceiptRejected,MESSAGE_REQUEST
+from vivis.speech.continuity_voice import ContinuityVoice
 
 
 CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负责，没有本地ASR或本地语义模型备用。'
@@ -116,7 +117,7 @@ class ControllerEventGate:
         if future is not None and not future.done():future.set_result(True)
 
 
-class CloudManagedVoice(ManagedVoice):
+class CloudManagedVoice(ContinuityVoice,ManagedVoice):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self.presence=SpeechPresence(json.loads((ROOT/'configs/perception/speech_presence.json').read_text()))
@@ -184,6 +185,7 @@ class CloudManagedVoice(ManagedVoice):
         self.expression.clear();self.resume_history=deque(maxlen=max(12,2*self.config['max_history_turns']))
         self.summary['control_backend']='qwen_realtime';self.summary['local_asr_started']=False
         self.log.write('cloud_control_backend',name='qwen_realtime',local_asr_started=False,reception_enabled=reception['enabled'],memory_enabled=self.memory is not None)
+        self.init_continuity()
 
     def health(self,available,reason):
         if available==self.health_available:return
@@ -254,6 +256,8 @@ class CloudManagedVoice(ManagedVoice):
     def finish_farewell(self,ticket,reason):
         if self.farewell is not ticket:return
         self.farewell=None
+        if ticket.get('archive_job') and reason=='played' and self.continuity:
+            self.continuity.submit('job_notice',ticket['archive_job'])
         self.log.write('transition_reply_finished',reply_id=ticket['id'],reason=reason)
         self.emit(dict(kind='voice_reply_done',epoch=self.epoch,reply_id=ticket['id'],reason=reason))
 
@@ -405,7 +409,8 @@ class CloudManagedVoice(ManagedVoice):
                     or target not in {'standby','interaction',*self.program_ids}):return
             self.cancel_farewell('execution_notice_replaced')
             self.farewell=dict(id=reply,generation=self.input_generation,connection=self.message_connection,
-                target=target,text=text,source='execution_failure')
+                target=target,text=text,source='archive_result' if command.get('archive_job') else 'execution_failure',
+                archive_job=command.get('archive_job'))
             return
         if command.get('kind')=='voice_fault_notice':
             reply=command.get('reply_id')
@@ -514,7 +519,7 @@ class CloudManagedVoice(ManagedVoice):
             person=self.knowledge.people.get(pid,{})
             return person.get('preferred_address') or person.get('display_name') or 'other'
         logical=label(stable['person_id']);raw=label(stable['candidate_id'])
-        return dict(identity_label=logical+'-'+raw,logical_label=logical,realtime_label=raw)
+        return dict(identity_label=logical+'-'+raw+('/图-other/声' if self.continuity else ''),logical_label=logical,realtime_label=raw)
 
     def reviewing_identity(self):
         stable=self.stable_identity()
@@ -1163,6 +1168,8 @@ class CloudManagedVoice(ManagedVoice):
         for item_id in candidates:
             turn=self.memory_turns[item_id];text=turn['text']
             if turn['valid'] and turn['engaged'] and isinstance(text,str) and text.strip() and turn['message_id'] is None:
+                if self.continuity and self.continuity.admissions.get((turn['session'],item_id)) is not True:
+                    continue  # No unbounded legacy copy while the new journal is paused.
                 mid=self.memory.append(turn['person'],turn['session'],'user',text);turn['message_id']=mid
                 if self.tasks:self.tasks.bind_source(turn['session'],item_id,mid)
                 if item_id==self.turn_item_id:self.turn_message_id=mid;self.turn_saved=True
@@ -1170,7 +1177,11 @@ class CloudManagedVoice(ManagedVoice):
             self.pending_memories[rid]=(self.reply_people.get(rid,self.anonymous),event.get('transcript',''))
         for key,(person,text) in list(self.pending_memories.items()):
             if key in self.player.started_responses:
-                if text.strip():self.memory.append(person,self.memory_session,'assistant',text,'audio_started_completion_unconfirmed')
+                response=self.cloud_state.responses.get(key,{}) if self.cloud_state else {}
+                source=None if response.get('archive_no_user') else (response.get('user_turn') or {}).get('item_id')
+                turn=self.memory_turns.get(source,{})
+                admitted=not self.continuity or self.continuity.admissions.get((turn.get('session'),source)) is True
+                if text.strip() and admitted:self.memory.append(person,turn.get('session',self.memory_session),'assistant',text,'audio_started_completion_unconfirmed')
                 del self.pending_memories[key]
         while len(self.pending_memories)>64:self.pending_memories.pop(next(iter(self.pending_memories)))
 
@@ -1198,6 +1209,12 @@ class CloudManagedVoice(ManagedVoice):
         facts=dict(**self.context,unattributed_source_notice=self.unattributed_source_notice,face_visible=self.presence.last_visible,
             wake_permission=permission and not self.presence.last_visible)
         facts['body_visible']=self.presence.person_count()>0
+        if self.continuity:
+            from vivis.interaction.continuity import actor
+            facts['recent_memory_paused']=actor(confirmed) in self.continuity.blocked_people
+            facts['conversation_recording']=self.continuity.finalized.get((self.memory_session,self.turn_item_id),dict(saved=False,status='pending_or_unavailable'))
+            if facts['recent_memory_paused']:
+                facts['memory_notice']='近期记忆已满且旧记录尚未整理。本轮不保存新聊天记忆，不能声称记住了；请简短说明，但留言仍按独立账本执行。'
         facts['program_followup_handoff']=self.followup_handoff
         facts['identity_state']='reviewing' if review else 'recognized' if confirmed else 'unknown'
         facts['identity_authorized']=confirmed is not None
@@ -1239,6 +1256,10 @@ class CloudManagedVoice(ManagedVoice):
         instructions+=CLOUD_POLICY+entry_instructions(self.entry)+WORK_POLICY+identity['instructions']+' controller_state='+json.dumps(facts,ensure_ascii=False)
         person=self.identified_person()
         if self.memory and person:instructions+=self.memory.context(person)
+        if getattr(self,'continuity',None):
+            instructions+=self.archive_context_cache.get(person,'')
+            instructions+=' 管理员明确要求整理档案时调用organize_archives。整理只在待机执行，必须由程序确认提交后才能说档案更新完毕。'
+            instructions+=' 聊天记录由程序后台保存。只有controller_state.conversation_recording.saved=true才可声称本轮聊天已保存；否则自然回应内容，不承诺永久记住。留言仍以独立账本回执为准。'
         instructions+=self.dialect.instructions()
         if social_active:instructions+=self.social.instructions()
         if self.program_turn_only():instructions+=PROGRAM_TURN_POLICY
@@ -1772,7 +1793,9 @@ class CloudManagedVoice(ManagedVoice):
                 raise StaleMessageRequest('话轮已变化或已由固定留言流程接管，不重复执行取件请求。')
             if self.relay_pending and name!='get_robot_status':
                 raise ValueError('Relay text is data, not tool authority')
-            if name=='get_robot_status':
+            if name=='organize_archives':
+                output=await self.organize_archives(args,event)
+            elif name=='get_robot_status':
                 if args!={}:raise ValueError('Status tool takes no arguments')
                 person_id=self.identified_person()
                 person=(dict(person_id=person_id,**self.knowledge.people[person_id])
@@ -1943,9 +1966,16 @@ class CloudManagedVoice(ManagedVoice):
             output['error']=str(exc);self.continue_response=self.tool_retry_budget>0
             self.tool_repair=dict(tool=name,error=str(exc),controller=self.context)
             self.tool_retry_budget=max(0,self.tool_retry_budget-1)
+        except PermissionError as exc:
+            if name=='organize_archives':output.update(status='administrator_required',error=str(exc))
+            elif name in ('manage_robot_task','courier_pickup'):
+                output.update(status='database_operation_failed',error='PermissionError：留言状态未能确认。')
+            else:raise
+            self.tool_repair=None;self.continue_response=self.can_speak()
         except (sqlite3.Error,OSError,RuntimeError) as exc:
-            if name not in ('manage_robot_task','courier_pickup'):raise
-            output.update(status='database_operation_failed',error=type(exc).__name__+'：留言状态未能确认。')
+            if name not in ('manage_robot_task','courier_pickup','organize_archives'):raise
+            output.update(status='database_operation_failed',error=type(exc).__name__+
+                ('：档案整理任务未能确认，不能声称整理成功。' if name=='organize_archives' else '：留言状态未能确认。'))
             self.tool_repair=None;self.continue_response=self.can_speak()
         if output.get('spoken_receipt'):
             rid=event.get('response_id')
@@ -2112,12 +2142,15 @@ class CloudManagedVoice(ManagedVoice):
                 from vivis.speech.explicit_wake import AudioPermissionGate
                 audio_gate=AudioPermissionGate()
                 uplink=asyncio.Queue(maxsize=max(1,round(policy()['uplink_max_age_s']/.02)));self.cloud_queue=uplink
+                from vivis.speech.round_recording import SentTimeline
+                journal_timeline=SentTimeline()
                 self.transport_fault=None
                 async def send():
                     while True:
                         stamp,pcm=await uplink.get()
                         if time.monotonic()-stamp>policy()['uplink_max_age_s']:raise VoiceTransportError('Cloud input audio expired; incomplete turn discarded')
                         await asyncio.wait_for(ws.send(json.dumps(dict(type='input_audio_buffer.append',audio=base64.b64encode(pcm).decode()))),timeout=policy()['send_timeout_s'])
+                        journal_timeline.sent(stamp,pcm)
                 async def reject_receipt(rid,reason):
                     if rid in self.blocked or rid in state.blocked:
                         self.message_receipts.responses.pop(rid,None);return
@@ -2155,6 +2188,12 @@ class CloudManagedVoice(ManagedVoice):
                         self.final_message(event,state)
                         await self.resume_courier_calls(ws)
                     warning=await receive_event(ws,state,event)
+                    if kind=='response.created':
+                        response=state.responses[event['response']['id']]
+                        item=(response.get('user_turn') or {}).get('item_id')
+                        response['archive_session']=self.memory_turns.get(item,{}).get('session',self.memory_session)
+                        if event['response']['id'] in welcome_gate.responses:
+                            response.update(archive_no_user=True,archive_session=self.memory_session)
                     if warning:self.emit(dict(kind='voice_warning',epoch=self.epoch,**warning))
                 async def cancel_welcome(rids,reason):
                     self.continue_response=False;self.announcement_revision=None;self.tool_repair=None
@@ -2231,6 +2270,7 @@ class CloudManagedVoice(ManagedVoice):
                             self.presence.continued_turn()
                             if self.can_speak():self.announcement_revision=None
                             self.begin_user_turn(event.get('item_id'))
+                            self.continuity_start(event,journal_timeline)
                             self.question_started(event.get('item_id'),state)
                             self.message_receipts.source_turns[event.get('item_id')]=self.input_generation
                         elif kind=='input_audio_buffer.speech_stopped' and event.get('item_id')==self.turn_item_id:
@@ -2241,7 +2281,10 @@ class CloudManagedVoice(ManagedVoice):
                                 if turn:turn['valid']=False
                                 self.turn_item_id=None;self.turn_ended_at=None
                             else:self.turn_ended_at=time.monotonic()
-                        if kind=='input_audio_buffer.speech_stopped':self.response_waiting_user_end=False
+                        if kind=='input_audio_buffer.speech_stopped':
+                            self.response_waiting_user_end=False
+                            if self.continuity:self.continuity.end(event.get('item_id'),journal_timeline.at(event.get('audio_end_ms')),
+                                event.get('reason')!='turn_invalid',self.continuity_evidence(self.turn_person))
                         if kind=='response.function_call_arguments.done':await self.tool(ws,event);continue
                         if (kind=='conversation.item.input_audio_transcription.completed' and self.question_onset
                                 and event.get('item_id')==self.turn_item_id==self.question_onset['item']
@@ -2253,6 +2296,12 @@ class CloudManagedVoice(ManagedVoice):
                             await self.resume_program_calls(ws)
                         waking=(kind=='conversation.item.input_audio_transcription.completed' and self.admit_explicit_wake(event,state))
                         recovered=(not waking and kind=='conversation.item.input_audio_transcription.completed' and self.recover_invalid_question(event,state))
+                        if kind=='conversation.item.input_audio_transcription.completed' and self.continuity:
+                            turn=self.memory_turns.get(event.get('item_id'),{})
+                            current=event.get('item_id')==self.turn_item_id
+                            engaged=(turn.get('engaged') or current and (self.turn_engaged or
+                                self.context['mode'] in ('interaction','task') and self.presence.allowed()))
+                            self.continuity.final(event.get('item_id'),event.get('transcript',''),bool(waking or recovered or turn.get('valid') and engaged))
                         if self.ordinary_message_turn(event):self.message_receipts.expect_intent(event['item_id'])
                         try:events=self.message_receipts.filter(event)
                         except ReceiptRejected as exc:
@@ -2327,7 +2376,8 @@ class CloudManagedVoice(ManagedVoice):
                                 and self.idle_sleep_revision!=self.context['revision']):
                             self.idle_sleep_revision=self.context['revision']
                             self.emit(dict(kind='cloud_action',revision=self.context['revision'],arguments=dict(action='standby',program='',explicit_wake=False),text='前台持续无人，回接待待机'))
-                        if (self.memory and self.context['mode']=='standby' and self.context['ready']
+                        await self.continuity_tick(state)
+                        if (self.memory and not self.continuity and self.context['mode']=='standby' and self.context['ready']
                                 and time.monotonic()>=self.memory_retry_at and (self.memory_task is None or self.memory_task.done())):
                             self.memory_retry_at=time.monotonic()+60
                             self.memory_task=asyncio.create_task(self.compact_memory())
@@ -2451,6 +2501,8 @@ class CloudManagedVoice(ManagedVoice):
             self.cloud_queue=None;self.ws=None;self.message_lane.cancel() if self.message_lane else None
             if state:
                 state.interrupt(source='cloud_closed');state.poll_playback()
+                if self.continuity:
+                    self.continuity.poll(state,self.memory_session);self.continuity.submit('disconnect')
                 self.summary['provisional_pauses']+=state.provisional_pauses
                 self.summary['invalid_turn_resumes']+=state.invalid_turn_resumes
                 self.summary['local_cancel_operations']+=state.cancel_operations

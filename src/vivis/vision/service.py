@@ -197,9 +197,12 @@ def main(argv=None):
                                and 0<=time.monotonic()-body_stamp<=presence.c['max_age_s'])
                 if frames==0:startup('first_frame_detected')
                 if familiar is not None and config.get('familiar_faces',{}).get('enabled'):
-                    recognized=familiar.step(sample,vision.selected_face_row,faces=metrics['faces'])
+                    recognized=familiar.step(sample,vision.selected_face_row,faces=metrics['faces'],
+                        collect=bool((social_config.get('enabled') or expression_config.get('enabled'))
+                            and body['fresh'] and body.get('persons',0)<=1))
                     familiar.publish(recognized)
                     metrics['familiar_recognition_available']=familiar.available
+                    metrics['photo_collection_error']=familiar.photo_error
                     metrics['familiar_identity']={k:recognized[k] for k in ('state','person_id','similarity','observed_monotonic')}
                     metrics['familiar_identity']['backend']=familiar.c['backend']
                     if 'observation' in recognized:metrics['familiar_identity']['observation']=recognized['observation']

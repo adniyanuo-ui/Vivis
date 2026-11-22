@@ -149,6 +149,7 @@ class CloudBackendTests(unittest.IsolatedAsyncioTestCase):
         speech['managed_voice']['lip_sync']['enabled']=False;speech['programs']=str(ROOT/'configs/interaction/programs.json')
         speech['managed_voice'].pop('fixed_replies',None)  # Unit tests explicitly exercise uncached live-reader paths.
         speech['managed_voice']['social_conversation_config']=None  # Dedicated social tests enable drafting explicitly.
+        speech['managed_voice']['continuity_config']=None  # Journal tests use isolated temporary stores.
         with patch.dict('os.environ',{'DASHSCOPE_API_KEY':'unit-test-placeholder'}):
             with patch('vivis.interaction.memory.PersonMemory'):
                 service=CloudManagedVoice(speech,ROOT/'configs/robots/xiaoshuai/robot.json',Path(tmp),events.append)
@@ -226,6 +227,7 @@ class ContinuousCloudAudioTests(unittest.IsolatedAsyncioTestCase):
              patch('vivis.speech.cloud_managed.websocket_connection',return_value=WS()), \
              patch('vivis.speech.cloud_managed.connect_session',side_effect=connected):
             speech=config('configs/perception/speech.json');speech['managed_voice']=config('configs/interaction/p1.json')['realtime_voice']
+            speech['managed_voice']['continuity_config']=None
             speech['managed_voice']['lip_sync']['enabled']=False;speech['programs']=str(ROOT/'configs/interaction/programs.json')
             service=CloudManagedVoice(speech,ROOT/'configs/robots/xiaoshuai/robot.json',Path(tmp),events.append)
             service.memory=None;service.presence=SpeechPresence(config('configs/perception/speech_presence.json'),tmp)

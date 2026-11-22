@@ -90,6 +90,7 @@ class CloudIntentTests(unittest.IsolatedAsyncioTestCase):
     def service(self,folder,events):
         def read(name):return json.loads((ROOT/name).read_text())
         speech=read('configs/perception/speech.json');speech['managed_voice']=read('configs/interaction/p1.json')['realtime_voice']
+        speech['managed_voice']['continuity_config']=None
         speech['managed_voice']['lip_sync']['enabled']=False;speech['programs']=str(ROOT/'configs/interaction/programs.json')
         with patch.dict('os.environ',{'DASHSCOPE_API_KEY':'unit-placeholder'}),patch('vivis.interaction.memory.PersonMemory'):
             service=CloudManagedVoice(speech,ROOT/'configs/robots/xiaoshuai/robot.json',folder,events.append)

@@ -40,7 +40,8 @@ class MessageSpeaker:
         self.started=False
         rid='message_'+uuid.uuid4().hex;complete=False;announced=False
         response=dict(created=time.monotonic(),received_audio_s=0.,transcript=text,status='in_progress',
-            source=self.source,user_turn=None)
+            source=self.source,user_turn=None,archive_item=getattr(request,'source_item',None),
+            archive_session=getattr(request,'session',None))
         self.state.responses[rid]=response
         try:
             for start in range(0,len(text),400):

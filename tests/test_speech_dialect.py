@@ -37,6 +37,7 @@ class DialectServiceTests(unittest.IsolatedAsyncioTestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         speech=json.loads((ROOT/'configs/perception/speech.json').read_text())
         speech['managed_voice']=json.loads((ROOT/'configs/interaction/p1.json').read_text())['realtime_voice']
+        speech['managed_voice']['continuity_config']=None
         speech['managed_voice']['lip_sync']['enabled']=False
         speech['programs']=str(ROOT/'configs/interaction/programs.json')
         from test_managed_voice import FakeAudio

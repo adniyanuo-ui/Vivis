@@ -29,7 +29,7 @@ class VoiceBuffer:
         self.started_responses=set()
         self.paused=set();self.pause_fade_left=0;self.pause_reported=set()
         self.resume_fades={};self.resume_waiting=set()
-        self.mouth=None;self.consumed={}
+        self.mouth=None;self.consumed={};self.audio_observer=None
 
     def add(self, response_id, pcm):
         if not isinstance(response_id,str) or not response_id or len(pcm)%2:raise ValueError('Invalid audio response packet')
@@ -130,6 +130,9 @@ class VoiceBuffer:
                     self.notices.put(dict(kind='playback_resumed',response_id=sid,dac_monotonic=dac_time+cursor/48000))
                     self.resume_waiting.discard(sid)
                 self.count-=take
+                if self.audio_observer:
+                    try:self.audio_observer(sid,out[cursor:cursor+take],dac_time+cursor/48000,position)
+                    except Exception:pass  # Optional journal must not break DAC.
                 if self.mouth and sid not in self.cancelled:
                     self.mouth.played(sid,position,position+take,dac_time+cursor/48000)
                 self.consumed[sid]=position+take

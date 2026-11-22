@@ -1,0 +1,11 @@
+{
+  "schema_version": "vivis-continuity-1.0",
+  "enabled": true,
+  "directory": "private/continuity",
+  "familiar_rounds": 500,
+  "other_rounds": 5000,
+  "admin_person": "heyude",
+  "archive_batch_chars": 16000,
+  "archive_timeout_s": 60,
+  "speaker_config": "configs/perception/speaker_observation.json"
+}

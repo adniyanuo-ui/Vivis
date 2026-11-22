@@ -417,7 +417,7 @@ def main(argv=None):
                         try:events.put_nowait(event)
                         except queue.Full:pass
                         continue
-                    if event.get('kind') not in ('asr_final','asr_control','asr_error','ready','voice_state','voice_warning','cloud_error','cloud_transcript','cloud_action','mouth_error','voice_health','voice_reply_done'):continue
+                    if event.get('kind') not in ('asr_final','asr_control','asr_error','ready','voice_state','voice_warning','cloud_error','cloud_transcript','cloud_action','archive_notice','mouth_error','voice_health','voice_reply_done'):continue
                     while not quitting:
                         try:events.put(event,timeout=.05);break
                         except queue.Full:
@@ -494,6 +494,18 @@ def main(argv=None):
                     if event['state'] is not None:preparation['state']=event['state']
                     preparation['last_message']=event['message']
                     record('preparation',program=active_program,**preparation);continue
+                if event.get('kind')=='archive_notice':
+                    if (not voice or not voice.accept(event) or event.get('revision')!=voice.context_revision
+                            or quitting or fault):continue
+                    entering=event.get('enter_standby') is True
+                    if not entering and session.mode!='standby':continue
+                    reply=uuid.uuid4().hex
+                    voice.transition_reply_id=reply;voice.transition_reply_target=STANDBY
+                    voice.send(kind='voice_execution_notice',reply_id=reply,target=STANDBY,
+                        text=event['text'],archive_job=None if entering else event['job_id'])
+                    if not entering:continue
+                    event=dict(kind='cloud_action',revision=voice.context_revision,arguments=dict(action='standby'),
+                        text='管理员请求待机整理档案',transition_reply_id=reply)
                 if event.get('kind')=='cloud_action':
                     if not qwen_only or not voice or not voice_available or event.get('revision')!=voice.context_revision or quitting or fault:
                         record('cloud_action_stale',detail=event);continue

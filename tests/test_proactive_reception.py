@@ -61,6 +61,7 @@ class ControllerEventTests(unittest.IsolatedAsyncioTestCase):
              patch('vivis.speech.cloud_managed.connect_session',side_effect=connected):
             def read(name):return json.loads((ROOT/name).read_text())
             speech=read('configs/perception/speech.json');speech['managed_voice']=read('configs/interaction/p1.json')['realtime_voice']
+            speech['managed_voice']['continuity_config']=None
             speech['managed_voice']['lip_sync']['enabled']=False;speech['programs']=str(ROOT/'configs/interaction/programs.json')
             service=CloudManagedVoice(speech,ROOT/'configs/robots/xiaoshuai/robot.json',Path(tmp),events.append)
             service.memory=None;service.presence=SpeechPresence(read('configs/perception/speech_presence.json'),tmp)

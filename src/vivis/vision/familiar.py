@@ -45,7 +45,7 @@ class FamiliarFaces:
     def __init__(self,config,root,model=None,gallery=None):
         config=backend_config(config)
         self.c=config;self.root=Path(root);self.owner=uuid.uuid4().hex
-        self.model=None;self._closing=False
+        self.model=None;self._closing=False;self.photo_pool=None;self.photo_error=None
         self.path=self.root/config['state_file'];self.epoch=0;self.last_submit=-math.inf
         self.lock=threading.Lock();self.job=BestEffortJob('familiar-face');self.candidate=None;self.hits=0;self.last_bbox=None
         self.confirmed=None;self.last_confirmed=-math.inf
@@ -67,6 +67,7 @@ class FamiliarFaces:
 
     def _load(self,model,gallery):
         config=self.c
+        photo_hashes=None
         if gallery is None:
             path=self.root/config['gallery']
             if not path.is_file():raise FileNotFoundError('Face gallery missing')
@@ -75,6 +76,7 @@ class FamiliarFaces:
                     raise ValueError('SeetaFace gallery/model mismatch')
                 if config['backend']=='seeta6' and str(data['embedding_contract'])!='seeta6-yunet-roi-pts5-v1':raise ValueError('SeetaFace alignment mismatch')
                 gallery=(data['vectors'],data['ids'])
+                if 'photo_sha256' in data:photo_hashes=data['photo_sha256'].copy()
         self.vectors,self.ids=gallery
         self.vectors=np.asarray(self.vectors,dtype=np.float32);self.ids=np.asarray(self.ids)
         dimension=1024 if config['backend']=='seeta6' else 128
@@ -94,6 +96,12 @@ class FamiliarFaces:
                 import cv2
                 cv2.setNumThreads(1);model=cv2.FaceRecognizerSF.create(str(path),'')
         self.model=model;self.available=True
+        if config.get('photo_collection',False) and photo_hashes is not None:
+            try:
+                from vivis.vision.photo_pool import PhotoPool
+                self.photo_pool=PhotoPool(self.root,config,self.vectors,self.ids,photo_hashes)
+                self.vectors,self.ids=self.photo_pool.gallery()
+            except Exception as exc:self.photo_error=type(exc).__name__
 
     def unknown(self):
         return dict(schema_version='vivis-familiar-person-1.0',person_id=None,state='unknown',
@@ -106,9 +114,13 @@ class FamiliarFaces:
     def reset(self):
         with self.lock:self._reset_locked()
 
-    def infer(self,image,row,stamp,epoch):
+    def infer(self,image,row,stamp,epoch,collect=False):
         try:
             begin=time.perf_counter();observation={}
+            if self.photo_pool:
+                try:
+                    self.photo_pool.refresh();self.vectors,self.ids=self.photo_pool.gallery()
+                except Exception as exc:self.photo_error=type(exc).__name__
             if self.c['backend']=='seeta6':
                 observation,vector=self.model.evaluate_selected(image,row,gate=self.c.get('quality_gate',True))
                 if vector is None:
@@ -141,12 +153,18 @@ class FamiliarFaces:
                     backend=self.c['backend'],observation=observation)
                 if self.confirmed:self.result['confirmed_monotonic']=self.last_confirmed
                 self.error=None
+            if collect and state=='recognized' and pid and vector is not None and self.photo_pool:
+                try:
+                    compare=self.model.compare if self.c['backend']=='seeta6' else lambda a,b:float(a@b)
+                    if self.photo_pool.consider(str(pid),image,row,vector,observation,compare,stamp):
+                        self.vectors,self.ids=self.photo_pool.gallery()
+                except Exception as exc:self.photo_error=type(exc).__name__
         except Exception:
             # Optional identification must not stop gaze/motion or reveal raw
             # source details. Treat a failed inference as unknown.
             self.error='Local face recognition failed';self.reset()
 
-    def step(self,sample,row,now=None,*,faces=1):
+    def step(self,sample,row,now=None,*,faces=1,collect=False):
         now=time.monotonic() if now is None else now
         # Invalidate old evidence BEFORE submitting a new asynchronous sample.
         # Otherwise a fast result could reuse confirmation hits from a stale face.
@@ -165,7 +183,9 @@ class FamiliarFaces:
             if (min(w,h)>=self.c['min_face_size_px'] and now-self.last_submit>=1/self.c['hz']
                     and 0<=now-sample[1]<=self.c['max_result_age_s']):
                 epoch=self.epoch
-                if self.job.offer(self.infer,sample[2].copy(),np.asarray(row,dtype=np.float32).copy(),sample[1],epoch):self.last_submit=now
+                arguments=(sample[2].copy(),np.asarray(row,dtype=np.float32).copy(),sample[1],epoch)
+                if collect:arguments=(*arguments,True)
+                if self.job.offer(self.infer,*arguments):self.last_submit=now
         with self.lock:result=dict(self.result)
         if (not 0<=now-result['observed_monotonic']<=self.c['max_result_age_s']
                 or (result['state']=='reviewing' and now-result['confirmed_monotonic']>=self.c.get('review_hold_s',5.))):

@@ -1,0 +1,13 @@
+{
+  "schema_version": "vivis-speaker-observation-1.0",
+  "enabled": true,
+  "observation_only": true,
+  "model": "outputs/models/speaker/campplus_zh.onnx",
+  "sha256": "e6af4d4c444f3dab01d991bb9b7d5af98eb979e329f6c8880a19d5553561ed25",
+  "directory": "private/speakers",
+  "threshold": 0.65,
+  "minimum_margin": 0.12,
+  "enrollment_samples": 3,
+  "maximum_samples": 8,
+  "minimum_seconds": 2.5
+}

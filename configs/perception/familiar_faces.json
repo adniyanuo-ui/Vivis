@@ -1,6 +1,7 @@
 {
   "schema_version": "vivis-familiar-faces-1.0",
   "enabled": true,
+  "photo_collection": true,
   "people_directory": "private/people",
   "state_file": "outputs/runtime/familiar_person.json",
   "minimum_margin": 0.08,

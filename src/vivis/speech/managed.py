@@ -55,6 +55,8 @@ def voice_configuration(speech,robot):
         validate_presence_config(json.loads((ROOT/'configs/perception/speech_presence.json').read_text()))
         ReceptionGate(json.loads((ROOT/options['reception_config']).read_text()))
         memory_config=json.loads((ROOT/options['memory_config']).read_text());validate_config(memory_config)
+        from vivis.interaction.continuity import configuration as continuity_configuration
+        continuity_configuration(options.get('continuity_config'),ROOT)
         from vivis.interaction.robot_tasks import validate_config as validate_tasks
         task_config=json.loads((ROOT/options['tasks_config']).read_text());validate_tasks(task_config)
         if task_config['enabled'] and not memory_config['enabled']:raise ValueError('Robot tasks require persistent memory storage')
@@ -322,6 +324,8 @@ class ManagedVoice:
                     try:stamp,pcm,raw,far=self.audio.uplink.get_nowait()
                     except queue.Empty:break
                     self.last_input=now
+                    journal=getattr(self,'continuity',None)
+                    if journal:journal.capture(stamp,pcm,far)
                     for name,data in [('microphone',raw),('reference',far),('uplink',pcm)]:
                         if name in self.writers:self.writers[name].writeframesraw(data)
                     if self.frame_log:
@@ -363,6 +367,11 @@ class ManagedVoice:
             if self.decoder_thread:self.decoder_thread.join(timeout=2)
             if self.decoder:self.decoder.close()
             self.recorders.close()
+            archive_task=getattr(self,'archive_task',None)
+            if archive_task:
+                archive_task.cancel();await asyncio.gather(archive_task,return_exceptions=True)
+            journal=getattr(self,'continuity',None)
+            if journal:journal.close()
             self.summary.update(audio=self.audio.stats,recorded_samples=self.recorded_samples)
             (self.folder/'summary.json').write_text(json.dumps(self.summary,ensure_ascii=False,indent=2)+'\n')
             self.log.close()
