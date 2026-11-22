@@ -135,7 +135,11 @@ class IndependentFaceFollower:
                 # Feed image error into the existing bounded velocity planner;
                 # do not pretend that encoder counts are measured head angles.
                 velocity[34]=self.plan['roll_gain_s']*(target-2047) if roll_valid else 0.
-            else:velocity[34]=self.plan['roll_gain_s']*(target-self.reference.planners[34].position)
+            else:
+                # A neutral-anchored target cannot accumulate image-tilt bias:
+                # upright eyes request2047 even while the face stays visible.
+                # Existing low-pass and Ruckig keep that return continuous.
+                velocity[34]=self.plan['roll_gain_s']*(target-ref.position)
             reason=self.assist.reason
         else:
             self.assist.reset()

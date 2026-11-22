@@ -349,8 +349,11 @@ class TransitionTests(unittest.IsolatedAsyncioTestCase):
                 s=self.s;s.context.update(mode='task' if action=='stop' else 'interaction',
                     target='baigufuren' if action=='stop' else 'interaction',ready=True)
                 self.body();s.presence.greet();self.final('请开始表演');s.response_revisions['prepare']=s.context['revision']
-                await s.tool(SimpleNamespace(send=AsyncMock()),dict(name='robot_program',call_id=action+program,
-                    response_id='prepare',arguments=json.dumps(dict(action=action,program=program))))
+                # Exercise the audible handoff deterministically; the five-way
+                # choice and its silent branch have separate regression tests.
+                with patch('vivis.speech.fixed_replies.interruption_reply',return_value='稍等，我先停一下。'):
+                    await s.tool(SimpleNamespace(send=AsyncMock()),dict(name='robot_program',call_id=action+program,
+                        response_id='prepare',arguments=json.dumps(dict(action=action,program=program))))
                 ticket=s.farewell;self.assertIsNotNone(ticket);self.assertIn(word,ticket['text'])
                 event=self.events[-1];self.assertEqual(event['transition_reply_id'],ticket['id'])
                 mode='task' if program else 'interaction';target=program or 'interaction'

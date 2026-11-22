@@ -8,7 +8,7 @@
   "conversation": {
     "enabled": true,
     "first_prompt_s": 6,
-    "min_interval_s": 60,
-    "max_per_visit": 3
+    "min_interval_s": 12,
+    "max_per_visit": 6
   }
 }

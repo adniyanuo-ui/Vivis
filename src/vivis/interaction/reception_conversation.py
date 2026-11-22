@@ -10,7 +10,7 @@ def public_invitation(address=None, previous_turns=(), *, welcome=False, index=0
         '歌曲': '想看看有哪些歌曲吗？',
     }
     fallback = tuple(REPLIES[key] for key in ('idle_first','idle_second','idle_third'))
-    question = fallback[min(index, len(fallback) - 1)]
+    question = fallback[index % len(fallback)]
     if welcome:
         # Match a public category only. Never repeat a historical quotation.
         for turn in previous_turns:
@@ -29,11 +29,11 @@ class ReceptionConversation:
     def __init__(self, config):
         self.enabled = config.get('enabled', False)
         self.delay = config.get('first_prompt_s', 6)
-        self.interval = config.get('min_interval_s', 60)
-        self.limit = config.get('max_per_visit', 3)
-        if (type(self.enabled) is not bool or type(self.limit) is not int or not 1 <= self.limit <= 3
+        self.interval = config.get('min_interval_s', 12)
+        self.limit = config.get('max_per_visit', 6)
+        if (type(self.enabled) is not bool or type(self.limit) is not int or not 1 <= self.limit <= 6
                 or any(type(n) not in (int, float) or not isfinite(n) for n in (self.delay, self.interval))
-                or not 6 <= self.delay <= 60 or not 60 <= self.interval <= 600):
+                or not 6 <= self.delay <= 60 or not 12 <= self.interval <= 600):
             raise ValueError('Invalid reception conversation configuration')
         self.reset()
 

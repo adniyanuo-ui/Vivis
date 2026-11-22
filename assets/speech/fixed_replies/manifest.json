@@ -117,6 +117,33 @@
       "frames": 96,
       "duration_s": 1.6
     },
+    "program_interrupt_wait": {
+      "text": "稍等。",
+      "audio": "program_interrupt_wait-936fb0db686f.wav",
+      "audio_sha256": "936fb0db686f6e12743f8c3588cdb2d44f577095f68a3e1272c1f3e8c1141f82",
+      "animation": "program_interrupt_wait-acc25b68c6fd.npz",
+      "animation_sha256": "acc25b68c6fd99b859c753883967a641228f6c2f26a00445618f163ad50338a4",
+      "frames": 44,
+      "duration_s": 0.72
+    },
+    "program_interrupt_moment": {
+      "text": "稍候。",
+      "audio": "program_interrupt_moment-041912769524.wav",
+      "audio_sha256": "0419127695246db66ce006e4dae9b4b5b008038ceac8abb7204d4242161fec1f",
+      "animation": "program_interrupt_moment-551ac8768a76.npz",
+      "animation_sha256": "551ac8768a768eae4fffb94ba0816bf8468f746dcdfb2027f485c73f6e769491",
+      "frames": 44,
+      "duration_s": 0.72
+    },
+    "program_interrupt_short": {
+      "text": "稍等下。",
+      "audio": "program_interrupt_short-e77bf8234923.wav",
+      "audio_sha256": "e77bf8234923b85541cc87cb9e6cc155b93e55a88d8d1d614e9378ca6e34cd6d",
+      "animation": "program_interrupt_short-e01188a8ad1e.npz",
+      "animation_sha256": "e01188a8ad1ec9405afbec8d6f335d739a266999ec61691ce2feb0f63ff3075c",
+      "frames": 58,
+      "duration_s": 0.96
+    },
     "standby": {
       "text": "好，您忙，我这就休息。需要时再叫我。",
       "audio": "standby-6f492bc56e0c.wav",

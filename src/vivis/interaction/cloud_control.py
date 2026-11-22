@@ -19,7 +19,7 @@ def tools(program_ids):
             program=dict(type='string',enum=['',*program_ids],description='节目ID。expression-follow代表持续模仿用户表情的实时节目；其他ID对应节目单中的作品。用户明确要求学表情，或肯定表情跟随提议时，用play启动该节目，不能以聊天回应代替执行。'),explicit_wake=dict(type='boolean',description='用户本句明确呼唤配置名字时为true；仅泛化招呼必须为false。stop/standby可省略，不能要求用户先唤醒再停止'),
             wake_reason=dict(type='string',enum=['name','greeting'],description='仅wake使用。greeting须摄像头当前看到人脸或人体且controller_state.greeting_wake_allowed=true；不授予画面无人时的名字呼叫权限')),required=['action'],additionalProperties=False)),
         dict(type='function',name='program_followup',
-            description='节目期间，用户明确对机器人提出完整问题或要求做一次表情时调用。结束旧表演后由控制器接续本轮原话。年龄、能力、会不会唱某首歌等问题用question，即使提到了歌名也不点播。只在明确请求做一次已有表情时用expression。停止、待机、明确点播或持续模仿用robot_program。歌词、剧本、自播、旁人说话、否定、引用、单纯笑声或附和尚不构成请求。听不清时不要调用。',
+            description='节目期间，用户明确对机器人提出完整问题或要求做一次表情时调用。结束旧表演后由控制器接续本轮原话。所有直接问题都用question，包括今天星期几、现在几点、天气、年龄、能力、会不会唱某首歌等；不能先直接回答，即使知道答案。提到歌名也不点播。只在明确请求做一次已有表情时用expression。停止、待机、明确点播或持续模仿用robot_program。歌词、剧本、自播、旁人说话、否定、引用、单纯笑声或附和尚不构成请求。听不清时不要调用。',
             parameters=dict(type='object',properties=dict(kind=dict(type='string',enum=['question','expression'])),
                 required=['kind'],additionalProperties=False)),
         dict(type='function',name='defer_reception',
@@ -85,12 +85,13 @@ def controller_intent(arguments,program_ids,mode):
     return dict(kind='interaction' if action=='stop' else 'standby')
 
 
-def preparation_reply(intent,programs,interrupting=False):
+def preparation_reply(intent,programs,interrupting=False,*,choose_interruption=False):
     """Owned acceptance text, distinct from successful physical execution."""
     from vivis.speech.fixed_replies import REPLIES
     if interrupting and intent['kind'] in ('select','interaction','standby'):
         target={'interaction':'interaction','standby':'standby'}.get(intent['kind'],intent.get('program'))
-        return dict(target=target,text=REPLIES['program_interrupt'],source='program_interrupt')
+        from vivis.speech.fixed_replies import interruption_reply
+        return dict(target=target,text=interruption_reply() if choose_interruption else REPLIES['program_interrupt'],source='program_interrupt')
     if intent['kind']=='wake':
         followup=intent.get('followup')
         return preparation_reply(followup,programs) if followup else None  # Preserve natural wake replies.

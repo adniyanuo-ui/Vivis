@@ -61,6 +61,21 @@ def controller(narrow=False):
 
 
 class IndependentTrackingTests(unittest.TestCase):
+    def test_visible_upright_face_returns_roll_to_neutral_without_losing_face(self):
+        robot,c,p,ids,data,receiver,g,last=controller()
+        self.assertEqual(c['independent_neck']['roll_control_mode'],'position')
+        roll=ids.index(34);held=[]
+        for tick in range(600):
+            receiver.target=dict(x=0.,y=0.,eye_line_roll_rad=.4 if tick<240 else 0.)
+            now=10+(tick+1)/60
+            for sid in g.owned:g.observe(sid,dict(position=last[ids.index(sid)]),now)
+            last=g.apply(data[0],last,1/60,now)
+            held.append(last[roll])
+        self.assertGreater(abs(held[239]-2047),5)
+        self.assertLess(abs(held[-1]-2047),1)
+        self.assertLess(max(abs(b-a) for a,b in zip(held,held[1:])),600/60+1e-6)
+        self.assertLess(max(held[:240])-min(held[180:240]),30)
+
     def test_all_neck_reference_and_command_bounds_use_device_limits(self):
         robot,c,p,ids,data,receiver,g,last=controller();motors={m['id']:m for m in p['motors']}
         for sid,bounds,speed in ((32,(1650,2450),600),(33,(1500,2347),600),(34,(1800,2300),600)):
