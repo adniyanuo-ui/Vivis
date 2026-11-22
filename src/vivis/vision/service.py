@@ -224,6 +224,7 @@ def main(argv=None):
                 if observation is not None and observation['valid'] and metrics['faces']==1:
                     expression=dict(bilateral_smile=round(min(observation['weights'].get('mouthSmileLeft',0.),
                         observation['weights'].get('mouthSmileRight',0.)),1),observation_only=True)
+                    if social is not None:expression['patterns']=packet['social_expression']
                 presence.publish(metrics['faces'],sample[1],expression=expression,person=metrics['person_detection'])
                 now = time.monotonic()
                 last_sequence = sample[0]

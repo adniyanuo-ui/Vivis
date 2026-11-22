@@ -62,6 +62,9 @@ def voice_configuration(speech,robot):
         expression_configuration()
         from vivis.interaction.presence_entry import configuration as entry_configuration
         entry_configuration()
+        from vivis.interaction.social_conversation import configuration as social_configuration,SocialConversation
+        SocialConversation(social_configuration(options.get('social_conversation_config')),
+            json.loads((ROOT/'configs/perception/speech_presence.json').read_text())['max_age_s'])
         session['tools']=tools([p['id'] for p in catalog['programs']])
         session['tool_choice']='auto'
         robot_definition=json.loads(Path(robot).read_text())

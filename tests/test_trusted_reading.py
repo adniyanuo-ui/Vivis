@@ -10,7 +10,7 @@ from vivis.speech.runtime_policy import policy
 
 
 class TrustedReadingTests(IsolatedAsyncioTestCase):
-    def reader(self,text='取件码三、三、八、八。',status='completed'):
+    def reader(self,text='取件码三、三、八、八。',status='completed',style=None):
         self.sent=[];self.closed=False
         events=[dict(type='response.created',response=dict(id='r')),
             dict(type='response.audio.delta',response_id='r',delta=base64.b64encode(b'\0'*4800).decode()),
@@ -32,7 +32,17 @@ class TrustedReadingTests(IsolatedAsyncioTestCase):
         self.log=Mock()
         return RealtimeReader('wss://test','test-secret',dict(voice='longanyang_v3.1',
             tools=[dict(name='must-not-be-in-reader')],instructions='private chat history',
-            turn_detection=dict(type='smart_turn_v2')),self.log)
+            turn_detection=dict(type='smart_turn_v2')),self.log,style=style)
+
+    async def test_public_style_preserves_voice_and_exact_reading(self):
+        reader=self.reader('想聊点轻松的吗？',style='concern')
+        with patch('vivis.speech.trusted_reading.websocket_connection',return_value=self.ws), \
+             patch('vivis.speech.trusted_reading.connect_session',new_callable=AsyncMock) as connect:
+            await reader.generate('想聊点轻松的吗？')
+        settings=connect.call_args.args[1]
+        self.assertEqual(settings['voice'],'longanyang_v3.1');self.assertEqual(settings['tools'],[])
+        self.assertFalse(settings['enable_search']);self.assertIn('温和、关切',settings['instructions'])
+        self.assertIn('不改写原文',settings['instructions'])
 
     async def test_same_voice_no_tools_no_history_and_verified_audio(self):
         reader=self.reader()

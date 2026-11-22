@@ -56,7 +56,7 @@ CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负�
     'controller_state.unattributed_source_notice=true表示识别片段没有可靠的话轮归属，不能据此办理业务或宣称已记录；请用户完整表达当前请求，只问缺项，不把查询误说成登记取件码失败。'
     '交互态用户说笑一个/别笑了/认真一点/恢复自然时，调用set_expression，source=command；不能只口头答应。'
     '聊天自动回应使用同一个set_expression，source=social，结合当前话语、上下文和可观察表情；不要机械模仿。'
-    '已有四种固定组合：joy开心、concern温和关切、listening认真倾听、surprise惊喜。用户明确要求用source=command；聊天语义适合时可用source=social。它们是标定通道组合，不是新舵机动作；本轮不因视觉变化额外主动起话题。'
+    '已有四种固定组合：joy开心、concern温和关切、listening认真倾听、surprise惊喜。用户明确要求用source=command；聊天语义适合时可用source=social。它们是标定通道组合，不是新舵机动作。主动话题由本地空闲调度，不能只因视觉变化就自行插话。'
     '用户苦笑、抱怨、表达难过或谈严肃事情时，优先attentive或neutral收起笑容；愉快交流可温和smile，不每句都调用。'
     '视觉数据只是面部动作观察，不证明内心情绪。52基础表情均可调用：单通道用标准通道名，多通道用custom和weights。'
     '用户要求悲伤、哭脸、大笑、惊讶等，实时选择已有通道组合，不以需要重新标定为由拒绝。悲伤可组合BrowInnerUp和MouthFrown；大笑可组合MouthSmile、CheekSquint、JawOpen；哭脸是面部组合，不声称已专门验收。'
@@ -128,6 +128,11 @@ class CloudManagedVoice(ManagedVoice):
         self.program_ids={p['id'] for p in catalog['programs']}
         reception=json.loads((ROOT/self.speech['managed_voice']['reception_config']).read_text())
         self.reception=ReceptionGate(reception)
+        from vivis.interaction.social_conversation import SocialConversation,configuration as social_configuration
+        self.social=SocialConversation(social_configuration(self.speech['managed_voice'].get('social_conversation_config')),
+            self.presence.c['max_age_s'])
+        self.last_social_cue=None
+        self.social_turns=deque(maxlen=6)
         self.public_prompt_task=None;self.public_prompt_started=False;self.thinking_generation=None
         self.public_prompt_context=None
         from vivis.interaction.memory import PersonMemory
@@ -445,6 +450,7 @@ class CloudManagedVoice(ManagedVoice):
             self.tool_repair=None;self.control_pending=False
             if mode!='interaction' or not command['ready']:
                 self.expression.clear();self.expression_pending=None;self.expression_outcome=None
+                self.social_turns.clear()
             if previous['target']!=target or not self.context.get('speech_ready',self.context['ready']):
                 self.continue_response=False
                 self.message_claimed=None
@@ -1209,15 +1215,23 @@ class CloudManagedVoice(ManagedVoice):
         if self.tasks and self.memory:
             facts['robot_tasks']=self.task_overview()
             facts['known_people']=self.known_people() if self.identified_person() else []
+        observation=None
         try:
             observation=json.loads(self.presence.path.read_text())
-            expression=observation.get('expression')
-            if (self.presence.visible() and observation.get('faces')==1 and isinstance(expression,dict)
+            expression=observation.get('expression') if isinstance(observation,dict) else None
+            if (isinstance(observation,dict) and self.presence.visible() and observation.get('faces')==1 and isinstance(expression,dict)
                     and expression.get('observation_only') is True
                     and type(expression.get('bilateral_smile')) in (float,int)
                     and 0<=expression['bilateral_smile']<=1):
                 facts['visual_expression_observation']=dict(bilateral_smile=expression['bilateral_smile'],observation_only=True)
         except (OSError,ValueError):pass
+        social_active=self.context['mode']=='interaction' and self.context['ready']
+        cue=self.social.observe(observation,time.monotonic(),(self.memory_session,confirmed or self.anonymous),active=social_active)
+        if social_active and (self.social.c['tone_enabled'] or self.social.c['topics_enabled']):
+            if self.social.c['tone_enabled']:facts['visual_social_cue']=cue
+            if cue!=self.last_social_cue:
+                self.last_social_cue=dict(cue)
+                self.log.write('social_speech_cue_changed',**cue,tone_enabled=self.social.c['tone_enabled'])
         if self.expression_outcome:facts['expression_outcome']=self.expression_outcome
         facts['greeting_wake_allowed']=self.greeting_wake_allowed()
         instructions=session_with_program_context(self.session,self.last_program)['instructions']
@@ -1226,6 +1240,7 @@ class CloudManagedVoice(ManagedVoice):
         person=self.identified_person()
         if self.memory and person:instructions+=self.memory.context(person)
         instructions+=self.dialect.instructions()
+        if social_active:instructions+=self.social.instructions()
         if self.program_turn_only():instructions+=PROGRAM_TURN_POLICY
         return instructions,identity,permission
 
@@ -1437,6 +1452,7 @@ class CloudManagedVoice(ManagedVoice):
         connection=self.message_connection;generation=self.input_generation;revision=self.context['revision']
         session=self.memory_session;person=self.recognized_person()
         address=self.knowledge.people.get(person,{}).get('preferred_address') if person else None
+        observed_style=None
         def current():
             return (self.cloud_state is state and connection is self.message_connection and session==self.memory_session
                     and (self.public_prompt_started or (generation==self.input_generation and not self.in_speech))
@@ -1444,11 +1460,16 @@ class CloudManagedVoice(ManagedVoice):
                     and not conversation.declined and not conversation.paused and self.context['ready'] and self.can_speak()
                     and (self.public_prompt_started or self.presence.single_visible()
                          and (person is None or person==self.recognized_person()))
+                    and (self.public_prompt_started or observed_style is None
+                         or self.social.cue['response_style'] in ('neutral',observed_style))
                     and not (self.message_lane and self.message_lane.task and not self.message_lane.task.done()))
         async def speak():
+            nonlocal observed_style
+            pose_id=None
             try:
                 turns=()
-                if welcome and person and self.memory:
+                verified_person=person if person==self.identified_person() else None
+                if verified_person and self.memory and (welcome or self.social.c['topics_enabled']):
                     try:turns=(await asyncio.to_thread(self.memory.search,person,[],session))['matches']
                     except sqlite3.Error:self.log.write('public_prompt_history_unavailable')
                 if not current():return
@@ -1456,9 +1477,37 @@ class CloudManagedVoice(ManagedVoice):
                 previous=self.public_prompt_context
                 if (not welcome and previous and previous['session']==session and previous['text'].endswith(text)):
                     text=public_invitation(index=conversation.count+1)
-                reader=None;audio=self.fixed_audio(text)
+                topic=None;speech_style=None
+                if not welcome and self.social.c['topics_enabled']:
+                    from vivis.interaction.social_conversation import public_context
+                    from vivis.speech.social_topics import draft
+                    observed_style=self.social.cue['response_style']
+                    current_turns=[{k:t[k] for k in ('role','text')} for t in self.social_turns if t['session']==session]
+                    context=public_context(self.knowledge,verified_person,turns,current_turns,conversation.topics)
+                    # Send facial ACTIONS, never the robot's suggested style as
+                    # if it proved the visitor's mood or overrode their words.
+                    context['visual_cue']={k:v for k,v in self.social.cue.items() if k!='response_style'}
+                    context['previous_prompt']=previous['text'] if previous and previous['session']==session else None
+                    try:
+                        proposal=await draft(self.url,self.secret,dict(self.session,voice=self.active_voice),context,self.log,
+                            self.social.c['topic_max_chars'],policy()['message_extract_s'])
+                        if not current():return
+                        if proposal['topic']=='skip':
+                            conversation.defer('thinking');self.thinking_generation=self.input_generation
+                            self.log.write('social_topic_deferred');return
+                        if previous and previous['session']==session and previous['text'].endswith(proposal['text']):
+                            raise ValueError('Repeated public invitation')
+                        text=proposal['text'];topic=proposal
+                        if self.social.c['tone_enabled']:speech_style=proposal['style']
+                    except asyncio.CancelledError:raise
+                    except Exception as exc:
+                        self.log.write('social_topic_fallback',reason=type(exc).__name__)
+                        observed_style=None  # Existing neutral cached invitation remains valid.
+                if not current():return
+                reader=None;audio=None if speech_style is not None else self.fixed_audio(text)
                 if audio is None:
-                    reader=RealtimeReader(self.url,self.secret,dict(self.session,voice=self.active_voice),self.log)
+                    options={'style':speech_style} if speech_style is not None else {}
+                    reader=RealtimeReader(self.url,self.secret,dict(self.session,voice=self.active_voice),self.log,**options)
                     audio=await asyncio.wait_for(reader.generate(text),policy()['playback_stall_s'])
                 # Check again immediately before queuing speech. The same guard
                 # remains active through playback and cancellation.
@@ -1466,13 +1515,25 @@ class CloudManagedVoice(ManagedVoice):
                 class PreparedAudio:
                     async def generate(self,_):return audio
                 def started(words):
+                    nonlocal pose_id
                     self.public_prompt_started=True
                     self.public_prompt_context=dict(text=words,playback_state='started',connection=connection,
                         session=session,generation=generation)
-                    if not welcome:conversation.played(time.monotonic())
+                    if not welcome:
+                        conversation.played(time.monotonic())
+                        if topic:
+                            conversation.remember_topic(topic['topic'])
+                            if self.social.c['topic_expression_enabled'] and topic['style']!='neutral':
+                                try:
+                                    outcome=self.expression.publish(dict(expression=topic['style'],source='social'),revision)
+                                    if outcome['status']=='pending_expression_target':pose_id=outcome['intent_id']
+                                    self.log.write('social_topic_expression',expression=topic['style'],**outcome)
+                                except (OSError,ValueError) as exc:
+                                    self.log.write('social_topic_expression_failed',reason=type(exc).__name__)
                     self.emit(dict(kind='cloud_transcript',epoch=self.epoch,role='assistant',text=words,
                         source='public_welcome' if welcome else 'public_idle_prompt'))
-                    self.log.write('public_prompt_played',welcome=welcome,count=conversation.count)
+                    self.log.write('public_prompt_played',welcome=welcome,count=conversation.count,
+                        topic=topic['topic'] if topic else None,speech_style=speech_style)
                 speaker=MessageSpeaker(reader,self.player,state,lambda _:current(),started,self.log.write,
                     tts=PreparedAudio(),source='public_reception')
                 complete=False
@@ -1487,6 +1548,10 @@ class CloudManagedVoice(ManagedVoice):
                         conversation.last_prompt=time.monotonic()
             except (asyncio.CancelledError,StaleMessageTurn):pass
             except Exception as exc:self.log.write('public_prompt_failed',error_type=type(exc).__name__)
+            finally:
+                if pose_id and self.expression.active and self.expression.active['id']==pose_id:
+                    try:self.expression.publish(dict(expression='auto',source='social'),self.context['revision'])
+                    except (OSError,ValueError) as exc:self.log.write('social_topic_expression_release_failed',reason=type(exc).__name__)
         self.public_prompt_task=asyncio.create_task(speak())
 
     def courier_request(self,args,event):
@@ -1987,6 +2052,7 @@ class CloudManagedVoice(ManagedVoice):
         try:
             self.message_connection=object();self.courier_waiters.clear()
             self.program_waiters.clear()
+            self.social_turns.clear()
             self.invalid_question=None;self.question_onset=None;self.recovered_query_generation=None
             self.program_followup=None;self.followup_handoff=False;self.followup_response=None
             self.program_responses.clear()
@@ -2181,6 +2247,8 @@ class CloudManagedVoice(ManagedVoice):
                                 and event.get('item_id')==self.turn_item_id==self.question_onset['item']
                                 and self.question_onset['generation']==self.input_generation and self.turn_ended_at is not None):
                             self.question_onset['final_text']=event.get('transcript','')
+                            if self.context['mode']=='interaction' and self.context['ready'] and self.turn_engaged:
+                                self.social_turns.append(dict(role='user',text=self.question_onset['final_text'],session=self.memory_session))
                             self.accept_program_followup(self.question_onset['final_text'])
                             await self.resume_program_calls(ws)
                         waking=(kind=='conversation.item.input_audio_transcription.completed' and self.admit_explicit_wake(event,state))

@@ -1,0 +1,8 @@
+{
+  "schema_version": "vivis-social-conversation-1.0",
+  "tone_enabled": true,
+  "topics_enabled": true,
+  "topic_expression_enabled": true,
+  "expression_config": "configs/interaction/interaction.json",
+  "topic_max_chars": 80
+}

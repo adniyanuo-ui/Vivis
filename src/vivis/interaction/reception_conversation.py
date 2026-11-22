@@ -44,6 +44,7 @@ class ReceptionConversation:
         self.count = 0
         self.paused = False
         self.declined = False
+        self.topics = []
 
     def user_started(self):
         self.quiet_since = None
@@ -74,3 +75,7 @@ class ReceptionConversation:
         self.last_prompt = now
         self.count += 1
         self.quiet_since = None
+
+    def remember_topic(self,topic):
+        if topic not in self.topics:self.topics.append(topic)
+        self.topics=self.topics[-self.limit:]
