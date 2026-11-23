@@ -108,7 +108,7 @@ def program_command(program,robot,folder,speech,settings):
 class Worker:
     """Only this child may own the serial lock. Cancellation is instance-local."""
     def __init__(self,command,folder,events,motion_environment=None):
-        self.folder=folder;self.cancelled_at=None;self.ready=False;self.preparation=dict(state='pending');self.standby_fault=None
+        self.folder=folder;self.cancelled_at=None;self.kill_requested_at=None;self.ready=False;self.preparation=dict(state='pending');self.standby_fault=None
         folder.parent.mkdir(parents=True,exist_ok=True)
         self.log=folder.with_suffix('.log').open('w')
         try:
@@ -145,12 +145,25 @@ class Worker:
 
     def finish(self):
         self.thread.join(timeout=2)
+        # Closing a TextIOWrapper while its reader is blocked can itself wait
+        # forever for the reader's lock. A dead USB driver may also delay SIGKILL.
+        if self.thread.is_alive():return False
         if self.process.stdout:self.process.stdout.close()
         self.log.close()
+        return True
 
     def kill_owned_group(self):
         try:os.killpg(self.process.pid,signal.SIGKILL)
         except ProcessLookupError:pass
+
+    def force_stop(self,timeout_s=2.):
+        """One kill request and one shared reap budget, including final cleanup."""
+        if self.kill_requested_at is None:
+            self.kill_requested_at=time.monotonic();self.kill_owned_group()
+        remaining=max(0.,timeout_s-(time.monotonic()-self.kill_requested_at))
+        try:self.process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:return False
+        return True
 
 
 class PromptPlayer:
@@ -695,8 +708,17 @@ def main(argv=None):
                             failure_reply_started=now
                         quitting=failure_reply_started is None
                 elif worker.cancelled_at is not None and now-worker.cancelled_at>settings['cancel_timeout_s']:
-                    worker.kill_owned_group();worker.process.wait(timeout=2);worker.finish();worker=None
-                    fault='Worker cancellation timed out; hold position, no automatic recovery';phase='fault';quitting=True
+                    pid=worker.process.pid;reaped=worker.force_stop()
+                    fault=('任务退出超时[WORKER_STOP_TIMEOUT]：进程'+str(pid)+
+                        ('已强制结束。' if reaped else '已请求强制终止，但仍未退出，可能在等待设备I/O；控制权尚未确认释放。')+
+                        '停止自动恢复，不启动新任务；请检查USB／串口后重新启动。')
+                    phase='fault';quitting=True
+                    record('worker_stop_timeout',pid=pid,reaped=reaped,error=fault)
+                    print(fault,flush=True)
+                    if reaped:
+                        if worker.finish() is False:record('worker_reader_pending',pid=pid)
+                        worker=None
+                    else:break  # Keep ownership tracked for bounded final cleanup.
             if voice:
                 if failure_reply_started is not None and (voice.transition_reply_id is None or not voice_available
                         or now-failure_reply_started>=settings['cancel_timeout_s']):quitting=True
@@ -752,11 +774,15 @@ def main(argv=None):
         if worker is not None:
             cleanup(worker.cancel)
             def wait_worker():
-                try:worker.process.wait(timeout=settings['cancel_timeout_s'])
-                except subprocess.TimeoutExpired:worker.kill_owned_group();worker.process.wait(timeout=2)
+                if worker.kill_requested_at is None:
+                    try:worker.process.wait(timeout=settings['cancel_timeout_s']);return
+                    except subprocess.TimeoutExpired:pass
+                if not worker.force_stop():raise RuntimeError('任务进程仍在等待退出；强制终止已请求，不能确认设备控制权释放')
             cleanup(wait_worker)
             cleanup(worker.kill_owned_group)
-            cleanup(worker.finish)
+            def finish_worker():
+                if worker.finish() is False:raise RuntimeError('任务日志读取仍未结束，未强行关闭正在读取的管道')
+            cleanup(finish_worker)
         if persistent_vision is not None:cleanup(persistent_vision.close)
         if asr is not None:
             def stop_asr():
@@ -765,11 +791,14 @@ def main(argv=None):
                 except subprocess.TimeoutExpired:asr.kill();asr.wait(timeout=2)
             cleanup(stop_asr)
             if asr_thread:cleanup(lambda:asr_thread.join(timeout=2))
-            if asr.stdout:cleanup(asr.stdout.close)
+            reader_done=asr_thread is None or not asr_thread.is_alive()
+            if asr.stdout and reader_done:cleanup(asr.stdout.close)
+            elif asr.stdout:cleanup_errors.append('语音日志读取仍未结束，未强行关闭正在读取的管道')
             if asr.stdin:cleanup(asr.stdin.close)
         if asr_log:cleanup(asr_log.close)
-        if asr_trace:cleanup(asr_trace.close)
+        if asr_trace and (asr_thread is None or not asr_thread.is_alive()):cleanup(asr_trace.close)
         if cleanup_errors:fault=fault or 'Resource cleanup failed: '+'; '.join(cleanup_errors)
+        for error in cleanup_errors:print('清理未完成[SHUTDOWN_PENDING]：'+error,flush=True)
         phase='fault' if fault else 'stopped';cleanup(lambda:publish(True));cleanup(lambda:record('closed',error=fault));cleanup(log.close)
         cleanup(lambda:(output/'summary.json').write_text(json.dumps(dict(phase=phase,error=fault,program_sessions=turn,
             last_mode=session.mode_of(active_target) if active_target is not None else session.mode,
