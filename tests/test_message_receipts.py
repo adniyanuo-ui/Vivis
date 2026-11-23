@@ -125,8 +125,26 @@ class MessageReceiptTests(unittest.TestCase):
 
     def test_delegate_variants_are_candidates_not_automatic_execution(self):
         from vivis.speech.message_receipts import MESSAGE_REQUEST
-        for text in ('你告诉他就好','帮我捎句话','帮我传个话','帮我递句话','给小王捎个信','跟小王说一声','让小王帮我买一个东西'):
+        for text in ('你告诉他就好','帮我捎句话','帮我传个话','帮我递句话','给小王捎个信','跟小王说一声','让小王帮我买一个东西',
+                '帮我告诉小王明天带资料。','告诉你的同事小王，明天九点到。',
+                '我现在告诉你一件事，请转告小王明天九点到。'):
             with self.subTest(text=text):self.assertTrue(MESSAGE_REQUEST.search(text))
+
+    def test_telling_robot_preferences_streams_without_message_receipt_even_when_final_is_late(self):
+        for text in ('我现在告诉你，我喜欢吃苹果，不喜欢吃','我告诉你我喜欢苹果，不喜欢香蕉。',
+                '我想告诉您，我喜欢喝绿茶。','我之前告诉你了，我不喜欢香蕉。'):
+            for final_first in (False,True):
+                with self.subTest(text=text,final_first=final_first):
+                    gate=MessageReceipts();gate.bind('r',1,'user')
+                    source=dict(type='conversation.item.input_audio_transcription.completed',item_id='user',transcript=text)
+                    answer=dict(type='response.audio_transcript.done',response_id='r',transcript='我记下了，您喜欢苹果。')
+                    if final_first:
+                        gate.filter(source);self.assertEqual(gate.filter(self.audio),[self.audio])
+                        self.assertEqual(gate.filter(answer),[answer])
+                    else:
+                        self.assertEqual(gate.filter(self.audio),[]);self.assertEqual(gate.filter(answer),[])
+                        self.assertEqual(gate.filter(source),[source,self.audio,answer])
+                    self.assertFalse(gate.rejected);self.assertEqual(gate.responses['r']['kind'],'ordinary')
 
 
 if __name__=='__main__':unittest.main()

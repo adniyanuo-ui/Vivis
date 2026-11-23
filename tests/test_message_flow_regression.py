@@ -133,7 +133,9 @@ class FinalTurnAdmissionTests(unittest.IsolatedAsyncioTestCase):
                 service.final_courier_read=Mock(return_value=False);service.messages=Mock()
                 service.message_request=Mock()
                 for index,text in enumerate(('今天天气真好。','你会唱什么歌？','小帅笑一个。',
-                        '我今天有点累，想聊聊天。','你是哪个公司的？','第一件事是好好休息。')):
+                        '我今天有点累，想聊聊天。','你是哪个公司的？','第一件事是好好休息。',
+                        '我现在告诉你，我喜欢吃苹果，不喜欢吃','我告诉你我喜欢苹果，不喜欢香蕉。',
+                        '我想告诉您，我喜欢喝绿茶。')):
                     with self.subTest(text=text):
                         item=str(index);service.turn_item_id=item;service.pending_user_text=text
                         event=dict(type='conversation.item.input_audio_transcription.completed',item_id=item,transcript=text)
@@ -144,6 +146,9 @@ class FinalTurnAdmissionTests(unittest.IsolatedAsyncioTestCase):
                         service.message_receipts.filter(event)
                         audio=dict(type='response.audio.delta',response_id='r'+item,delta=base64.b64encode(b'\0'*480).decode())
                         self.assertEqual(service.message_receipts.filter(audio),[audio])
+                        answer=dict(type='response.audio_transcript.done',response_id='r'+item,
+                            transcript='我记下了，您喜欢吃苹果，不喜欢香蕉。')
+                        self.assertEqual(service.message_receipts.filter(answer),[answer])
                 service.messages.assert_not_called();service.message_request.assert_not_called()
             finally:service.log.close()
 

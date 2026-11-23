@@ -6,7 +6,9 @@ import time
 
 from vivis.interaction.message_status import RECEIPTS
 
-MESSAGE_REQUEST=re.compile(r'留.{0,2}言|转告|捎.{0,2}话|带.{0,2}话|传.{0,2}话|递.{0,2}话|(?:取件|退件|退货)码|告诉(?!我)|通知|'
+# Directly telling the robot something is ordinary conversation. Possessive
+# recipients such as "告诉你的同事" still need semantic message classification.
+MESSAGE_REQUEST=re.compile(r'留.{0,2}言|转告|捎.{0,2}话|带.{0,2}话|传.{0,2}话|递.{0,2}话|(?:取件|退件|退货)码|告诉(?!我|[你您](?!的))|通知|'
     r'(?:跟|和|同).{1,12}(?:说一声|说一下|讲一声|讲一下)|让.{1,16}(?:帮|买|寄|带)|'
     r'(?:见到|遇到|碰到).{1,16}(?:问问|问一下|说|讲|提醒|告知)|'
     r'(?:帮|替|麻烦).{0,6}(?:问问|问一下|告知|提醒).{1,12}|'

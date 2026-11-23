@@ -1155,7 +1155,9 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
                 turn['text']=event.get('transcript','');candidates.add(item_id)
                 if item_id==self.turn_item_id:self.pending_user_text=turn['text'];self.unattributed_source_notice=False
             else:
-                self.log.write('memory_transcript_unattributed',item_id=item_id,reason='unknown_user_turn')
+                self.log.write('memory_transcript_unattributed',item_id=item_id,reason='unknown_user_turn',
+                    event_fields=sorted(event),previous_item_id=event.get('previous_item_id'),
+                    current_item_id=self.turn_item_id,not_assigned_to_current=True)
                 # An orphaned short acknowledgement is not a business request.
                 # Keep it unattributed without asking for an unrelated pickup code.
                 from vivis.speech.message_receipts import normalized
