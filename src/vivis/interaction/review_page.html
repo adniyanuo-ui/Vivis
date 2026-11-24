@@ -1,0 +1,52 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>熟人照片与声纹样本管理</title><style>
+body{font:16px/1.6 system-ui,sans-serif;max-width:1360px;margin:24px auto;padding:0 20px;background:#f6f7fa;color:#202a37}
+header,section{padding:20px;background:white;border-radius:12px;margin:18px 0}h1,h2,h3{line-height:1.4}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}article{background:#f2f5f8;padding:12px;border-radius:10px}
+img{width:100%;height:180px;object-fit:contain;background:#e6eaf0}button{font:inherit;padding:6px 10px;margin:5px 5px 0 0;cursor:pointer}
+button{border:1px solid #b5c3d5;background:white;border-radius:6px}button:disabled{opacity:.5;cursor:wait}.danger{color:#a31d2d;border-color:#dbb0b8}
+.muted{color:#667085;font-size:14px}.notice{background:#fff2cc;padding:12px;border-radius:8px}audio{width:100%}.badge{color:#126638;font-weight:600}
+.candidate{color:#966400}code{font-size:12px;overflow-wrap:anywhere}#status{position:sticky;top:0;padding:10px;background:#e5edf9;z-index:1}nav a{margin:0 18px 8px 0;display:inline-block}
+</style><header><h1>熟人照片与声纹样本管理</h1><p>点击按钮直接保存，不需要复制命令。照片最多32张，活动最多16张；声纹最多32段，停用的录音不参与匹配但仍占名额。删除后自动采集只补空缺。</p>
+<p>基础照片保持锁定；激活候选照片或声纹会同时锁定。自动采集不会覆盖已有样本。声纹目前只在日志观察，不授予身份或业务权限。</p>
+<div class="notice">试听建议用耳机。若用Orin音箱，请先在终端停止交互服务：sudo systemctl stop vivis-p1.service，避免把录音当成新话语；听完后用sudo systemctl start vivis-p1.service恢复。此管理页面可独立使用。</div>
+<p><button id="refresh">刷新清单</button> <a href="http://127.0.0.1:8765/">人脸跟随与交互日志</a></p><nav id="nav"></nav></header><p id="status" role="status">正在读取…</p><main id="people"></main>
+<script>
+let snapshot=null,busy=false;
+const $=s=>document.querySelector(s),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
+function player(src){if(!src)return el('p','原始文件不存在','muted');const n=el('audio');n.controls=true;n.preload='none';n.src=src;return n;}
+function actionButton(text,person,kind,row,action){const b=el('button',text,action==='delete'?'danger':'');b.onclick=()=>act(person,kind,row,action);return b;}
+async function act(person,kind,row,action){
+ if(busy)return;busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);$('#status').textContent='正在保存…';
+ const request={person:person.id,kind,id:row.id,action,revision:kind==='photo'?person.photo_revision:person.voice_revision};
+ let notice='';try{const r=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json','X-Vivis-Review-Token':snapshot.token},body:JSON.stringify(request)});const data=await r.json();notice=r.ok?data.message:data.error;}
+ catch(e){notice='连接未确认，请刷新清单核对；不要把网络失败当作保存成功。';}
+ finally{busy=false;await load();$('#status').textContent=notice;}
+}
+function photoCard(person,row){
+ const card=el('article');if(row.media){const a=el('a'),i=el('img');a.href=row.media;a.target='_blank';i.src=row.media;i.loading='lazy';a.append(i);card.append(a);}
+ card.append(el('p',(row.active?'活动':'候选')+(row.base?' · 基础照':row.locked?' · 人工锁定':''),'badge'+(row.active?'':' candidate')),el('code',row.filename));
+ if(row.base){card.append(el('p','基础照片保持锁定','muted'));return card;}
+ if(row.active){card.append(actionButton('停用',person,'photo',row,'deactivate'));card.append(actionButton(row.locked?'解锁':'锁定',person,'photo',row,row.locked?'unlock':'lock'));}
+ else card.append(actionButton('激活',person,'photo',row,'activate'));
+ card.append(actionButton(row.active?'永久删除':'删除',person,'photo',row,'delete'));return card;
+}
+function voiceCard(person,row){const card=el('article');card.append(el('p',(row.active?'参与声纹匹配':'已停用')+(row.locked?' · 已锁定':''),'badge'),el('code',row.id),player(row.media));
+ card.append(actionButton(row.active?'停用':'激活并锁定',person,'voice',row,row.active?'deactivate':'activate'));
+ if(row.active)card.append(actionButton(row.locked?'解锁':'锁定',person,'voice',row,row.locked?'unlock':'lock'));
+ card.append(actionButton('永久删除',person,'voice',row,'delete'));return card;}
+function render(){const main=$('#people'),nav=$('#nav');main.replaceChildren();nav.replaceChildren();
+ for(const person of snapshot.people){const a=el('a',person.name);a.href='#person-'+person.id;nav.append(a);const section=el('section');section.id='person-'+person.id;
+ section.append(el('h2',person.name+' · '+person.id),el('p','照片 '+person.photos.length+'/32；活动 '+person.photos.filter(r=>r.active).length+'/16；声纹 '+person.voices.length+'/32；参与匹配 '+person.voices.filter(r=>r.active).length+' 段。'));
+ for(const active of [true,false]){const rows=person.photos.filter(r=>r.active===active);section.append(el('h3',(active?'活动照片':'候选照片')+'（'+rows.length+'）'));const grid=el('div',undefined,'grid');for(const row of rows)grid.append(photoCard(person,row));section.append(grid);}
+ section.append(el('h3','声纹参考录音'));const voices=el('div',undefined,'grid');for(const row of person.voices)voices.append(voiceCard(person,row));section.append(voices);
+ if(!person.voices.length)section.append(el('p','尚无合格参考。普通聊天录音在下方；不能直接当作可靠声纹。','muted'));
+ const details=el('details');details.append(el('summary','近期完整音文（最近'+person.rounds.length+'轮，只读）'));
+ for(const r of person.rounds){const article=el('article');article.append(el('p',r.created+' · '+r.outcome,'muted'),el('p','用户：'+(r.user_text||'尚无定稿文字')),player(r.media));
+ for(const reply of r.replies)article.append(el('p','小帅：'+(reply.text||'未取得回答文字')+' · '+reply.outcome),player(reply.media));details.append(article);}
+ section.append(details);main.append(section);
+ }}
+async function load(){try{const r=await fetch('/api/state',{cache:'no-store'}),data=await r.json();if(!r.ok)throw new Error(data.error);snapshot=data;render();$('#status').textContent='已刷新。操作后立即保存；网页提示以实际保存结果为准。';}
+ catch(e){$('#status').textContent='读取失败：'+e.message;}finally{document.querySelectorAll('button').forEach(b=>b.disabled=false);}}
+$('#refresh').onclick=()=>{if(!busy)load();};load();
+</script></html>

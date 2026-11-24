@@ -16,9 +16,25 @@ from vivis.paths import ROOT
 from vivis.interaction.intents import IntentRouter
 from vivis.interaction.dialogue import EventGate,program_command,Worker,main
 from vivis.runtime.cancellation import operator_cancelled
+from vivis.interaction.session import SessionPolicy,STANDBY,INTERACTION
 
 
 def read(path):return json.loads((ROOT/path).read_text())
+
+
+class CaptureRecoveryPolicyTests(unittest.TestCase):
+    def test_only_ready_interaction_can_reenter_after_capture_gap(self):
+        for kind,target,active,ready,keep in (
+                ('capture_gap',INTERACTION,INTERACTION,True,True),
+                ('capture_gap',INTERACTION,INTERACTION,False,False),
+                ('capture_gap',INTERACTION,'song',True,False),
+                ('capture_gap','song','song',True,False),
+                ('capture_gap',STANDBY,INTERACTION,True,False),
+                (None,INTERACTION,INTERACTION,True,False)):
+            s=SessionPolicy(['song']);s.desired=target;s.pending_prompt='welcome'
+            self.assertEqual(s.voice_interrupted(kind,active,ready),keep)
+            self.assertEqual(s.desired,INTERACTION if keep else STANDBY)
+            self.assertIsNone(s.pending_prompt)
 
 
 class IntentTests(unittest.TestCase):
@@ -290,7 +306,7 @@ class SupervisorTests(unittest.TestCase):
             def __iter__(self):time.sleep(.2);return iter(())
         worker=SimpleNamespace(process=SimpleNamespace(poll=lambda:None,wait=lambda **_:calls.append('wait')),
             cancel=lambda:calls.append('cancel'),kill_owned_group=lambda:calls.append('kill_owned'),
-            finish=lambda:calls.append('finish'),cancelled_at=None)
+            finish=lambda:calls.append('finish'),cancelled_at=None,kill_requested_at=None)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);settings=read('configs/interaction/p1.json');settings['programs']=str(ROOT/settings['programs']);settings['semantic']=str(ROOT/settings['semantic']);settings['conversation']=str(ROOT/settings['conversation'])
             config=root/'p1.json';config.write_text(json.dumps(settings))

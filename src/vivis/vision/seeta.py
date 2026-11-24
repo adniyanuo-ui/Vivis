@@ -43,7 +43,26 @@ class Seeta:
             clarity=dict(score=float(meta[8]),level=int(meta[9])) if meta[0] else None,
             timing_ms=dict(zip(('detection','landmarks','quality','recognition','native_total'),map(float,meta[10:15]))),
             quality_low=bool(meta[0] and (meta[7]==0 or meta[9]==0)),
+            quality_rejection_reasons=([name for name,index in (('brightness',7),('clarity',9)) if meta[index]==0] if meta[0] else []),
             quality_rejected=bool(gate and meta[0] and (meta[7]==0 or meta[9]==0)))
+
+    @staticmethod
+    def brightness_diagnostics(image,box):
+        """Only explain the existing quality decision; never change admission."""
+        x,y,w,h=map(float,box[:4])
+        if w<=0 or h<=0:return dict(valid=False)
+        left=min(image.shape[1],max(0,int(np.floor(x))));top=min(image.shape[0],max(0,int(np.floor(y))))
+        right=min(image.shape[1],max(0,int(np.ceil(x+w))));bottom=min(image.shape[0],max(0,int(np.ceil(y+h))))
+        face=image[top:bottom,left:right]
+        if not face.size:return dict(valid=False)
+        gray=(face[:,:,0]*.114+face[:,:,1]*.587+face[:,:,2]*.299)
+        rh,cw=gray.shape[0]//3,gray.shape[1]//3
+        if not rh or not cw:return dict(valid=False)
+        brightest=max(float(gray[i*rh:(i+1)*rh,j*cw:(j+1)*cw].mean()) for i in range(3) for j in range(3))
+        return dict(valid=True,diagnostic_only=True,mean_gray=float(gray.mean()),
+            brightest_grid_mean=brightest,dark_pixel_fraction=float(np.mean(gray<32)),
+            near_white_pixel_fraction=float(np.mean(gray>=250)),
+            hint='too_bright' if brightest>=230 else 'too_dark' if brightest<70 else 'not_at_native_low_boundary')
 
     def evaluate(self,image,gate=False):
         image=np.ascontiguousarray(image,dtype=np.uint8);meta=np.zeros(16,dtype=np.float64)
@@ -64,6 +83,8 @@ class Seeta:
         if code:raise RuntimeError(self.lib.sf6_error().decode())
         if not all(np.isfinite(a).all() for a in (features,meta,attributes)):raise ValueError('Non-finite selected-face result')
         result=self.observation(meta,gate);result.update(face_source='yunet_selected',detection_score=None)
+        if meta[0] and meta[7]==0:
+            result['brightness_diagnostics']=self.brightness_diagnostics(image,box)
         if attributes[0]>=0:
             result['age_estimate']=dict(years=int(attributes[0]),estimated=True,source='seeta6_age',not_identity_evidence=True)
             result['timing_ms']['age']=float(attributes[1])

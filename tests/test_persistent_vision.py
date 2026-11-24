@@ -127,6 +127,9 @@ class PersistentTests(unittest.TestCase):
         from vivis.vision import service
         with tempfile.TemporaryDirectory() as folder,patch('os.getppid',return_value=os.getpid()):
             base,landmark,owner=self.fixture(folder);root=Path(folder)
+            # The owner enables identity once. A song mode can omit its local
+            # block, but must not suspend identification for the live dialogue.
+            base['familiar_faces']={'enabled':True}
             presence=root/'configs/perception/speech_presence.json';presence.parent.mkdir(parents=True)
             presence.write_bytes((ROOT/'configs/perception/speech_presence.json').read_bytes())
             interaction=copy.deepcopy(base)
@@ -134,7 +137,8 @@ class PersistentTests(unittest.TestCase):
                 gate=json.loads((ROOT/'configs/interaction/interaction.json').read_text())['social_response']['gate'])
             expression=copy.deepcopy(base);expression['face_expression']=dict(enabled=True,face_selection='largest',**landmark)
             file=root/'config.json';atomic_json(file,base)
-            calls=[0];states=[];sequence_modes={2:interaction,4:expression,6:base,8:interaction}
+            song=copy.deepcopy(base);song.pop('familiar_faces')
+            calls=[0];states=[];sequence_modes={2:interaction,4:expression,6:song,8:interaction}
             class Stop:
                 def set(self):pass
                 def is_set(self):return calls[0]>=10
@@ -152,14 +156,20 @@ class PersistentTests(unittest.TestCase):
             landmarker.observe.side_effect=lambda sample,target:dict(schema_version='vivis-face-expression-1.0',
                 sequence=sample[0],timestamp_monotonic=sample[1],valid=True,weights=dict(mouthSmileLeft=.6,mouthSmileRight=.6))
             people=Mock(error=None);people.observation.return_value=dict(available=True,observed_monotonic=None,persons=0)
+            familiar=Mock(available=True,error=None,photo_error=None,photo_pool=None,brightness_samples=None,brightness_error=None)
+            familiar.c={'backend':'seeta6'}
+            familiar.step.return_value=dict(state='recognized',person_id='alpha',similarity=.9,observed_monotonic=time.monotonic())
             preview=Mock();preview.update.side_effect=lambda state,jpeg=None:states.append(state)
             with patch.object(service,'ROOT',root),patch.object(service,'LatestCamera',return_value=camera) as capture,\
                  patch.object(service,'FaceVision',return_value=detector) as detection,\
                  patch('vivis.vision.landmarks.FaceLandmarkerDetector',return_value=landmarker) as model,\
                  patch('vivis.vision.person.PersonWorker',return_value=people),patch.object(service,'Preview',return_value=preview),\
+                 patch('vivis.vision.familiar.FamiliarFaces',return_value=familiar) as recognizer,\
                  patch.object(service.socket,'socket'),patch.object(service.threading,'Event',Stop),redirect_stdout(io.StringIO()):
                 service.main(['--config',str(file),'--managed-owner',str(owner),'--output',str(root/'vision')])
             capture.assert_called_once();detection.assert_called_once();model.assert_called_once()
+            recognizer.assert_called_once();self.assertEqual(familiar.step.call_count,10)
+            self.assertTrue(all(s['familiar_identity']['person_id']=='alpha' for s in states))
             camera.close.assert_called_once();landmarker.close.assert_called_once()
             observed=[c.args[0][0] for c in landmarker.observe.call_args_list]
             self.assertEqual(observed,[3,4,5,6,9,10])  # No inference in either standby segment.

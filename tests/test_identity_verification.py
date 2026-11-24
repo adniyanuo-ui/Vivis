@@ -305,6 +305,73 @@ class IdentityVerificationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ConversationReset,'confirmed_person_changed'):
             self.service.verify_identity(self.state)
 
+    def anonymous_input(self):
+        s=self.service;s.turn_person=s.anonymous;s.turn_item_id='anonymous-current';s.in_speech=True
+        s.presence.single_visible=Mock(return_value=True)
+        s.question_started(s.turn_item_id,self.state)
+        return s
+
+    async def test_identification_during_bound_anonymous_speech_waits_for_final_question(self):
+        s=self.anonymous_input();original=(s.memory_session,s.turn_item_id,s.turn_person,s.message_connection)
+        s.verify_identity(self.state)
+        self.state.interrupt.assert_not_called();self.assertIsNone(s.conversation_person)
+        self.assertEqual((s.memory_session,s.turn_item_id,s.turn_person,s.message_connection),original)
+        s.in_speech=False;s.turn_ended_at=time.monotonic()
+        s.verify_identity(self.state)  # Final ASR can arrive after speech_stopped.
+        self.state.interrupt.assert_not_called()
+        s.question_onset['final_text']='你会联网吗？你能联网吗？'
+        s.resume_history.append(dict(role='user',text=s.question_onset['final_text']))
+        s.verify_identity(self.state)
+        self.state.interrupt.assert_not_called();self.assertEqual(s.conversation_person,'alice')
+        self.assertEqual((s.memory_session,s.turn_item_id,s.turn_person,s.message_connection),original)
+
+    async def test_pending_identification_withholds_private_context_and_memory_tools(self):
+        s=self.anonymous_input();s.memory=Mock();s.memory.context.return_value='SECRET_MEMORY'
+        s.archive_context_cache={'alice':'SECRET_ARCHIVE'}
+        s.knowledge.person_context=Mock(side_effect=lambda **kw:dict(
+            instructions='SECRET_PROFILE' if kw['allow_identification'] else 'PUBLIC',recognized=False,person_id=None))
+        s.stable_identity=Mock(return_value=dict(person_id='alice',state='recognized',held=False,
+            candidate_id='alice',remaining_s=0))
+        s.verify_identity(self.state);instructions,identity,_=s.context_snapshot()
+        self.assertNotIn('SECRET_',instructions);s.memory.context.assert_not_called()
+        self.assertIn('"identity_authorized": false',instructions)
+        self.assertFalse(s.knowledge.person_context.call_args.kwargs['allow_identification'])
+        self.assertFalse(s.task_overview()['enabled'])
+        # ASR finishes before the next verification tick: it must not open a
+        # temporary private-data window for this anonymous business request.
+        s.in_speech=False;s.turn_ended_at=time.monotonic();s.question_onset['final_text']='给小王留言。'
+        instructions,_,_=s.context_snapshot()
+        self.assertNotIn('SECRET_',instructions);s.memory.context.assert_not_called()
+        s.response_revisions['reply']=s.context['revision'];sent=[]
+        async def send(value):sent.append(json.loads(value))
+        await s.tool(SimpleNamespace(send=send),dict(name='search_person_memory',call_id='pending-private',
+            response_id='reply',arguments=json.dumps(dict(keywords=[]))))
+        self.assertFalse(json.loads(sent[-1]['item']['output'])['accepted']);s.memory.search.assert_not_called()
+
+    async def test_business_final_is_not_promoted_by_the_wait_for_public_input(self):
+        s=self.anonymous_input();s.verify_identity(self.state)
+        s.in_speech=False;s.turn_ended_at=time.monotonic();s.question_onset['final_text']='给小王留言，请他买东西。'
+        with self.assertRaisesRegex(ConversationReset,'confirmed_person_changed'):s.verify_identity(self.state)
+
+    async def test_arrival_during_current_user_turn_does_not_open_a_new_visit_session(self):
+        s=self.anonymous_input()
+        self.assertTrue(s.reception_turn_in_progress(self.state))
+        s.in_speech=False;s.turn_ended_at=time.monotonic()
+        self.assertTrue(s.reception_turn_in_progress(self.state))
+        self.state.responses['reply']=dict(status='completed',user_turn=dict(item_id=s.turn_item_id))
+        self.assertFalse(s.reception_turn_in_progress(self.state))
+        s.in_speech=True;s.question_onset['connection']=object()
+        self.assertFalse(s.reception_turn_in_progress(self.state))
+
+    async def test_missing_final_has_a_bounded_wait_and_different_known_person_is_not_deferred(self):
+        from vivis.speech.cloud_managed import policy
+        s=self.anonymous_input();s.verify_identity(self.state)
+        s.in_speech=False;s.turn_ended_at=10.
+        with patch('vivis.speech.cloud_managed.time.monotonic',return_value=10.+policy()['message_extract_s']+.01):
+            with self.assertRaisesRegex(ConversationReset,'confirmed_person_changed'):s.verify_identity(self.state)
+        s=self.anonymous_input();s.conversation_person='alice';self.person='bob'
+        with self.assertRaisesRegex(ConversationReset,'confirmed_person_changed'):s.verify_identity(self.state)
+
     async def test_initial_identification_does_not_preserve_recipient_bound_audio(self):
         self.service.relay_recipients['private']='bob'
         with self.assertRaisesRegex(ConversationReset,'confirmed_person_changed'):

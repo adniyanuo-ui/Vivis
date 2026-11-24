@@ -75,6 +75,21 @@ class SeetaIdentityTests(unittest.TestCase):
             self.infer(12.+i*.25);self.assertEqual(self.f.result['state'],'reviewing')
         self.infer(13.);self.assertEqual(self.f.result['state'],'recognized')
 
+    def test_brightness_reject_is_recorded_without_comparison_or_enrollment(self):
+        self.model.evaluate_selected=Mock(return_value=(dict(quality_rejected=True,
+            brightness=dict(level=0,score=.01),quality_rejection_reasons=['brightness']),None))
+        self.f.infer(np.zeros((120,120,3),np.uint8),np.array([0,0,100,100]),10.,self.f.epoch)
+        self.f.brightness_samples.job.wait(2)
+        self.assertEqual(self.f.result['state'],'unknown');self.model.compare.assert_not_called()
+        self.assertEqual(len(list((self.root/'private/diagnostics/face_brightness').glob('*.jpg'))),1)
+        self.assertEqual(self.f.ids.tolist(),['alpha','beta'])
+
+    def test_diagnostic_failure_does_not_revoke_a_good_identity(self):
+        self.f.brightness_samples.offer=Mock(side_effect=OSError('diagnostic unavailable'))
+        for t in (10.,10.5,11.):self.infer(t)
+        self.assertEqual(self.f.result['person_id'],'alpha')
+        self.assertEqual(self.f.brightness_error,'OSError');self.assertIsNone(self.f.error)
+
     def test_new_credible_person_revokes_old_name_before_confirmation(self):
         for t in (10.,10.5,11.):self.infer(t)
         self.model.index=1;self.infer(11.5)
@@ -187,3 +202,35 @@ class MultiPhotoGalleryTests(unittest.TestCase):
             for name,data in [('photo.jpg',b'first'),('reference.png',b'second'),('photos/third.JPG',b'third'),('photos/copy.png',b'first'),('resume.md',b'ignored')]:
                 (folder/name).write_bytes(data)
             self.assertEqual([p.name for p in registration_photos(folder)],['photo.jpg','reference.png','third.JPG'])
+
+
+class BrightnessDiagnosticTests(unittest.TestCase):
+    def test_dark_and_overexposed_faces_are_distinguished_without_changing_pixels(self):
+        from vivis.vision.seeta import Seeta
+        for level,hint in ((20,'too_dark'),(120,'not_at_native_low_boundary'),(255,'too_bright')):
+            with self.subTest(level=level):
+                image=np.full((30,30,3),level,np.uint8);before=image.copy()
+                result=Seeta.brightness_diagnostics(image,[0,0,30,30])
+                self.assertTrue(result['valid']);self.assertTrue(result['diagnostic_only'])
+                self.assertEqual(result['hint'],hint)
+                self.assertAlmostEqual(result['mean_gray'],level)
+                np.testing.assert_array_equal(image,before)
+
+    def test_only_selected_face_is_measured_and_outside_rectangles_are_invalid(self):
+        from vivis.vision.seeta import Seeta
+        image=np.full((90,90,3),255,np.uint8);image[30:60,30:60]=20
+        result=Seeta.brightness_diagnostics(image,[30,30,30,30])
+        self.assertEqual(result['hint'],'too_dark');self.assertAlmostEqual(result['dark_pixel_fraction'],1)
+        for box in ((-40,0,10,30),(100,0,20,30),(0,0,0,30),(0,0,2,2)):
+            with self.subTest(box=box):self.assertFalse(Seeta.brightness_diagnostics(image,box)['valid'])
+
+    def test_rejection_reasons_explain_native_gate_but_do_not_override_it(self):
+        from vivis.vision.seeta import Seeta
+        meta=np.zeros(16,np.float64);meta[0]=1;meta[9]=2
+        self.assertEqual(Seeta.observation(meta,True)['quality_rejection_reasons'],['brightness'])
+        self.assertTrue(Seeta.observation(meta,True)['quality_rejected'])
+        self.assertFalse(Seeta.observation(meta,False)['quality_rejected'])
+        meta[7]=2;meta[9]=0
+        self.assertEqual(Seeta.observation(meta,True)['quality_rejection_reasons'],['clarity'])
+        meta[9]=2
+        self.assertFalse(Seeta.observation(meta,True)['quality_rejected'])

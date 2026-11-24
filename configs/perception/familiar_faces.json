@@ -2,6 +2,23 @@
   "schema_version": "vivis-familiar-faces-1.0",
   "enabled": true,
   "photo_collection": true,
+  "brightness_diagnostics": {
+    "enabled": true,
+    "directory": "private/diagnostics/face_brightness",
+    "maximum_images": 100,
+    "sample_interval_s": 2.0
+  },
+  "photo_sampling": {
+    "stable_s": 1.0,
+    "batch_window_s": 30.0,
+    "sample_interval_s": 0.75,
+    "min_face_size_px": 60,
+    "brightness_range": [
+      0.1,
+      0.95
+    ],
+    "min_laplacian_variance": 25.0
+  },
   "people_directory": "private/people",
   "state_file": "outputs/runtime/familiar_person.json",
   "minimum_margin": 0.08,

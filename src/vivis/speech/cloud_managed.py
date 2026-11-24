@@ -187,14 +187,14 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
         self.log.write('cloud_control_backend',name='qwen_realtime',local_asr_started=False,reception_enabled=reception['enabled'],memory_enabled=self.memory is not None)
         self.init_continuity()
 
-    def health(self,available,reason):
+    def health(self,available,reason,*,recovery_kind=None):
         if available==self.health_available:return
         self.health_available=available
         if not available:
             self.message_connection=object()
             if self.message_lane:self.message_lane.reset_context()
             if self.cloud_state:self.cloud_state.interrupt(source='voice_unavailable')
-        self.emit(dict(kind='voice_health',available=available,reason=reason))
+        self.emit(dict(kind='voice_health',available=available,reason=reason,recovery_kind=recovery_kind))
 
     def input_overflow(self):
         self.cloud_queue=None
@@ -203,7 +203,14 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
 
     async def recover_audio(self,reason):
         """Close the previous owner before reopening; no hardware-controller restart."""
-        self.audio_ready=False;self.health(False,reason)
+        self.log.write('audio_recovery_started',reason=reason,
+            capture_clock_fault=self.audio.stats.get('capture_clock_fault'),
+            captured_frames=self.audio.stats.get('captured_frames'),processed_frames=self.audio.stats.get('processed_frames'),
+            recent_callback_warnings=self.audio.stats.get('callback_warning_events',[])[-8:])
+        interval=(self.audio.stats.get('capture_clock_fault') or {}).get('interval_ms')
+        recovery_kind=('capture_gap' if type(interval) in (int,float) and 35<interval<1000*policy()['callback_stall_s']
+                       and reason.startswith('Gap in microphone capture clock:') else None)
+        self.audio_ready=False;self.health(False,reason,recovery_kind=recovery_kind)
         self.message_connection=object();self.awaiting_recovery_user=True
         self.cloud_queue=None
         if self.cloud_task:
@@ -573,7 +580,17 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
                     public_inflight=any(r.get('source') in ('public_reception','transition_reply')
                         and rid not in state.blocked and r.get('received_audio_s') and not self.audio_completed(state,rid)
                         for rid,r in state.responses.items())
-                    if previous is None and not self.relay_recipients and public_inflight:
+                    if previous is None and not self.relay_recipients and self.anonymous_identity_turn_pending(now):
+                        # The current input began anonymously. Preserve its
+                        # audio/source until final ASR can classify it; private
+                        # context remains withheld during this narrow interval.
+                        self.conversation_person=None
+                        notice=(person,self.input_generation,self.turn_item_id)
+                        if getattr(self,'identity_enrichment_notice',None)!=notice:
+                            self.identity_enrichment_notice=notice
+                            self.log.write('identity_enrichment_waiting_final',person_id=person,item_id=self.turn_item_id,
+                                user_audio_preserved=True,private_context_withheld=True)
+                    elif previous is None and not self.relay_recipients and public_inflight:
                         # Complete this public sentence before isolating older,
                         # unattributed history. Re-evaluate on the next tick.
                         self.conversation_person=None
@@ -618,8 +635,33 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
             and isinstance(text,str) and text.strip() and not MESSAGE_REQUEST.search(text)
             and '取件码' not in text and courier_read_intent(text) is None)
 
+    def anonymous_identity_source_current(self):
+        source=self.question_onset
+        return bool(source and isinstance(self.turn_item_id,str) and self.turn_item_id
+            and source.get('person')==self.anonymous and source.get('generation')==self.input_generation
+            and source.get('item')==self.turn_item_id and source.get('connection') is self.message_connection)
+
+    def anonymous_identity_turn_pending(self,now=None):
+        """Wait only for this anonymous input's final text, never old history."""
+        now=time.monotonic() if now is None else now
+        return bool(self.anonymous_identity_source_current() and not self.question_onset.get('final_text')
+            and (self.in_speech or self.turn_ended_at is not None
+                and 0<=now-self.turn_ended_at<=policy()['message_extract_s']))
+
+    def identity_enrichment_guarded(self):
+        # A final event can arrive before the verification tick. Keep private
+        # data closed until that tick explicitly accepts the public enrichment.
+        return self.conversation_person is None and self.anonymous_identity_source_current()
+
+    def reception_turn_in_progress(self,state):
+        source=self.question_onset
+        return bool(self.context['mode']=='interaction' and self.context['ready'] and source
+            and source['item']==self.turn_item_id and source['generation']==self.input_generation
+            and source['connection'] is self.message_connection and self.user_turn_pending(state))
+
     def task_overview(self):
         if not self.tasks or not self.memory:return dict(enabled=False)
+        if self.identity_enrichment_guarded():return dict(enabled=False,identity_pending=True)
         now=time.monotonic();person=self.identified_person()
         if self.task_cache is None or now>=self.task_refresh_at or self.task_cache_version!=self.memory.version or self.task_cache.get('current_person')!=person:
             fields=('task_id','kind','creator','recipient','status','not_before','due_at')
@@ -850,7 +892,8 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
         if (not self.tasks or not self.memory or not self.tasks.c['auto_announce'] or not self.can_speak()
                 or self.in_speech or state.generating or self.player.count or self.continue_response or self.response_request_pending
                 or self.response_waiting_user_end or self.announcement_revision is not None
-                or len(self.task_visit_announced)>=self.tasks.c['max_auto_per_visit']):return
+                or len(self.task_visit_announced)>=self.tasks.c['max_auto_per_visit']
+                or self.identity_enrichment_guarded()):return
         person=self.identified_person()
         if not person:return
         lane=self.messages()
@@ -1205,6 +1248,8 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
     def context_snapshot(self):
         confirmed=self.identified_person()
         review=self.reviewing_identity()
+        identity_pending=self.identity_enrichment_guarded()
+        if identity_pending:confirmed=None;review=None
         identity=self.knowledge.person_context(allow_identification=confirmed is not None,allow_review=review is not None,
             retained_person_id=confirmed if review else None,stable_identity=self.stable_identity())
         permission=self.presence.allowed()
@@ -1220,6 +1265,7 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
         facts['program_followup_handoff']=self.followup_handoff
         facts['identity_state']='reviewing' if review else 'recognized' if confirmed else 'unknown'
         facts['identity_authorized']=confirmed is not None
+        facts['identity_enrichment_pending']=identity_pending
         facts['message_operation']=self.message_operation()
         invitation=self.public_prompt_context
         if (invitation and invitation['connection'] is self.message_connection
@@ -1233,7 +1279,7 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
         facts['timezone']=local_zone
         if self.tasks and self.memory:
             facts['robot_tasks']=self.task_overview()
-            facts['known_people']=self.known_people() if self.identified_person() else []
+            facts['known_people']=self.known_people() if confirmed else []
         observation=None
         try:
             observation=json.loads(self.presence.path.read_text())
@@ -1256,7 +1302,7 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
         instructions=session_with_program_context(self.session,self.last_program)['instructions']
         from vivis.interaction.presence_entry import instructions as entry_instructions
         instructions+=CLOUD_POLICY+entry_instructions(self.entry)+WORK_POLICY+identity['instructions']+' controller_state='+json.dumps(facts,ensure_ascii=False)
-        person=self.identified_person()
+        person=confirmed
         if self.memory and person:instructions+=self.memory.context(person)
         if getattr(self,'continuity',None):
             instructions+=self.archive_context_cache.get(person,'')
@@ -1784,6 +1830,10 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
                 read_tool=name in ('get_robot_status','search_person_memory','search_robot_memory')
                 read_tool|=name=='courier_pickup' and isinstance(args,dict) and args.get('action') in ('owner_query','owner_visit','lookup')
                 if not (read_tool or expression_recovery):raise ValueError('Recovered turn does not authorize this action; request a fresh explicit action.')
+            private_tool=name in ('search_person_memory','search_robot_memory','organize_archives')
+            private_tool|=name=='courier_pickup' and isinstance(args,dict) and args.get('action')!='lookup'
+            if private_tool and self.identity_enrichment_guarded():
+                raise IdentityVerificationRequired('当前匿名话轮尚未定稿，身份补全暂不授权私人资料或业务。')
             if name in ('search_person_memory','search_robot_memory'):
                 speaker=self.reply_people.get(event.get('response_id'))
                 if speaker and not speaker.startswith('anonymous:') and speaker!=self.identified_person():
@@ -2350,10 +2400,12 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
                         instructions,identity,permission=self.context_snapshot()
                         arrived=self.context['ready'] and self.reception.observe(self.presence.last_visible,self.context['mode'],
                             person_id=self.identified_person(),occupied=self.presence.person_count()>0)
-                        if arrived and self.continuing_program_turn():
+                        if arrived and (self.continuing_program_turn() or self.reception_turn_in_progress(state)):
                             # A mode handoff is still this conversation. Consume
                             # the arrival without erasing its retained source.
-                            self.log.write('reception_arrival_during_program_followup',session_retained=True)
+                            event=('reception_arrival_during_program_followup' if self.continuing_program_turn()
+                                   else 'reception_arrival_during_user_turn')
+                            self.log.write(event,session_retained=True)
                         elif arrived:
                             self.log.write('reception_arrival',mode=self.context['mode'],
                                 observed_hold_s=time.monotonic()-self.reception.present_since,

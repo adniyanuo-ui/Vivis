@@ -5,12 +5,14 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import Mock
+import wave
 
 import numpy as np
 
 from vivis.paths import ROOT
 from vivis.vision.photo_pool import PhotoPool,choose
-from vivis.speech.speaker_observation import SpeakerObserver,audio_quality
+from vivis.speech.speaker_observation import SpeakerObserver,audio_quality,consistency_windows
 
 
 def photo(i,locked=False):
@@ -43,6 +45,8 @@ class PhotoTests(unittest.TestCase):
         cv2.imwrite(str(folder/'photo.png'),image);digest=hashlib.sha256((folder/'photo.png').read_bytes()).hexdigest()
         vectors=np.zeros((1,128),np.float32);vectors[0,0]=1
         pool=PhotoPool(root,dict(people_directory='private/people',score_threshold=.6,minimum_margin=.1),vectors,['alpha'],[digest])
+        self.addCleanup(pool.close)
+        for stamp in (8,9,10):pool.observe_identity('alpha',stamp)
         return pool,image,vectors[0]
 
     def test_manual_original_locked_without_rewriting_gallery(self):
@@ -63,10 +67,23 @@ class PhotoTests(unittest.TestCase):
         self.assertFalse(pool.consider('alpha',image,row,vector,dict(quality_low=True),np.dot,10))
         self.assertFalse(pool.consider('alpha',image,row,-vector,{},np.dot,10))
 
+    def test_administrator_unlock_is_not_undone_on_restart(self):
+        pool,image,vector=self.pool();folder=pool.directory/'alpha';(folder/'photo_pool').mkdir()
+        (folder/'photo_pool/new.jpg').write_bytes(b'photo')
+        data=copy.deepcopy(pool.pools['alpha']);digest=data['rows'][0]['hash']
+        row=photo(1);row.update(hash='new',path='photo_pool/new.jpg',locked=False,excluded=False,lock_reason='administrator_unlocked')
+        data['rows'].append(row);data['active'].append('new');data['revision']+=1
+        (folder/'photo_pool.json').write_text(json.dumps(data))
+        renewed=PhotoPool(pool.root,pool.c,np.array([vector]),['alpha'],[digest]);self.addCleanup(renewed.close)
+        self.assertFalse(renewed.pools['alpha']['rows'][1]['locked']);self.assertIn('new',renewed.pools['alpha']['active'])
+
     def test_eligible_frame_added_and_near_duplicate_skipped(self):
         pool,image,vector=self.pool();row=np.array([0,0,120,120,35,40,85,40,60,65,40,90,80,90],np.float32)
         self.assertTrue(pool.consider('alpha',image,row,vector,{},np.dot,10))
-        self.assertFalse(pool.consider('alpha',image,row,vector,{},np.dot,20))
+        pool.observe_identity('alpha',11)
+        self.assertFalse(pool.consider('alpha',image,row,vector,{},np.dot,11))
+        self.assertEqual(len(pool.pools['alpha']['rows']),1)  # Pending samples do not change recognition.
+        self.assertTrue(pool.finish_batch('alpha'))
         data=pool.pools['alpha'];self.assertEqual(len(data['rows']),2)
         self.assertTrue(all((pool.directory/'alpha'/r['path']).is_file() for r in data['rows']))
 
@@ -84,6 +101,23 @@ class SpeakerTests(unittest.TestCase):
         for pcm,far in [(bytes(100),bytes(100)),(bytes(96000),bytes(96000)),(b'\xff\x7f'*48000,bytes(96000)),(self.pcm,self.pcm)]:
             self.assertIsNone(audio_quality(pcm,far)[0])
 
+    def test_effective_speech_threshold_is_point_six_seconds(self):
+        # Total WAV duration includes silence; admission counts energized20ms frames.
+        frame=np.rint(np.sin(np.arange(320)*.1)*3000).astype('<i2').tobytes()
+        self.assertEqual(self.c['minimum_seconds'],.6)
+        for frames,expected in ((29,'insufficient_speech'),(30,'accepted')):
+            pcm=bytes(16000)+frame*frames+bytes(16000)
+            statistics={};_,reason=audio_quality(pcm,bytes(len(pcm)),self.c['minimum_seconds'],statistics)
+            self.assertEqual(reason,expected)
+            self.assertAlmostEqual(statistics['effective_speech_s'],frames*.02)
+        pcm=frame*50
+        self.assertEqual(audio_quality(pcm,bytes(len(pcm)),1.5)[1],'too_short')
+
+    def test_sub_point_six_configuration_is_rejected(self):
+        for value in (.59,0):
+            with self.assertRaises(ValueError):
+                SpeakerObserver(dict(self.c,minimum_seconds=value),Path(self.tmp.name),self.events.append,lambda *a,**kw:None)
+
     def test_enrollment_needs_three_independent_turns_and_same_retry_not_added(self):
         self.s.infer(self.pcm,self.far,self.source(1));self.s.infer(self.pcm,self.far,self.source(1))
         self.assertEqual(len(self.s.gallery['heyude']),1)
@@ -97,6 +131,10 @@ class SpeakerTests(unittest.TestCase):
     def test_held_or_unknown_face_not_enrolled(self):
         self.s.infer(self.pcm,self.far,dict(self.source(1),enrollment_allowed=False))
         self.assertEqual(self.s.gallery,{})
+        self.s.poll();result=self.log[-1][1]
+        self.assertTrue(result['audio_quality_accepted']);self.assertFalse(result['reference_sample_saved'])
+        self.assertEqual(result['enrollment_skip_reason'],'visual_evidence_unconfirmed')
+        self.assertIn('未入库',self.events[-1]['message'])
 
     def test_late_results_keep_original_source_and_have_no_authority(self):
         self.s.infer(self.pcm,self.far,self.source('original'));self.s.poll()
@@ -104,17 +142,98 @@ class SpeakerTests(unittest.TestCase):
         self.assertNotIn('authorized',result);self.assertTrue(result['observation_only'])
 
     def test_reference_recordings_and_vectors_bounded_after_restart(self):
-        for i in range(12):self.s.infer(self.pcm,self.far,self.source(i))
-        self.assertEqual(len(self.s.gallery['heyude']),8)
-        self.assertEqual(len(list((self.s.directory/'heyude').glob('*.wav'))),8)
+        for i in range(40):self.s.infer(self.pcm,self.far,self.source(i))
+        self.assertEqual(len(self.s.gallery['heyude']),32)
+        self.assertEqual([r['turn_id'] for r in self.s.gallery['heyude']],[str(i) for i in range(32)])
+        self.assertEqual(len(list((self.s.directory/'heyude').glob('*.wav'))),32)
         second=SpeakerObserver(self.c,Path(self.tmp.name),lambda e:None,lambda *a,**kw:None,extractor=lambda x:[1.,0.])
-        self.assertEqual(len(second.gallery['heyude']),8)
+        self.assertEqual(len(second.gallery['heyude']),32)
+        before=second.gallery_path.read_bytes();second.infer(self.pcm,self.far,self.source(50))
+        self.assertEqual(second.gallery_path.read_bytes(),before)
+
+    def test_manual_audio_deletion_reopens_only_that_slot_while_running_and_after_restart(self):
+        for i in range(32):self.s.infer(self.pcm,self.far,self.source(i))
+        folder=self.s.directory/'heyude';(folder/'5.wav').unlink()
+        self.s.infer(self.pcm,self.far,self.source(40));self.s.infer(self.pcm,self.far,self.source(41))
+        ids=[r['turn_id'] for r in self.s.gallery['heyude']]
+        self.assertEqual(len(ids),32);self.assertIn('40',ids);self.assertNotIn('5',ids);self.assertNotIn('41',ids)
+        (folder/'6.wav').unlink()
+        second=SpeakerObserver(self.c,Path(self.tmp.name),lambda e:None,lambda *a,**kw:None,extractor=lambda x:[1.,0.])
+        self.assertEqual(len(second.gallery['heyude']),31)
+        second.infer(self.pcm,self.far,self.source(42));self.assertEqual(len(second.gallery['heyude']),32)
+
+    def test_reference_save_failure_does_not_leave_a_phantom_in_memory_or_audio(self):
+        from unittest.mock import patch
+        with patch.object(self.s,'save_gallery',side_effect=OSError('disk full')):
+            self.s.infer(self.pcm,self.far,self.source(1))
+        self.assertEqual(self.s.gallery,{})
+        self.assertFalse(list((self.s.directory/'heyude').glob('*.wav')))
+        self.s.infer(self.pcm,self.far,self.source(1));self.assertEqual(len(self.s.gallery['heyude']),1)
+
+    def test_disabled_reference_not_used_for_matching_and_active_changes_reload(self):
+        from vivis.speech.speaker_gallery import edit_reference,read_gallery
+        for i in range(3):self.s.infer(self.pcm,self.far,self.source(i))
+        source=dict(self.source('query'),enrollment_allowed=False)
+        data=read_gallery(self.s.gallery_path,self.c['sha256'])
+        edit_reference(self.s.gallery_path,self.c['sha256'],'heyude','0','deactivate',data['revision'])
+        self.s.infer(self.pcm,self.far,source)
+        while not self.s.results.empty():result=self.s.results.get()
+        self.assertIsNone(result['speaker_candidate']);self.assertEqual(len(self.s.gallery['heyude']),3)
+        data=read_gallery(self.s.gallery_path,self.c['sha256'])
+        edit_reference(self.s.gallery_path,self.c['sha256'],'heyude','0','activate',data['revision'])
+        self.s.infer(self.pcm,self.far,source);self.assertEqual(self.s.results.get()['speaker_candidate'],'heyude')
+
+    def test_concurrent_manual_edit_cannot_be_overwritten_by_enrollment(self):
+        from unittest.mock import patch
+        from vivis.speech.speaker_gallery import edit_reference,read_gallery
+        self.s.infer(self.pcm,self.far,self.source(0));save=self.s.save_gallery
+        def concurrent(people):
+            data=read_gallery(self.s.gallery_path,self.c['sha256'])
+            edit_reference(self.s.gallery_path,self.c['sha256'],'heyude','0','deactivate',data['revision'])
+            save(people)
+        with patch.object(self.s,'save_gallery',side_effect=concurrent):self.s.infer(self.pcm,self.far,self.source(1))
+        data=read_gallery(self.s.gallery_path,self.c['sha256'])
+        self.assertEqual(len(data['people']['heyude']),1);self.assertFalse(data['people']['heyude'][0]['active'])
+        self.assertFalse((self.s.directory/'heyude/1.wav').exists())
 
     def test_inconsistent_multi_speaker_windows_not_enrolled(self):
         def feature(x):return [1,0] if np.mean(x)>0 else [0,1]
         self.s.extractor=feature
         pcm=np.r_[np.full(48000,3000),np.full(48000,-3000)].astype('<i2').tobytes()
         self.s.infer(pcm,bytes(len(pcm)),self.source(1));self.assertEqual(self.s.gallery,{})
+
+    def test_consistency_probes_ignore_padding_without_changing_main_query(self):
+        # Three seconds of leading silence previously became the first probe.
+        self.s.extractor=lambda x:[1.,0.] if np.mean(x*x)>.001 else [0.,1.]
+        pcm=np.r_[np.zeros(48000),np.full(48000,3000)].astype('<i2').tobytes()
+        original=pcm;self.s.infer(pcm,bytes(len(pcm)),self.source('padded'))
+        self.assertEqual(pcm,original);result=self.s.results.get()
+        self.assertTrue(result['reference_sample_saved']);self.assertAlmostEqual(result['consistency']['similarity'],1.)
+        with wave.open(str(self.s.directory/'heyude/padded.wav')) as w:self.assertEqual(w.getnframes(),96000)
+
+    def test_consistency_does_not_reuse_one_short_word_twice(self):
+        x=np.r_[np.zeros(48000),np.full(12000,.1),np.zeros(48000)].astype(np.float32)
+        windows,evidence=consistency_windows(x,.6)
+        self.assertIsNone(windows);self.assertEqual(evidence['reason'],'insufficient_independent_speech')
+
+    def test_failed_consistency_never_publishes_an_otherwise_matching_candidate(self):
+        for i in range(3):self.s.infer(self.pcm,self.far,self.source(i))
+        while not self.s.results.empty():self.s.results.get()
+        self.s.feature=Mock(side_effect=[np.array([1.,0.]),np.array([1.,0.]),np.array([0.,1.])])
+        pcm=np.full(96000,3000,dtype='<i2').tobytes()
+        self.s.infer(pcm,bytes(len(pcm)),self.source('mixed'))
+        result=self.s.results.get();self.assertEqual(result['best_candidate'],'heyude')
+        self.assertIsNone(result['speaker_candidate']);self.assertEqual(result['recognition_reason'],'consistency_rejected')
+        self.assertFalse(result['reference_sample_saved']);self.assertEqual(len(self.s.gallery['heyude']),3)
+
+    def test_low_score_is_explained_without_lowering_threshold_or_enrolling(self):
+        for i in range(3):self.s.infer(self.pcm,self.far,self.source(i))
+        while not self.s.results.empty():self.s.results.get()
+        self.s.feature=lambda x:np.array([.59,np.sqrt(1-.59**2)])
+        self.s.infer(self.pcm,self.far,dict(self.source('low'),enrollment_allowed=False))
+        self.s.poll();result=self.events[-1]['speaker_observation']
+        self.assertIsNone(result['speaker_candidate']);self.assertEqual(result['recognition_reason'],'low_similarity')
+        self.assertIn('0.590低于0.650',self.events[-1]['message'])
 
 
 if __name__=='__main__':unittest.main()

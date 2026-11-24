@@ -14,7 +14,7 @@ from vivis.interaction.dialogue import main
 
 
 class ManagedSupervisorTests(unittest.TestCase):
-    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False,early=False,slow_initial=False,faulted=False,slow_return=False,preparations=False,fail_program=False):
+    def test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(self,cloud_commands=False,extended=False,repeated=False,qwen=False,recover=False,farewell=False,early=False,slow_initial=False,faulted=False,slow_return=False,preparations=False,fail_program=False,capture_gap=False):
         actual_popen=subprocess.Popen;voice_starts=[];prompts=[]
         settings=json.loads((ROOT/'configs/interaction/p1.json').read_text())
         settings['realtime_voice']['control_backend']='qwen_realtime' if qwen else 'local'
@@ -113,10 +113,11 @@ turns=[(.2,'小帅'),(.8,'你是谁'),(1.2,'播放白骨夫人'),(2.,'自己玩'
 if sys.argv[3]=='True':turns=[(.2,'小帅'),(.8,'呃播放剧本'),(1.2,'停止'),(1.8,'模仿我的表情'),(2.2,'待机'),(2.7,'小帅'),(3.2,'播放白骨夫人'),(4.1,'待机')]
 if sys.argv[4]=='True':turns=[(.2,'小帅'),(.8,'播放宇飞剧本'),(1.4,'停止'),(2.1,'再演一遍'),(2.8,'退出'),(3.4,'待机')]
 if sys.argv[6]=='True':turns=[(.2,'小帅'),(.8,'断网'),(1.1,'播放白骨夫人'),(1.4,'恢复'),(2.,'小帅'),(2.6,'待机')]
+if sys.argv[10]=='True':turns=[(.2,'小帅'),(.8,'断网'),(1.4,'恢复'),(2.,'待机')]
 for n,(deadline,text) in enumerate(turns,1):
  time.sleep(max(0,start+deadline-time.monotonic()))
  if text in ('断网','恢复'):
-  emit(kind='voice_health',available=text=='恢复',reason='synthetic network');continue
+  emit(kind='voice_health',available=text=='恢复',reason='synthetic network',recovery_kind='capture_gap' if sys.argv[10]=='True' else None);continue
  if sys.argv[5]=='True':
   actions={'小帅':('wake',''),'播放白骨夫人':('play','baigufuren'),'呃播放剧本':('play','wz2'),
    '模仿我的表情':('play','expression-follow'),'自己玩':('standby',''),'停止':('stop',''),'待机':('standby','')}
@@ -153,7 +154,7 @@ time.sleep(10)
             def popen(command,**kwargs):
                 if 'vivis.speech.managed' in command:
                     voice_starts.append(command)
-                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover),str(farewell),str(early),str(preparations)],**kwargs)
+                    return actual_popen([sys.executable,str(listener),str(speaker),str(cloud_commands),str(extended),str(repeated),str(qwen),str(recover),str(farewell),str(early),str(preparations),str(capture_gap)],**kwargs)
                 return actual_popen(command,**kwargs)
             with patch('vivis.interaction.dialogue.ROOT',root), \
                  patch('vivis.interaction.dialogue.dependencies',return_value=(speech,[])), \
@@ -177,6 +178,7 @@ time.sleep(10)
                       ['standby','interaction','wz2','interaction','expression-follow','standby','interaction','baigufuren','interaction','standby']
                       if extended else ['standby','interaction','baigufuren','interaction','standby','interaction','standby'])
             if recover:expected=['standby','interaction','standby','interaction','standby']
+            if capture_gap:expected=['standby','interaction','interaction','standby']
             if faulted:expected=['standby','interaction','baigufuren','interaction','standby']
             if fail_program:expected=['standby','interaction','baigufuren']
             self.assertEqual([s[6:] for s in lines if s.startswith('start ')],expected)
@@ -241,6 +243,9 @@ time.sleep(10)
 
     def test_network_outage_holds_motion_and_requires_fresh_request_after_recovery(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,recover=True)
+
+    def test_capture_gap_returns_ready_interaction_without_wake_or_standby_homing(self):
+        self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,capture_gap=True)
 
     def test_farewell_owns_speaker_once_in_ready_standby_then_releases(self):
         self.test_state_transitions_keep_one_capture_and_release_cloud_before_other_audio(qwen=True,farewell=True)

@@ -29,6 +29,8 @@ class BoardReferenceOutput:
             raise ValueError('Board reference needs a separate stereo playback device')
         if channels not in (1, 2):
             raise ValueError('Board reference supports mono or stereo speaker audio')
+        from vivis.speech.reference_mixer import restore_reference_mixer
+        mixer=restore_reference_mixer(board_info['name'])
         self.sd = sd
         self.callback = callback
         self.on_fault = on_fault
@@ -47,6 +49,9 @@ class BoardReferenceOutput:
                           reference_gap_callbacks=0, reference_frames=0,
                           output_underflow_callbacks=0, max_underflow_streak=0,
                           underflow_streak_limit=MAX_CONSECUTIVE_UNDERFLOWS)
+        self.stats['mixer']=mixer
+        if mixer.get('checked') and on_warning:
+            on_warning('DOV回采输出电平已'+('恢复并' if mixer['restored'] else '')+'核验：'+str(mixer['after']['values']))
         self.resources = ExitStack()
         try:
             # The speaker callback produces PCM before the board asks for the

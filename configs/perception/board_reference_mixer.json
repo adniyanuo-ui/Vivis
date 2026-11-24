@@ -1,0 +1,7 @@
+{
+  "schema_version": "vivis-board-reference-mixer-1.0",
+  "enabled": true,
+  "device_prefix": "DOV:",
+  "alsa_card": "DOV",
+  "playback_value": 999
+}

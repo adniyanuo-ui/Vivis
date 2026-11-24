@@ -20,7 +20,7 @@ import wave
 
 from vivis.paths import ROOT
 from vivis.speech.runtime_policy import policy
-from vivis.speech.realtime_audio import AudioIO,VoiceBuffer,PlaybackBufferFull
+from vivis.speech.realtime_audio import AudioIO,VoiceBuffer,PlaybackBufferFull,input_gain_parameters
 from vivis.speech.service_recovery import ServiceRecovery,transient_error
 from vivis.speech.voice_frontend import select_frontend,AEC_PROFILES
 
@@ -61,6 +61,7 @@ def configuration(args):
     hardware=json.loads((robot_path.parent/robot['hardware']).read_text())
     speaker=args.speaker or hardware['runtime']['audio_device']
     speech=json.loads((ROOT/config['speech']).read_text())
+    input_gain_parameters(speech['capture'])
     if args.mic:speech['capture']['device']=args.mic
     session=dict(modalities=['text','audio'],voice=config['voice'],speech_rate=config['speech_rate'],
                  enable_speech_emotion=config['enable_speech_emotion'],

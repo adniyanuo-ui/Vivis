@@ -22,3 +22,4 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "vivis.hardware.feetech._vendor.scservo_sdk" = ["LICENSE"]
+"vivis.interaction" = ["review_page.html"]

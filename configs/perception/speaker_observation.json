@@ -8,6 +8,17 @@
   "threshold": 0.65,
   "minimum_margin": 0.12,
   "enrollment_samples": 3,
-  "maximum_samples": 8,
-  "minimum_seconds": 2.5
+  "maximum_samples": 32,
+  "minimum_seconds": 0.6,
+  "consistency_window_mode": "speech_aligned",
+  "short_collection": {
+    "enabled": true,
+    "minimum_fragment_s": 0.2,
+    "target_speech_s": 1.5,
+    "maximum_speech_s": 3.0,
+    "maximum_window_s": 30.0,
+    "maximum_audio_s": 12.0,
+    "visual_witness_s": 0.5,
+    "padding_ms": 100
+  }
 }

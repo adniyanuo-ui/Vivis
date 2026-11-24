@@ -392,6 +392,12 @@ def main(argv=None):
         if persistent_vision is not None:environment.update(persistent_vision.environment())
         return Worker(command,folder,events,environment)
     gate=EventGate(settings['max_event_age_s'])
+    from vivis.interaction.sample_progress import SampleProgress
+    def sample_event(event):
+        try:events.put_nowait(event);return True
+        except queue.Full:return False
+    samples=SampleProgress(ROOT,sample_event)
+    voice_recovery_target=STANDBY
     try:
         def optional_event(event):
             try:events.put_nowait(event)
@@ -450,6 +456,7 @@ def main(argv=None):
         print('唤醒词：'+'、'.join(wake_words)+'；管理器运行期间持续监听。',flush=True)
         while True:
             now=time.monotonic()
+            samples.poll(now)
             if args.seconds is not None and now-started>=args.seconds:quitting=True
             if (ROOT/'outputs/STOP').exists():quitting=True;fault='Emergency stop file present'
             if asr is not None and asr.poll() is not None and not quitting:quitting=True;fault='Speech process ended; see asr.log'
@@ -460,15 +467,22 @@ def main(argv=None):
                 try:event=events.get_nowait()
                 except queue.Empty:break
                 if event.get('kind')=='shutdown':quitting=True;continue
+                if event.get('kind')=='sample_progress':
+                    record('sample_progress',detail=event)
+                    print(event['message'],flush=True);continue
                 if event.get('kind')=='voice_health' and qwen_only:
                     voice_available=bool(event['available']);record('voice_health',detail=event)
                     if not voice_available:
-                        phase='voice_recovering';session.desired=STANDBY;session.pending_prompt=None
+                        keep=session.voice_interrupted(event.get('recovery_kind'),active_target,
+                            bool(warm_ready and worker and worker.ready and worker.cancelled_at is None and not worker.standby_fault))
+                        voice_recovery_target=session.desired;phase='voice_recovering'
                         if worker:worker.cancel()
                         if voice:voice.transition_reply_id=None;voice.preparation_speech=False;voice.enable(False)
-                        print('语音链路恢复中；停止当前任务并保持扭矩，管理器继续运行。原因：'+event['reason'],flush=True)
+                        print('语音链路恢复中；停止当前任务并保持扭矩，管理器继续运行。'+
+                            ('恢复后回交互，不重播旧请求。' if keep else '恢复后回待机。')+'原因：'+event['reason'],flush=True)
                     else:
-                        print('语音链路已恢复；等待新的唤醒或接待，不续播旧节目、不重放旧指令。',flush=True)
+                        print('语音链路已恢复；'+('回交互，请继续说话；' if voice_recovery_target==INTERACTION else '等待新的唤醒或接待；')+
+                            '不续播旧节目、不重放旧指令。',flush=True)
                     continue
                 if event.get('kind')=='mouth_error':
                     record('mouth_error',detail=event)
@@ -482,6 +496,8 @@ def main(argv=None):
                 if event.get('kind')=='ready':
                     ready=True;record('speech_ready',detail=event)
                     print('麦克风已就绪，请说唤醒词。'+('本次只识别，不驱动机器人。' if args.listen_only else ('当前为前台接待待机，相机观察来人。' if reception_enabled else '当前为真正待机，摄像头关闭。')),flush=True)
+                    if 'input_gain_db' in event:
+                        print(f"麦克风输入增益：{event['input_gain_db']:+g} dB；音箱与AEC播放参考电平保持。",flush=True)
                     continue
                 if event.get('kind')=='worker_ready' and worker and worker.cancelled_at is None and event['pid']==worker.process.pid:
                     warm_ready=True
@@ -764,6 +780,7 @@ def main(argv=None):
     except BaseException as exc:
         fault=str(exc);raise
     finally:
+        samples.close()
         cleanup_errors=[]
         def cleanup(action):
             try:action()

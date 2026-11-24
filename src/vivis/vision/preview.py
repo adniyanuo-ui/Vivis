@@ -25,7 +25,7 @@ pre{white-space:pre-wrap;background:#202c3b;padding:16px;border-radius:10px}</st
 <small>下方眼球是图像方向模拟，不代表舵机实测位置。此视觉服务不驱动机器人。</small>
 <p id="robot-control">视觉服务只检测人脸，真机控制状态等待更新。</p>
 <p id="presence-status"></p><p id="identity-status"></p></section><section>
-<h2>交互日志</h2><p id="interaction-status">正在读取…</p><p id="business-identity"></p>
+<h2>交互日志</h2><p><a href="http://127.0.0.1:8766/" style="color:#8bc9fa" target="_blank">照片／声纹样本管理（本机）</a></p><p id="interaction-status">正在读取…</p><p id="business-identity"></p>
 <label><input id="log-follow" type="checkbox" checked> 自动滚动到最新</label>
 <p><small>最近100条，本机只读。回复文字不代表音频已完整播出；可能包含私人对话，请勿公开分享页面。</small></p>
 <div id="interaction-lines" role="log"></div></section></div>

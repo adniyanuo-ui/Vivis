@@ -45,6 +45,25 @@ class ContinuityVoice:
             and self.presence.person_count()<=1)
         return dict(person_id=raw,confirmed=bool(reliable),single_face=bool(reliable))
 
+    def collection_visual_evidence(self,now):
+        """Raw selected-frame evidence for sampling only; no business identity update."""
+        unknown=dict(stamp=now,person_id=None,confirmed=False,blocked=False,owner=None)
+        config=getattr(self.knowledge,'recognition',None)
+        if not config:return unknown
+        try:
+            face=json.loads((self.knowledge.root/config['state_file']).read_text())
+            presence=json.loads(self.presence.path.read_text())
+            stamp=face.get('observed_monotonic');visible=presence.get('observed_monotonic')
+            if type(visible) not in (int,float) or not 0<=now-visible<=self.presence.c['max_age_s']:return unknown
+            blocked=presence.get('faces',0)>1 or self.presence.person_count(now)>1
+            pid=face.get('person_id')
+            if (face.get('state')=='recognized' and pid in self.knowledge.people and not blocked
+                    and presence.get('faces')==1 and type(stamp) in (int,float)
+                    and 0<=now-stamp<=config['max_result_age_s']):
+                return dict(stamp=stamp,person_id=pid,confirmed=True,blocked=False,owner=face.get('owner'))
+            return dict(unknown,blocked=blocked,owner=face.get('owner'))
+        except (OSError,ValueError,TypeError,AttributeError):return unknown
+
     async def organize_archives(self,args,event):
         if not self.continuity:raise ValueError('聊天档案未启用')
         if args!={}:raise ValueError('整理档案不接受额外参数')
@@ -99,6 +118,11 @@ class ContinuityVoice:
 
     async def _continuity_tick(self,state):
         if not self.continuity:return
+        now=time.monotonic()
+        speaker=self.continuity.speaker
+        if speaker and getattr(speaker,'collector',None) and now>=getattr(self,'collection_visual_at',0.):
+            self.collection_visual_at=now+.2
+            self.continuity.offer_sampling_identity(self.collection_visual_evidence,now)
         self.continuity.poll(state,self.memory_session)
         try:
             notice=self.continuity.notices.get_nowait()

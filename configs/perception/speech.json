@@ -6,6 +6,8 @@
     "sample_rate_hz": 48000,
     "channels": 2,
     "channel": 0,
+    "input_gain_db": 9.0,
+    "input_latency_ms": 80.0,
     "frame_ms": 20,
     "queue_frames": 25
   },

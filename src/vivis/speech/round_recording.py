@@ -43,6 +43,9 @@ class RoundRecorder:
         self.ring=deque(maxlen=1500);self.active={};self.output={};self.last_poll=0.
         self.contexts={};self.speaker=None;self.previous_round=None;self.invalid_inputs={};self.finished_inputs={}
         self.admissions={};self.finalized={};self.source_keys={};self.blocked_people=set()
+        self.sampling_points=deque(maxlen=400);self.sampling_epoch=0;self.sampling_person=None;self.sampling_owner=None
+        from vivis.runtime.best_effort import BestEffortJob
+        self.sampling_job=BestEffortJob('voice-sampling-visual')
         self.thread=threading.Thread(target=self.work,name='conversation-journal',daemon=True);self.thread.start()
 
     def submit(self,kind,*args):
@@ -59,6 +62,46 @@ class RoundRecorder:
         self.submit('start',item,session,person,stamp,evidence)
     def final(self,item,text,accepted=True):self.submit('final',item,text,accepted)
     def end(self,item,stamp,valid=True,evidence=None):self.submit('end',item,stamp,valid,evidence)
+    def sampling_identity(self,evidence):self.submit('sampling_identity',dict(evidence))
+
+    def offer_sampling_identity(self,reader,now):
+        def read():
+            try:self.sampling_identity(reader(now))
+            except Exception:pass  # Optional evidence expires without affecting voice/control.
+        return self.sampling_job.offer(read)
+
+    def invalidate_sampling(self):
+        self.sampling_epoch+=1
+        if self.speaker and hasattr(self.speaker,'set_collection_epoch'):self.speaker.set_collection_epoch(self.sampling_epoch)
+
+    def on_sampling_identity(self,evidence):
+        stamp=evidence.get('stamp');pid=evidence.get('person_id');owner=evidence.get('owner')
+        if type(stamp) not in (int,float) or not np.isfinite(stamp):return
+        changed=owner and self.sampling_owner and owner!=self.sampling_owner
+        changed=changed or evidence.get('blocked') or bool(pid and self.sampling_person and pid!=self.sampling_person)
+        if changed:self.sampling_epoch+=1
+        if owner:self.sampling_owner=owner
+        if pid:self.sampling_person=pid
+        point=dict(evidence,epoch=self.sampling_epoch)
+        if not self.sampling_points or point!=self.sampling_points[-1]:self.sampling_points.append(point)
+        if self.speaker and hasattr(self.speaker,'set_collection_epoch'):self.speaker.set_collection_epoch(self.sampling_epoch)
+
+    def offer_speaker(self,clip):
+        if not self.speaker:return
+        from vivis.speech.speaker_sampling import visual_ranges
+        start=clip.get('speaker_start',clip['start']);end=start+len(b''.join(clip['near']))/32000
+        config=getattr(self.speaker,'c',{})
+        seconds=((config.get('short_collection') or {}).get('visual_witness_s',.5) if isinstance(config,dict) else .5)
+        ranges,conflict=visual_ranges(list(self.sampling_points),start,end,seconds)
+        # Existing fully verified turns remain eligible as a whole; business
+        # attribution is never rewritten when only interior frames identify a face.
+        evidence=clip.get('evidence') or {};pid=evidence.get('person_id')
+        if (not conflict and clip.get('sampling_epoch',self.sampling_epoch)==self.sampling_epoch
+                and evidence.get('confirmed') and pid==clip['person']
+                and all(s['person_id']==pid for s in ranges)):
+            ranges=[dict(start_s=0.,end_s=end-start,person_id=pid,epoch=self.sampling_epoch,
+                visual_stamp=clip['start'],proof='verified_start_end')]
+        self.speaker.offer(dict(clip,sampling_ranges=ranges,sampling_conflict=conflict))
 
     def poll(self,state,session):
         now=time.monotonic()
@@ -167,7 +210,7 @@ class RoundRecorder:
         alignment='aligned' if self.ring and self.ring[0][0]<=stamp else 'missing_preroll'
         clip=dict(rid=rid,path=relative,writer=writer,stream=stream,start=stamp,end=None,
             last=None,alignment=alignment,near=deque(),far=deque(),person=person,evidence=evidence,session=session,item=item,
-            drop_generation=self.drop_generation)
+            drop_generation=self.drop_generation,sampling_epoch=self.sampling_epoch)
         self.active[item]=clip
         for frame in self.ring:self.append_input(clip,*frame)
         self.store.input_audio(rid,relative,'recording')
@@ -198,7 +241,7 @@ class RoundRecorder:
             self.finalized[(entry[0],item)]=dict(saved=True,status='committed',round_id=entry[1])
             while len(self.finalized)>256:self.finalized.pop(next(iter(self.finalized)))
             clip=self.finished_inputs.pop(item,None)
-            if clip and self.speaker:self.speaker.offer(clip)
+            if clip and self.speaker:self.offer_speaker(clip)
 
     def on_job_notice(self,jid):
         with self.store.db() as db:db.execute('UPDATE jobs SET notice=1 WHERE id=?',(jid,))
@@ -216,6 +259,7 @@ class RoundRecorder:
     def on_end(self,item,stamp,valid,evidence=None):
         clip=self.active.pop(item,None)
         if not clip:return
+        clip['end']=stamp
         clip['writer'].close();clip['stream'].close()
         # speech_stopped can arrive late; trim actual WAV by the server endpoint.
         if stamp is not None and stamp>=clip['start']:
@@ -224,12 +268,14 @@ class RoundRecorder:
             writer,stream=self.writer(clip['path'],16000);writer.writeframes(pcm);writer.close();stream.close()
         else:clip['alignment']='end_offset_unavailable'
         if not valid:
+            self.invalidate_sampling()
             self.invalid_inputs[item]=dict(session=clip['session'],person=clip['person'],pcm=b''.join(clip['near'])[-384000:])
             while len(self.invalid_inputs)>16:self.invalid_inputs.pop(next(iter(self.invalid_inputs)))
             self.store.discard(clip['rid']);self.live.pop(item,None);return
         if not evidence or evidence.get('person_id')!=(clip.get('evidence') or {}).get('person_id') or not evidence.get('confirmed'):
             if clip.get('evidence'):clip['evidence']['confirmed']=False
-        if self.drop_generation!=clip['drop_generation']:clip['alignment']='recording_queue_gap'
+        if self.drop_generation!=clip['drop_generation']:
+            clip['alignment']='recording_queue_gap';self.invalidate_sampling()
         self.store.input_audio(clip['rid'],clip['path'],clip['alignment'])
         if self.speaker and clip['alignment']=='aligned':
             # Remove any audio captured after the late server endpoint, retaining
@@ -241,8 +287,9 @@ class RoundRecorder:
                 tail=max(0,round(((clip['last'] or stamp)-stamp)*16000))*2
                 end=max(0,len(reference)-tail);wanted=len(clip['near'][0])
                 clip['far']=deque([reference[max(0,end-wanted):end]])
+                clip['speaker_start']=stamp-len(clip['near'][0])/32000
             if self.finalized.get((clip['session'],item),{}).get('saved'):
-                self.speaker.offer(clip)
+                self.offer_speaker(clip)
             else:
                 self.finished_inputs[item]=clip
                 while len(self.finished_inputs)>16:self.finished_inputs.pop(next(iter(self.finished_inputs)))
@@ -284,6 +331,7 @@ class RoundRecorder:
     def close(self):
         if self.closed:return
         self.closed=True
+        self.sampling_job.close()
         if self.speaker:self.speaker.job.close()
         # This is called after audio callbacks stop. Bound shutdown even if disk stalls.
         try:self.queue.put(('shutdown',()),timeout=.2)

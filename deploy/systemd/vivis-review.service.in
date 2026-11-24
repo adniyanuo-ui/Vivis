@@ -1,0 +1,19 @@
+[Unit]
+Description=Vivis local photo and voice sample review
+After=local-fs.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@ROOT@
+Environment=PYTHONPATH=@ROOT@/src
+ExecStart=@ROOT@/.venv/bin/python -u -m vivis.interaction.review_server
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

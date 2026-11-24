@@ -45,7 +45,8 @@ class FamiliarFaces:
     def __init__(self,config,root,model=None,gallery=None):
         config=backend_config(config)
         self.c=config;self.root=Path(root);self.owner=uuid.uuid4().hex
-        self.model=None;self._closing=False;self.photo_pool=None;self.photo_error=None
+        self.model=None;self._closing=False;self.photo_pool=None;self.photo_error=None;self.photo_epoch=None
+        self.brightness_samples=None;self.brightness_error=None
         self.path=self.root/config['state_file'];self.epoch=0;self.last_submit=-math.inf
         self.lock=threading.Lock();self.job=BestEffortJob('familiar-face');self.candidate=None;self.hits=0;self.last_bbox=None
         self.confirmed=None;self.last_confirmed=-math.inf
@@ -64,6 +65,13 @@ class FamiliarFaces:
         except Exception as exc:
             # Identification assets are optional; gaze and interaction remain usable.
             self.error='Local '+config['backend']+' assets invalid: '+type(exc).__name__;self.available=False
+        diagnostics=config.get('brightness_diagnostics',{})
+        if self.available and diagnostics.get('enabled'):
+            try:
+                from vivis.vision.brightness_samples import BrightnessSamples
+                brightness_range=config.get('photo_sampling',{}).get('brightness_range',[.15,.9])
+                self.brightness_samples=BrightnessSamples(self.root,diagnostics,brightness_range)
+            except Exception as exc:self.brightness_error=type(exc).__name__
 
     def _load(self,model,gallery):
         config=self.c
@@ -120,6 +128,7 @@ class FamiliarFaces:
             if self.photo_pool:
                 try:
                     self.photo_pool.refresh();self.vectors,self.ids=self.photo_pool.gallery()
+                    self.photo_error=self.photo_pool.error
                 except Exception as exc:self.photo_error=type(exc).__name__
             if self.c['backend']=='seeta6':
                 observation,vector=self.model.evaluate_selected(image,row,gate=self.c.get('quality_gate',True))
@@ -153,11 +162,21 @@ class FamiliarFaces:
                     backend=self.c['backend'],observation=observation)
                 if self.confirmed:self.result['confirmed_monotonic']=self.last_confirmed
                 self.error=None
-            if collect and state=='recognized' and pid and vector is not None and self.photo_pool:
+            # Diagnostic capture is independent of photo enrollment: rejected
+            # unknown faces and full personal pools still provide useful evidence.
+            if self.brightness_samples:
+                try:self.brightness_samples.offer(image,row,observation,stamp)
+                except Exception as exc:self.brightness_error=type(exc).__name__
+            if self.photo_pool:
                 try:
-                    compare=self.model.compare if self.c['backend']=='seeta6' else lambda a,b:float(a@b)
-                    if self.photo_pool.consider(str(pid),image,row,vector,observation,compare,stamp):
-                        self.vectors,self.ids=self.photo_pool.gallery()
+                    if self.photo_epoch!=epoch:self.photo_pool.observe_identity(None,stamp)
+                    self.photo_epoch=epoch
+                    eligible=collect and state=='recognized' and pid is not None and vector is not None
+                    self.photo_pool.observe_identity(str(pid) if eligible else None,stamp)
+                    if eligible:
+                        compare=self.model.compare if self.c['backend']=='seeta6' else lambda a,b:float(a@b)
+                        self.photo_pool.consider(str(pid),image,row,vector,observation,compare,stamp)
+                    if self.photo_pool.error:self.photo_error=self.photo_pool.error
                 except Exception as exc:self.photo_error=type(exc).__name__
         except Exception:
             # Optional identification must not stop gaze/motion or reveal raw
@@ -206,14 +225,17 @@ class FamiliarFaces:
             except OSError:pass
 
     def close(self):
+        if self.brightness_samples:self.brightness_samples.close()
         self.job.close();self.reset()
-        if self.c['backend']=='seeta6' and self.model is not None and not self._closing:
+        if self.model is not None and not self._closing:
             self._closing=True;model=self.model
             def release():
-                self.job.wait();model.close()
+                self.job.wait()
+                if self.photo_pool:self.photo_pool.close()
+                if self.c['backend']=='seeta6':model.close()
             if self.job.thread is not None and self.job.thread.is_alive():
                 threading.Thread(target=release,daemon=True,name='identity-release').start()
-            else:model.close()
+            else:release()
         try:
             if json.loads(self.path.read_text()).get('owner')==self.owner:self.path.unlink()
         except (OSError,ValueError):pass

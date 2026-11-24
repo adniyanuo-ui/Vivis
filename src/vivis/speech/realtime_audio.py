@@ -19,6 +19,21 @@ from vivis.speech.board_reference import BoardReferenceOutput
 class PlaybackBufferFull(RuntimeError):pass
 
 
+def input_gain_parameters(capture):
+    value=capture.get('input_gain_db',0.)
+    if type(value) not in (int,float) or not np.isfinite(value) or not 0<=value<=12:
+        raise ValueError('Microphone input_gain_db must be finite and within0..12dB;0 disables gain')
+    return float(value),10**(float(value)/20)
+
+
+def input_latency(capture):
+    value=capture.get('input_latency_ms')
+    if value is None:return 'low'  # Preserve older capture configurations.
+    if type(value) not in (int,float) or not np.isfinite(value) or not 20<=value<=200:
+        raise ValueError('Microphone input_latency_ms must be finite and within20..200ms')
+    return float(value)/1000
+
+
 class VoiceBuffer:
     """24k PCM -> continuous48k PCM; cancellation rejects late old-response audio."""
     def __init__(self, gain=1., fade_ms=40, max_seconds=30):
@@ -154,15 +169,20 @@ class VoiceBuffer:
 class AudioIO:
     def __init__(self, speech, output_device, player, aec=True,frontend=None,board_reference_device=None):
         self.speech=speech;self.output_device=output_device;self.player=player;self.aec=aec
+        self.input_gain_db,self.input_gain_factor=input_gain_parameters(speech['capture'])
+        self.input_latency=input_latency(speech['capture'])
         self.board_reference_device=board_reference_device
         self.frontend=frontend or {}
         capacity=max(1,round(policy()['uplink_max_age_s']/(speech['capture']['frame_ms']/1000)))
         self.capture=queue.Queue(maxsize=capacity);self.uplink=queue.Queue(maxsize=capacity)
         self.stop=threading.Event();self.fault=None;self.stack=None
-        self.stats=dict(captured_frames=0,processed_frames=0,callback_warnings=[],reference_covered_frames=0,
+        self.stats=dict(input_gain_db=self.input_gain_db,input_gain_factor=self.input_gain_factor,
+                        captured_frames=0,processed_frames=0,callback_warnings=[],reference_covered_frames=0,
                         processing_total_s=0.,processing_max_ms=0.,capture_age_max_ms=0.,
                         raw_clipped_samples=0,uplink_clipped_samples=0,reference_missing_frames=0,
                         callback_warning_count=0,callback_warning_events=[],output_frames=0,
+                        capture_clock_fault=None,
+                        input_latency_requested=self.input_latency,
                         clock_samples=[])
         self.last_capture=None;self.last_output=None
         self.meters=queue.Queue(maxsize=2)
@@ -246,7 +266,9 @@ class AudioIO:
             self.output_stream=out
             self.stack.callback(self.disable_output)
             inp=sd.InputStream(device=input_device,samplerate=48000,channels=c['channels'],
-                dtype='float32',blocksize=960,latency='low',callback=capture)
+                dtype='float32',blocksize=960,latency=self.input_latency,callback=capture)
+            reported=getattr(inp,'latency',None)
+            if type(reported) in (int,float):self.stats['input_latency_reported_s']=float(reported)
             self.stack.callback(inp.close)
             clocks.update(input=AudioStreamClock.calibrate(inp))
             if out is not None:clocks['output']=AudioStreamClock.calibrate(out)
@@ -254,7 +276,8 @@ class AudioIO:
             if out is not None:out.start();self.output_opened_at=time.monotonic()
             inp.start();self.stack.callback(inp.stop)
             self.thread=threading.Thread(target=self.process,args=(udp,front),daemon=True);self.thread.start()
-            return dict(microphone=devices[input_device]['name'],speaker=devices[output_device]['name'])
+            return dict(microphone=devices[input_device]['name'],speaker=devices[output_device]['name'],
+                        input_gain_db=self.input_gain_db)
         except BaseException:self.close();raise
 
     def enable_output(self,player=None):
@@ -286,7 +309,12 @@ class AudioIO:
                 began=time.monotonic()
                 self.stats['capture_age_max_ms']=max(self.stats['capture_age_max_ms'],(began-stamp)*1000)
                 if time.monotonic()-stamp>policy()['uplink_max_age_s']:raise RuntimeError('Microphone audio expired')
-                if previous is not None and stamp-previous>.035:raise RuntimeError('Gap in microphone capture clock')
+                if previous is not None and stamp-previous>.035:
+                    gap_ms=(stamp-previous)*1000
+                    self.stats['capture_clock_fault']=dict(previous_stamp=previous,current_stamp=stamp,
+                        interval_ms=gap_ms,expected_ms=20.,limit_ms=35.,processed_monotonic=began,
+                        callback_warning_count=self.stats['callback_warning_count'])
+                    raise RuntimeError(f'Gap in microphone capture clock: interval={gap_ms:.2f}ms; expected20ms, limit35ms')
                 previous=stamp
                 for _ in range(64):
                     try:data,source=udp.recvfrom(20000)
@@ -295,7 +323,12 @@ class AudioIO:
                 far,coverage=reference.sample(stamp-c['reference_delay_ms']/1000,960,48000)
                 self.stats['raw_clipped_samples']+=int(np.count_nonzero(np.abs(near)>=.999))
                 near,far,cleaned=front.process48(near,far)
-                self.stats['uplink_clipped_samples']+=int(np.count_nonzero(np.abs(cleaned)>=.999))
+                # Calibrate only the post-DSP microphone uplink. Raw diagnostics,
+                # speaker PCM and its AEC reference retain their original levels.
+                pre_gain=cleaned
+                if self.input_gain_db:cleaned=cleaned*self.input_gain_factor
+                clipped=int(np.count_nonzero(np.abs(cleaned)>=.999))
+                self.stats['uplink_clipped_samples']+=clipped
                 pcm=lambda x:np.clip(x*32768,-32768,32767).astype('<i2').tobytes()
                 try:self.uplink.put_nowait((stamp,pcm(cleaned),pcm(near),pcm(far)))
                 except queue.Full:raise RuntimeError('Processed microphone queue full')
@@ -306,7 +339,10 @@ class AudioIO:
                 self.stats['processing_max_ms']=max(self.stats['processing_max_ms'],elapsed*1000)
                 if self.stats['processed_frames']%50==0:
                     rms=lambda x:float(np.sqrt(np.mean(x*x)))
-                    try:self.meters.put_nowait(dict(kind='audio_meter',raw_rms=rms(near),uplink_rms=rms(cleaned),
+                    try:self.meters.put_nowait(dict(kind='audio_meter',input_gain_db=self.input_gain_db,
+                                                   raw_rms=rms(near),pre_gain_rms=rms(pre_gain),uplink_rms=rms(cleaned),
+                                                   uplink_peak_abs=float(np.max(np.abs(cleaned))),
+                                                   uplink_clipped_samples=clipped,
                                                    reference_rms=rms(far),reference_coverage=coverage,
                                                    processing_ms=elapsed*1000))
                     except queue.Full:pass

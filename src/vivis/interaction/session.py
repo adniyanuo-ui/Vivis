@@ -42,6 +42,18 @@ class SessionPolicy:
         if not cancelled and self.desired==target and self.mode_of(target)=='task':
             self.desired=INTERACTION;self.pending_prompt='interaction'
 
+    def voice_interrupted(self,recovery_kind,active_target,ready):
+        """Only a ready interaction may return after a local capture discontinuity.
+
+        The caller still cancels/reaps the old motion worker before starting a
+        new one. A song/follow-up, explicit standby or unreleased device never
+        inherits this exception, and no old input or programme is replayed.
+        """
+        keep=(recovery_kind=='capture_gap' and ready and self.desired==INTERACTION and active_target==INTERACTION)
+        self.desired=INTERACTION if keep else STANDBY
+        self.pending_prompt=None
+        return keep
+
     def take_prompt(self,target,ready):
         if ready and target==self.desired:
             value=self.pending_prompt;self.pending_prompt=None;return value

@@ -109,9 +109,10 @@ class RecoveryRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('synthetic-secret',warning);self.assertNotIn('\n',warning)
         self.assertIn('[redacted]',warning);self.assertIn('closed',warning)
 
-    async def test_audio_failure_closes_old_owner_before_reopening_and_keeps_manager(self):
+    async def test_audio_failure_closes_old_owner_before_reopening_and_keeps_manager(self,capture_gap=False,interval_ms=44.):
         from test_managed_voice import FakeAudio
         service=self.service;old=FakeAudio();service.audio=old
+        if capture_gap:old.stats['capture_clock_fault']=dict(interval_ms=interval_ms)
         service.enabled=True;old.enable_output(service.player)
         service.cloud_task=asyncio.create_task(asyncio.sleep(20))
         async def connected(_):service.health(True,'test-connected')
@@ -122,11 +123,19 @@ class RecoveryRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 return super().open(with_output)
         self_test=self
         with patch('vivis.speech.realtime_audio.AudioIO',NewAudio),patch.object(service,'cloud',side_effect=connected):
-            await service.recover_audio('synthetic callback fault')
+            await service.recover_audio(f'Gap in microphone capture clock: interval={interval_ms:.2f}ms' if capture_gap else 'synthetic callback fault')
             await service.cloud_task
         self.assertEqual(len(opened),1);self.assertIs(service.audio,opened[0])
         self.assertFalse(service.shutdown.is_set());self.assertTrue(service.awaiting_recovery_user)
         self.assertEqual([e['available'] for e in self.events if e['kind']=='voice_health'],[False,True])
+        failed=next(e for e in self.events if e['kind']=='voice_health' and not e['available'])
+        self.assertEqual(failed.get('recovery_kind'),'capture_gap' if capture_gap and interval_ms<1000 else None)
+
+    async def test_only_measured_capture_gap_requests_interaction_reentry(self):
+        await self.test_audio_failure_closes_old_owner_before_reopening_and_keeps_manager(capture_gap=True)
+
+    async def test_stall_sized_capture_gap_retains_standby_fallback(self):
+        await self.test_audio_failure_closes_old_owner_before_reopening_and_keeps_manager(capture_gap=True,interval_ms=2000.)
 
     async def test_uplink_overflow_invalidates_old_message_and_requests_local_reconnect(self):
         service=self.service;old=service.message_connection;service.cloud_queue=asyncio.Queue(maxsize=1)

@@ -26,9 +26,10 @@ def main():
         data['recent_rounds']=rows;db.close()
     for file in sorted((ROOT/'private/people').glob('*/photo_pool.json')):
         c=json.loads(file.read_text());data['photos'].append(dict(person_id=c['person_id'],originals=len(c['rows']),
-            locked=sum(r['locked'] for r in c['rows']),active=len(c['active']),candidates=len(c['rows'])-len(c['active']),manifest=str(file)))
+            locked=sum(r['locked'] for r in c['rows']),active=len(c['active']),candidates=len(c['rows'])-len(c['active']),
+            sampling_complete=len(c['rows'])>=32,vacant_slots=max(0,32-len(c['rows'])),manifest=str(file)))
     path=ROOT/'private/speakers/gallery.json'
-    if path.exists():data['speakers']={p:dict(samples=len(v),observation_only=True) for p,v in json.loads(path.read_text())['people'].items()}
+    if path.exists():data['speakers']={p:dict(samples=len(v),active=sum(r.get('active',True) for r in v),locked=sum(r.get('locked',False) for r in v),sampling_complete=len(v)>=32,vacant_slots=max(0,32-len(v)),observation_only=True) for p,v in json.loads(path.read_text())['people'].items()}
     print(json.dumps(data,ensure_ascii=False,indent=2))
 
 
