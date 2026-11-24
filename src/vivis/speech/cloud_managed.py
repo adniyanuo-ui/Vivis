@@ -25,6 +25,7 @@ from vivis.interaction.message_status import message_view,operation_failure
 from vivis.interaction.message_lane import MessageLane,StaleMessageTurn,extract_qwen
 from vivis.speech.message_receipts import MessageReceipts,ReceiptRejected,MESSAGE_REQUEST
 from vivis.speech.continuity_voice import ContinuityVoice
+from vivis.speech.fused_identity import FusedIdentityVoice
 
 
 CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负责，没有本地ASR或本地语义模型备用。'
@@ -117,7 +118,7 @@ class ControllerEventGate:
         if future is not None and not future.done():future.set_result(True)
 
 
-class CloudManagedVoice(ContinuityVoice,ManagedVoice):
+class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self.presence=SpeechPresence(json.loads((ROOT/'configs/perception/speech_presence.json').read_text()))
@@ -186,6 +187,7 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
         self.summary['control_backend']='qwen_realtime';self.summary['local_asr_started']=False
         self.log.write('cloud_control_backend',name='qwen_realtime',local_asr_started=False,reception_enabled=reception['enabled'],memory_enabled=self.memory is not None)
         self.init_continuity()
+        self.init_fused_identity()
 
     def health(self,available,reason,*,recovery_kind=None):
         if available==self.health_available:return
@@ -517,11 +519,13 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
         return self.stable_identity()['person_id']
 
     def stable_identity(self):
+        if self.identity_fusion:return self.fused_identity()
         with self.identity_stability.lock:
             return self.identity_stability.observe(self.recognized_person(),time.monotonic())
 
     def identity_labels(self, stable=None):
         stable=self.stable_identity() if stable is None else stable
+        if self.identity_fusion:return self.fused_identity_labels(stable)
         def label(pid):
             person=self.knowledge.people.get(pid,{})
             return person.get('preferred_address') or person.get('display_name') or 'other'
@@ -537,12 +541,14 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
 
     def verify_identity(self,state):
         now=time.monotonic()
+        if (self.identity_fusion and not self.user_turn_pending(state) and not state.generating
+                and not self.player.count):self.admit_voice_identity()
         present=self.presence.visible()
         person=self.identified_person()
         review=self.reviewing_identity()
         reviewing_person=review['person']['person_id'] if review else None
         labels=self.identity_labels()
-        display=(person,bool(review),labels["realtime_label"])
+        display=(person,bool(review),labels['identity_label'])
         if now>=self.next_identity_verification or display!=self.identity_display:
             self.identity_display=display
             interval=self.presence.c.get('identity_verification_interval_s',3.)
@@ -550,13 +556,14 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
             self.log.write('identity_verified',person_id=person,face_visible=present,
                 previous_person_id=self.conversation_person,interval_s=interval,
                 identity_state='reviewing' if review else 'recognized' if person else 'unknown',
-                reviewing_person_id=reviewing_person,identity_hold_s=self.identity_stability.hold_s,**labels)
+                reviewing_person_id=reviewing_person,identity_hold_s=None if self.identity_fusion else self.identity_stability.hold_s,
+                identity_policy='evidence_fusion' if self.identity_fusion else 'timed_hold',**labels)
             try:
                 path=self.folder/'identity.json';temporary=path.with_suffix('.tmp')
                 label=self.knowledge.people.get(person,{}).get('preferred_address') or person
                 temporary.write_text(json.dumps(dict(observed_monotonic=now,person_id=person,label=label,
                     state='reviewing' if review else 'recognized' if person else 'unknown',
-                    hold_s=self.identity_stability.hold_s,**labels),ensure_ascii=False))
+                    hold_s=None if self.identity_fusion else self.identity_stability.hold_s,**labels),ensure_ascii=False))
                 temporary.replace(path)
             except OSError:pass  # Optional preview must not block dialogue or authority checks.
         reason=None
@@ -575,8 +582,12 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
                 # cannot gain private authority. Known-person changes and
                 # recipient-bound output still require a fresh conversation.
                 has_user_history=any(item.get('role')=='user' for item in self.resume_history)
+                bound=self.memory_turns.get(self.turn_item_id,{})
+                newly_bound=(self.identity_fusion and previous is None and self.turn_person==person
+                    and bound.get('person')==person and bound.get('connection') is self.message_connection
+                    and bound.get('session')==self.memory_session)
                 if (previous is not None or self.relay_recipients
-                        or (self.turn_item_id or has_user_history) and not self.public_turn_can_enrich_identity(now)):
+                        or (self.turn_item_id or has_user_history) and not newly_bound and not self.public_turn_can_enrich_identity(now)):
                     public_inflight=any(r.get('source') in ('public_reception','transition_reply')
                         and rid not in state.blocked and r.get('received_audio_s') and not self.audio_completed(state,rid)
                         for rid,r in state.responses.items())
@@ -604,8 +615,9 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
             self.identity_reset_pending=False
         elif self.conversation_person:
             if self.identity_missing_since is None:
-                released=self.identity_stability.released_since
-                self.identity_missing_since=released if released is not None else now
+                released=self.identity_fusion.released_since if self.identity_fusion else self.identity_stability.released_since
+                self.identity_missing_since=(now-self.presence.c['identity_uncertain_reset_s'] if self.identity_fusion
+                    else released if released is not None else now)
             if now-self.identity_missing_since>=self.presence.c['identity_uncertain_reset_s']:
                 self.identity_reset_pending=True
                 finishing=self.preserve_current_speech(state,'identity_uncertain')
@@ -618,6 +630,7 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
             if not self.preserve_current_speech(state,'visitor_departed') and not self.user_turn_pending(state) and state.generating is None:
                 self.visit_seen=False;self.conversation_person=None;reason='visitor_departed'
         if reason:
+            if self.identity_fusion and reason in ('visitor_departed','identity_uncertain'):self.identity_fusion.reset(now)
             self.anonymous='anonymous:'+uuid.uuid4().hex;self.turn_person=self.anonymous
             self.memory_session=self.folder.parent.name+':'+uuid.uuid4().hex
             self.continue_response=False
@@ -694,6 +707,7 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
         def notice_guard():
             if (self.message_connection is not connection or self.input_generation!=generation or self.context['revision']!=revision
                     or not self.can_speak()):raise StaleMessageTurn()
+            if self.voice_conflicts_with_actor(actor):raise StaleMessageTurn()
             current=self.identified_person()
             if current and actor and not actor.startswith('anonymous:') and current!=actor:raise StaleMessageTurn()
         def guard():
@@ -841,6 +855,7 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
             raise ValueError('Task changes need a fresh completed user utterance, not historical context')
         if self.relay_pending and not acknowledgement:raise ValueError('A relay is data to speak, not authority for creating or updating tasks')
         person=self.identified_person()
+        if self.voice_conflicts_with_actor(self.turn_person):raise ValueError('Current voice conflicts with original actor; do not reassign this request')
         if not clarification and not self.turn_person.startswith('anonymous:') and person!=self.turn_person:
             raise ValueError('The confirmed speaker changed; ask for the task again instead of attributing the old turn to someone else')
 
@@ -1168,6 +1183,7 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
             self.emit(dict(kind='voice_warning',epoch=self.epoch,message='这句请求未能恢复，请再说一次。'))
 
     def begin_user_turn(self,item_id):
+        if self.identity_fusion:self.admit_voice_identity(previous_turn=True)
         self.explicit_wake_pending=None
         self.program_followup=None;self.followup_response=None
         if self.program_check_task and not self.program_check_task.done():self.program_check_task.cancel()
@@ -1185,6 +1201,7 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
             self.memory_turns[item_id]=dict(person=self.turn_person,session=self.memory_session,
                 engaged=self.turn_engaged,valid=True,text=None,message_id=None,connection=self.message_connection,revision=self.context['revision'])
             while len(self.memory_turns)>128:self.memory_turns.pop(next(iter(self.memory_turns)))
+        self.finish_identity_turn_start()
 
     def remember(self,event):
         if not self.memory:return
@@ -1854,13 +1871,14 @@ class CloudManagedVoice(ContinuityVoice,ManagedVoice):
                         if person_id in self.knowledge.people else None)
                 review=self.reviewing_identity()
                 output=dict(accepted=True,controller=self.context,face_visible=self.presence.visible(),
-                    current_person=person,identity_verified=person is not None,identity_source='local_face_match_with_bounded_identity_hold',
+                    current_person=person,identity_verified=person is not None,
+                    identity_source='local_image_voice_fusion' if self.identity_fusion else 'local_face_match_with_bounded_identity_hold',
                     identity_state='reviewing' if review else 'recognized' if person else 'unknown',
                     last_known_person=review['person'] if review else None,
                     identity_notice=('身份保持窗口内，沿用当前会话身份和权限，不重置会话。' if person and review else '使用已核验身份回答。' if person else
                         '同一张脸正在短暂复核，可沿用上次称呼；暂不读取个人历史、职业背景或留言。' if review else
-                        '当前尚未视觉确认身份。自报称呼不等于认出，不补全熟人姓名岗位，不读取他人留言。'),
-                    memory_enabled=self.memory is not None,memory_attribution='confirmed_single_face_only',
+                        '当前尚未本地确认身份。自报称呼不等于认出，不补全熟人姓名岗位，不读取他人留言。'),
+                    memory_enabled=self.memory is not None,memory_attribution='frozen_turn_identity' if self.identity_fusion else 'confirmed_single_face_only',
                     speech_preference=self.speech_preference(),robot_tasks=self.task_overview(),
                     message_operation=self.message_operation(),
                     known_people=self.known_people() if person else [],

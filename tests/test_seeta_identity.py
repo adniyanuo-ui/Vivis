@@ -39,6 +39,23 @@ class SeetaIdentityTests(unittest.TestCase):
 
     def infer(self,stamp):self.f.infer(None,np.array([1,2,100,100]),stamp,self.f.epoch)
 
+    def test_typed_evidence_uses_raw_frame_not_review_hold(self):
+        self.infer(10.)
+        self.assertEqual(self.f.result['identity_evidence']['state'],'suspected')
+        self.infer(10.25)
+        self.assertEqual(self.f.result['identity_evidence']['state'],'confirmed')
+        self.model.quality=False;self.infer(10.5)
+        self.assertEqual(self.f.result['person_id'],'alpha')
+        self.assertEqual(self.f.result['identity_evidence']['state'],'unavailable')
+
+    def test_weak_identity_does_not_require_margin_or_weaken_confirmed_gate(self):
+        self.model.compare.side_effect=[.55,.54]
+        self.infer(10.)
+        e=self.f.result['identity_evidence'];self.assertEqual(e['state'],'suspected');self.assertEqual(e['person_id'],'alpha')
+        self.assertIsNone(self.f.result['person_id'])
+        self.model.compare.side_effect=[.39,.3];self.infer(10.25)
+        self.assertEqual(self.f.result['identity_evidence']['state'],'other')
+
     def test_seeta_1024_api_scores_confirm_without_loading_sface(self):
         self.assertTrue(self.f.available)
         for t in (10.,10.5,11.):self.infer(t)

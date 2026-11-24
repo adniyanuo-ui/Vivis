@@ -8,7 +8,7 @@ button{border:1px solid #b5c3d5;background:white;border-radius:6px}button:disabl
 .muted{color:#667085;font-size:14px}.notice{background:#fff2cc;padding:12px;border-radius:8px}audio{width:100%}.badge{color:#126638;font-weight:600}
 .candidate{color:#966400}code{font-size:12px;overflow-wrap:anywhere}#status{position:sticky;top:0;padding:10px;background:#e5edf9;z-index:1}nav a{margin:0 18px 8px 0;display:inline-block}
 </style><header><h1>熟人照片与声纹样本管理</h1><p>点击按钮直接保存，不需要复制命令。照片最多32张，活动最多16张；声纹最多32段，停用的录音不参与匹配但仍占名额。删除后自动采集只补空缺。</p>
-<p>基础照片保持锁定；激活候选照片或声纹会同时锁定。自动采集不会覆盖已有样本。声纹目前只在日志观察，不授予身份或业务权限。</p>
+<p>基础照片保持锁定；激活候选照片或声纹会同时锁定。自动采集不会覆盖已有样本。活动声纹用于声音识别；业务身份由图声核验结果决定，自报姓名不能替代核验。</p>
 <div class="notice">试听建议用耳机。若用Orin音箱，请先在终端停止交互服务：sudo systemctl stop vivis-p1.service，避免把录音当成新话语；听完后用sudo systemctl start vivis-p1.service恢复。此管理页面可独立使用。</div>
 <p><button id="refresh">刷新清单</button> <a href="http://127.0.0.1:8765/">人脸跟随与交互日志</a></p><nav id="nav"></nav></header><p id="status" role="status">正在读取…</p><main id="people"></main>
 <script>

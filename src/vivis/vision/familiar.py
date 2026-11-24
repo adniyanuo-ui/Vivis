@@ -58,6 +58,9 @@ class FamiliarFaces:
                 or type(config.get('review_hold_s',5.)) not in (int,float) or not 1<=config.get('review_hold_s',5.)<=15
                 or type(config.get('min_face_size_px')) is not int or not 16<=config['min_face_size_px']<=512):
             raise ValueError('Invalid familiar-face configuration')
+        suspect=config.get('suspect_threshold',config['score_threshold'])
+        if type(suspect) not in (int,float) or not math.isfinite(suspect) or not 0<=suspect<=config['score_threshold']:
+            raise ValueError('Invalid familiar-face suspect threshold')
         if config['backend']=='seeta6' and (type(config.get('quality_gate',True)) is not bool or type(config.get('age_estimation',False)) is not bool):
             raise ValueError('Invalid SeetaFace options')
         if not config.get('enabled'):return
@@ -113,7 +116,8 @@ class FamiliarFaces:
 
     def unknown(self):
         return dict(schema_version='vivis-familiar-person-1.0',person_id=None,state='unknown',
-                    observed_monotonic=0.,similarity=None,owner=self.owner)
+                    observed_monotonic=0.,similarity=None,owner=self.owner,
+                    identity_evidence=dict(state='unavailable',person_id=None,stamp=None,evidence_id=None,reason='no_usable_face'))
 
     def _reset_locked(self):
         self.epoch+=1;self.candidate=None;self.hits=0;self.result=self.unknown()
@@ -139,7 +143,7 @@ class FamiliarFaces:
                     pid,score=match_scores(scores,self.ids,self.c['score_threshold'],self.c['minimum_margin'],observation)
             else:
                 vector=feature(self.model,image,row)
-                pid,score=match(vector,self.vectors,self.ids,self.c['score_threshold'],self.c['minimum_margin'])
+                pid,score=match_scores(self.vectors@vector,self.ids,self.c['score_threshold'],self.c['minimum_margin'],observation)
             observation['worker_ms']=(time.perf_counter()-begin)*1000
             with self.lock:
                 if self.job.closed.is_set() or epoch!=self.epoch:return
@@ -160,6 +164,16 @@ class FamiliarFaces:
                 self.result=dict(schema_version='vivis-familiar-person-1.0',person_id=self.confirmed,
                     state=state,observed_monotonic=stamp,similarity=score,owner=self.owner,
                     backend=self.c['backend'],observation=observation)
+                weak=observation.get('candidate_id');evidence_state='unavailable';evidence_person=None
+                if vector is not None:
+                    if pid is not None and self.hits>=self.c['confirmation_samples']:
+                        evidence_state='confirmed';evidence_person=str(pid)
+                    elif weak and score>=self.c.get('suspect_threshold',self.c['score_threshold']):
+                        evidence_state='suspected';evidence_person=weak
+                    else:evidence_state='other'
+                self.result['identity_evidence']=dict(state=evidence_state,person_id=evidence_person,
+                    stamp=stamp,evidence_id=self.owner+':'+str(stamp)+':'+str(epoch),score=score,
+                    reason=observation.get('decision_reason'),owner=self.owner)
                 if self.confirmed:self.result['confirmed_monotonic']=self.last_confirmed
                 self.error=None
             # Diagnostic capture is independent of photo enrollment: rejected

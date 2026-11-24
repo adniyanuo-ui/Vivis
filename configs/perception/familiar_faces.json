@@ -33,13 +33,15 @@
       "model": "outputs/models/sface/face_recognition_sface_2021dec.onnx",
       "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
       "gallery": "private/people/gallery.npz",
-      "score_threshold": 0.5
+      "score_threshold": 0.5,
+      "suspect_threshold": 0.3
     },
     "seeta6": {
       "model": "outputs/face_ab/models/face_recognizer.csta",
       "sha256": "3cefce29d2ceb6fd95153d67c11f24ce08746e1877478bacaa5ae5d333a0a670",
       "gallery": "private/people/gallery_seeta6.npz",
       "score_threshold": 0.6,
+      "suspect_threshold": 0.4,
       "quality_gate": true,
       "age_estimation": true
     }

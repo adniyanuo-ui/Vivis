@@ -37,6 +37,7 @@
     "social_conversation_config": "configs/interaction/social_conversation.json",
     "memory_config": "configs/interaction/memory.json",
     "continuity_config": "configs/interaction/continuity.json",
+    "identity_fusion_config": "configs/perception/identity_fusion.json",
     "tasks_config": "configs/interaction/tasks.json"
   }
 }

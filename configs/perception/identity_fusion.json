@@ -1,0 +1,8 @@
+{
+  "schema_version": "vivis-identity-fusion-1.0",
+  "enabled": true,
+  "face_max_age_s": 1.5,
+  "voice_max_age_s": 8.0,
+  "pair_max_skew_s": 2.0,
+  "pair_confirmation_samples": 2
+}

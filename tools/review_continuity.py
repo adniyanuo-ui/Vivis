@@ -70,7 +70,7 @@ article{border-top:1px solid #ddd;padding:14px 0}summary{cursor:pointer}nav a{ma
 <p><a href="http://127.0.0.1:8766/">打开实时样本管理：点击即可停用、激活、锁定或删除照片与声纹</a>（需本机审核服务运行）。</p>
 <p>本文件是只读静态快照；不修改照片、声纹、聊天档案或留言状态。点击原图可放大，录音按需加载。下方命令仍可复制到终端执行。</p>
 <div class="notice">听录音建议用耳机或另一台电脑。若使用Orin音箱，请先停止交互服务：<code>sudo systemctl stop vivis-p1.service</code>，避免把录音当成新话语；听完后用<code>sudo systemctl start vivis-p1.service</code>恢复。
-录音可能含机器人回声，不能把每一条自动当作真人声纹参考。声纹当前只观察，不授予身份或业务权限。</div>''']
+录音可能含机器人回声，不能把每一条自动当作真人声纹参考。正式交互按图声证据核验身份；普通录音不直接成为已确认身份。</div>''']
     parts.append('<p class="muted">生成时间：'+esc(datetime.now().astimezone().isoformat(timespec='seconds'))+'；内容不会自动刷新，重新运行导出命令可更新。</p></header>')
     roster={}
     for f in sorted(people.glob('*/profile.json')):
@@ -113,7 +113,7 @@ article{border-top:1px solid #ddd;padding:14px 0}summary{cursor:pointer}nav a{ma
             refs=speakers.get(pid,[])
             parts.append('<details><summary>声纹参考录音（'+str(len(refs))+'段）</summary>')
             maximum=speaker_config['maximum_samples']
-            parts.append('<p>'+('已满'+str(maximum)+'段，停止新增；人工删除后只补空缺。' if len(refs)>=maximum else '还缺'+str(maximum-len(refs))+'段合格样本，不限每日批次。')+' 声纹仍仅观察。</p>')
+            parts.append('<p>'+('已满'+str(maximum)+'段，停止新增；人工删除后只补空缺。' if len(refs)>=maximum else '还缺'+str(maximum-len(refs))+'段合格样本，不限每日批次。')+' 样本操作不直接修改当前业务身份。</p>')
             for r in refs:
                 parts.append('<article><code>'+esc(r['turn_id'])+'</code><br>'+audio(speaker_root/pid/(r['turn_id']+'.wav'))+'</article>')
             if not refs:parts.append('<p>尚无合格声纹参考；普通聊天录音与声纹参考不是同一份清单。</p>')

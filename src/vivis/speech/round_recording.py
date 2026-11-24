@@ -44,6 +44,7 @@ class RoundRecorder:
         self.contexts={};self.speaker=None;self.previous_round=None;self.invalid_inputs={};self.finished_inputs={}
         self.admissions={};self.finalized={};self.source_keys={};self.blocked_people=set()
         self.sampling_points=deque(maxlen=400);self.sampling_epoch=0;self.sampling_person=None;self.sampling_owner=None
+        self.visual_evidence=None
         from vivis.runtime.best_effort import BestEffortJob
         self.sampling_job=BestEffortJob('voice-sampling-visual')
         self.thread=threading.Thread(target=self.work,name='conversation-journal',daemon=True);self.thread.start()
@@ -74,9 +75,12 @@ class RoundRecorder:
         self.sampling_epoch+=1
         if self.speaker and hasattr(self.speaker,'set_collection_epoch'):self.speaker.set_collection_epoch(self.sampling_epoch)
 
+    def on_invalidate_sampling(self):self.invalidate_sampling()
+
     def on_sampling_identity(self,evidence):
         stamp=evidence.get('stamp');pid=evidence.get('person_id');owner=evidence.get('owner')
         if type(stamp) not in (int,float) or not np.isfinite(stamp):return
+        self.visual_evidence=dict(evidence)
         changed=owner and self.sampling_owner and owner!=self.sampling_owner
         changed=changed or evidence.get('blocked') or bool(pid and self.sampling_person and pid!=self.sampling_person)
         if changed:self.sampling_epoch+=1

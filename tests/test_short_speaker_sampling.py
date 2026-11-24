@@ -206,13 +206,13 @@ class RecorderWitnessTests(unittest.TestCase):
             root=Path(folder);v=ContinuityVoice()
             v.knowledge=SimpleNamespace(root=root,recognition=dict(state_file='face.json',max_result_age_s=1),people={'heyude':{}})
             v.presence=SimpleNamespace(path=root/'presence.json',c=dict(max_age_s=1),person_count=lambda now:1)
-            (root/'presence.json').write_text(json.dumps(dict(observed_monotonic=10,faces=1)))
-            (root/'face.json').write_text(json.dumps(dict(observed_monotonic=10,person_id='heyude',state='recognized',owner='vision')))
+            (root/'presence.json').write_text(json.dumps(dict(schema_version='vivis-face-presence-1.0',observed_monotonic=10,faces=1)))
+            (root/'face.json').write_text(json.dumps(dict(schema_version='vivis-familiar-person-1.0',observed_monotonic=10,person_id='heyude',state='recognized',owner='vision')))
             self.assertTrue(v.collection_visual_evidence(10.2)['confirmed'])
             self.assertFalse(v.collection_visual_evidence(12)['confirmed'])
-            (root/'face.json').write_text(json.dumps(dict(observed_monotonic=10,person_id='heyude',state='reviewing',owner='vision')))
+            (root/'face.json').write_text(json.dumps(dict(schema_version='vivis-familiar-person-1.0',observed_monotonic=10,person_id='heyude',state='reviewing',owner='vision')))
             self.assertFalse(v.collection_visual_evidence(10.2)['confirmed'])
-            (root/'presence.json').write_text(json.dumps(dict(observed_monotonic=10,faces=2)))
+            (root/'presence.json').write_text(json.dumps(dict(schema_version='vivis-face-presence-1.0',observed_monotonic=10,faces=2)))
             self.assertTrue(v.collection_visual_evidence(10.2)['blocked'])
 
     def test_interior_visual_evidence_labels_samples_without_reassigning_original_turn(self):

@@ -80,6 +80,9 @@ class SpeakerObserver:
                 or not 3<=c.get('enrollment_samples',0)<=c.get('maximum_samples',0)<=32
                 or not .6<=c.get('minimum_seconds',0)<=12
                 or c.get('consistency_window_mode','fixed') not in ('fixed','speech_aligned')):raise ValueError('Invalid speaker observation policy')
+        weak=c.get('suspect_threshold',c['threshold'])
+        if type(weak) not in (int,float) or not np.isfinite(weak) or not 0<=weak<=c['threshold']:
+            raise ValueError('Invalid speaker suspect threshold')
         self.c=c;self.root=Path(root);self.emit=emit;self.log=log;self.results=queue.SimpleQueue();self.job=BestEffortJob('speaker-observation');self.labels={}
         self.directory=self.root/c['directory'];self.model=None;self.error=None
         if not self.directory.resolve().is_relative_to((self.root/'private').resolve()):raise ValueError('Private speaker directory required')
@@ -88,6 +91,10 @@ class SpeakerObserver:
         self.gallery_path=self.directory/'gallery.json'
         self.gallery={};self.gallery_stamp=None;self.gallery_revision=0
         self.collector=None;self.collection_epoch=0;self.collection_housekeeping=0.
+        self.result_handler=None;self.recognition_window=None
+        if (c.get('short_recognition') or {}).get('enabled'):
+            from vivis.speech.speaker_window import ShortRecognitionWindow
+            self.recognition_window=ShortRecognitionWindow(c['short_recognition'])
         if (c.get('short_collection') or {}).get('enabled'):
             from vivis.speech.speaker_sampling import ShortSpeechCollector
             self.collector=ShortSpeechCollector(c['short_collection'])
@@ -149,6 +156,11 @@ class SpeakerObserver:
         source=dict(turn_id=clip['rid'],session=clip['session'],item_id=clip['item'],
             logical_person=clip['person'],visual_person=(clip.get('evidence') or {}).get('person_id'),
             enrollment_allowed=bool((clip.get('evidence') or {}).get('confirmed') and clip['alignment']=='aligned'))
+        source.update(audio_started=clip.get('speaker_start',clip.get('start')),audio_ended=clip.get('end'),
+            sample_epoch=clip.get('sampling_epoch'),voice_context=(clip.get('evidence') or {}).get('voice_context'),
+            source_generation=(clip.get('evidence') or {}).get('source_generation'))
+        source.update(source_visual_evidence=(clip.get('evidence') or {}).get('identity_evidence'),
+            sampling_conflict=clip.get('sampling_conflict',False))
         if self.collector:
             source.update(_collection_managed=True,_sampling_ranges=clip.get('sampling_ranges',[]),
                 _sampling_conflict=clip.get('sampling_conflict',False),_reference_end_aligned=True,
@@ -156,6 +168,55 @@ class SpeakerObserver:
         return self.job.offer(self.infer,pcm,far,source)
 
     def set_collection_epoch(self,epoch):self.collection_epoch=epoch
+
+    def _identity_evidence(self,result,source,turns=None):
+        from vivis.interaction.identity_fusion import unavailable
+        stamp=source.get('audio_ended');state='unavailable';person=None
+        if type(stamp) not in (float,int) or not np.isfinite(stamp):return unavailable('no_audio_endpoint')
+        decision=result.get('recognition_reason');score=result.get('score');candidate=result.get('best_candidate')
+        if decision=='matched' and result.get('speaker_candidate'):
+            state='confirmed';person=result['speaker_candidate']
+        elif (decision in ('low_similarity','ambiguous_candidates') and candidate
+                and type(score) in (int,float) and score>=self.c.get('suspect_threshold',self.c['threshold'])):
+            state='suspected';person=candidate
+        elif decision=='low_similarity' and candidate:state='other'
+        if state=='unavailable':return unavailable(result.get('reason','no_usable_voice'))
+        return dict(state=state,person_id=person,stamp=stamp,evidence_id=source['turn_id'],score=score,
+            margin=result.get('margin'),source_turn_ids=turns or [source['turn_id']],reason=decision)
+
+    def _enrich_recognition(self,pcm,far,source,result):
+        result['identity_evidence']=self._identity_evidence(result,source)
+        window=self.recognition_window
+        if not window:return
+        if result['identity_evidence']['state']=='confirmed':window.clear();return
+        group=window.add(pcm,far,source,result,self.collection_epoch)
+        if not group:return
+        samples=group['samples'];windows,detail=consistency_windows(samples,self.c['minimum_seconds'])
+        similarity=float(self.feature(windows[0])@self.feature(windows[1])) if windows else None
+        result['window_match']=dict(source_turn_ids=group['source_turn_ids'],
+            effective_speech_s=group['effective_speech_s'],consistency=similarity,**detail)
+        if similarity is None or similarity<CONSISTENCY_THRESHOLD:window.defer();return
+        self.refresh_gallery()
+        vector=self.feature(samples);ranked=[]
+        for pid,rows in self.gallery.items():
+            active=[r for r in rows if r.get('active',True)]
+            if len(active)>=self.c['enrollment_samples']:
+                ranked.append((float(normalized(np.mean([r['vector'] for r in active],axis=0))@vector),pid))
+        ranked.sort(reverse=True)
+        if not ranked:window.clear();return
+        score,pid=ranked[0];margin=score-ranked[1][0] if len(ranked)>1 else score
+        latest=self.feature(group['latest_samples'])
+        support=float(vector@latest)
+        result['window_match']['latest_speaker_support']=support
+        if support<self.c.get('suspect_threshold',self.c['threshold']):
+            result['window_match']['reason']='latest_fragment_not_supported';window.clear();return
+        decision=('low_similarity' if score<self.c['threshold'] else
+            'ambiguous_candidates' if margin<self.c['minimum_margin'] else 'matched')
+        result['single_query']={key:result.get(key) for key in ('speaker_candidate','score','margin','reason','recognition_reason','best_candidate')}
+        result.update(score=score,margin=margin,best_candidate=pid,recognition_reason=decision,
+            speaker_candidate=pid if decision=='matched' else None,reason='short_window')
+        result['identity_evidence']=self._identity_evidence(result,source,group['source_turn_ids'])
+        window.clear()  # Published windows are disjoint, never two votes from the same speech.
 
     def _store_reference(self,person,samples,vector,turn_id,session,metadata=None):
         if not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}',turn_id):raise ValueError('Invalid speaker sample ID')
@@ -275,6 +336,10 @@ class SpeakerObserver:
                     if len(self.gallery[person])<self.c['enrollment_samples']:result['reason']='collecting_reference_samples'
         except Exception as exc:result['reason']='speaker_unavailable:'+type(exc).__name__
         finally:
+            try:self._enrich_recognition(pcm,far,source,result)
+            except Exception as exc:
+                from vivis.interaction.identity_fusion import unavailable
+                result['identity_evidence']=unavailable('recognition_window:'+type(exc).__name__)
             self.results.put(result)
             if self.collector and source.get('_collection_managed'):self._collect_short(pcm,far,source,result)
 
@@ -293,10 +358,18 @@ class SpeakerObserver:
                 else:message='声纹聚合参考未入库：'+name+'；'+status
                 self.emit(dict(kind='voice_warning',message=message,speaker_collection=result));continue
             self.log('speaker_observation',**result)
+            if self.result_handler:
+                try:self.result_handler(result)
+                except Exception as exc:self.log('speaker_result_rejected',error_type=type(exc).__name__,turn_id=result['turn_id'])
             def name(pid):
                 if not pid or str(pid).startswith('anonymous:'):return 'other'
                 return self.labels.get(pid,'other')
-            label=name(result['logical_person'])+'-'+name(result['visual_person'])+'/图-'+name(result['speaker_candidate'])+'/声'
+            if self.result_handler:
+                from vivis.interaction.identity_fusion import evidence_label
+                visual=result.get('source_visual_evidence') or dict(state='unavailable')
+                profiles={pid:dict(preferred_address=label) for pid,label in self.labels.items()}
+                label=name(result['logical_person'])+'-'+evidence_label(visual,profiles,'图')+'-'+evidence_label(result['identity_evidence'],profiles,'声')
+            else:label=name(result['logical_person'])+'-'+name(result['visual_person'])+'/图-'+name(result['speaker_candidate'])+'/声'
             message='声纹观察［原话轮'+result['turn_id'][:8]+'］：'+label+'；'+result['reason']
             if result.get('reference_sample_saved'):
                 message+='；参考已入库（'+str(result['enrollment_samples'])+'/'+str(self.c['maximum_samples'])+'）'
@@ -309,9 +382,11 @@ class SpeakerObserver:
             decision=result.get('recognition_reason');candidate=name(result.get('best_candidate'))
             if decision=='low_similarity':message+=f'；声纹未确认：候选{candidate}，相似度{result["score"]:.3f}低于{self.c["threshold"]:.3f}'
             elif decision=='ambiguous_candidates':message+=f'；声纹未确认：候选差距{result["margin"]:.3f}不足{self.c["minimum_margin"]:.3f}'
-            elif decision=='matched':message+=f'；声纹匹配通过：{name(result["speaker_candidate"])}（仅观察）'
+            elif decision=='matched':message+=f'；声纹匹配通过：{name(result["speaker_candidate"])}'+('（提交身份融合）' if self.result_handler else '（仅观察）')
             elif decision=='insufficient_reference_samples':message+='；暂无至少3段活动参考的人物可比对'
             elif decision=='consistency_rejected':
                 detail=result.get('consistency',{});score=detail.get('similarity')
                 message+=f'；分段声音一致性{score:.3f}低于{CONSISTENCY_THRESHOLD:.3f}' if score is not None else '；两段独立有效发声不足，暂不确认'
+            if result.get('window_match'):
+                message+='；短句识别窗口来自'+str(len(result['window_match']['source_turn_ids']))+'轮'
             self.emit(dict(kind='voice_warning',message=message,speaker_observation=result))

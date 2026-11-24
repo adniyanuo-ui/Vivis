@@ -18,7 +18,7 @@ ETIQUETTE=('交流要温暖、尊重、有关切和分寸，可以自然关心�
 
 IDENTITY_RULES=('身份来源规则：云端没有收到摄像头图像，只收到音频和本地控制器的结构化身份结果。'
     '公司知识和人物简历只是第三方参考资料，不代表正在交流的用户；其中姓名、称谓与职务不能套用到当前用户。'
-    '回答“你认识我吗/我是谁”时，只依据最新current_visual_identity：recognized只可引用其中person的姓名，'
+    '回答“你认识我吗/我是谁”时，只依据本地控制器最新current_visual_identity结构化结果（兼容字段名；启用图声融合时也可来自本地声纹）：recognized只可引用其中person的姓名，'
     'unknown应坦诚说暂时没有确认身份并询问怎么称呼，绝不能从公司职位、声音或对话猜姓名或性别。'
     '未知访客先用“您好”或“您”，可自然询问希望怎样称呼。本人明确自报或要求后，可使用先生、女士、帅哥、美女等称呼；'
     '本人或监护人明确提供年龄且小于12岁时可称小朋友。不根据脸部外观、衣着或声音推断性别，也不把看起来年轻当作已知年龄。'
@@ -26,7 +26,7 @@ IDENTITY_RULES=('身份来源规则：云端没有收到摄像头图像，只收
     '本地匹配是所选画面人脸，不证明它就是发声者；多人或用户否认时应承认不确定并确认称呼。'
     '用户自报身份可以作为自我介绍使用，但不冒充人脸识别成功；用户纠正优先于你之前的猜测。'
     '自报“小王”等称呼只表示对方这样介绍自己，不能据此匹配熟人档案、补全姓名职务或读取留言。'
-    '询问“看看我是谁/认出我了吗”必须以最新视觉核验为准；unknown时明确说尚未确认，不能沿用自报或历史称呼宣称认出。'
+    '询问“看看我是谁/认出我了吗”必须以最新本地身份核验为准；unknown时明确说尚未确认，不能沿用自报或历史称呼宣称认出。'
     'reviewing表示身份正在复核，可以保留之前的称呼，不要说突然不认识了；询问身份时坦诚说明正在复核。'
     '复核不等于新近核验成功；仅当控制器明确identity_retained=true时，沿用身份保持窗口内此前确认的身份和权限，其他复核状态不能读取私人内容。'
     '身份未知且对方没有明确要求怎样称呼时，只用“您好/您”；对方提到、否认或询问一个熟人称呼不代表那是本人，不能把该称呼套用给当前用户。'
@@ -142,9 +142,13 @@ class Knowledge:
         if retained:
             person=dict(person_id=retained_person_id,**self.people[retained_person_id])
             identity=dict(identity,person=person,identity_retained=True)
+        if stable_identity is not None and stable_identity.get('policy')=='evidence_fusion':
+            identity.update(source='local_image_voice_fusion',decision=stable_identity.get('reason'))
         instructions=' current_visual_identity='+json.dumps(identity,ensure_ascii=False)+'。'+IDENTITY_RULES
         if retained:
-            instructions+=' 当前处于前台身份保持窗口，短暂低分、不同候选或丢脸不立即换人；保持原会话身份、背景和留言权限，不声称刚重新识别成功，不反复询问身份或问候。'
+            if stable_identity is not None and stable_identity.get('policy')=='evidence_fusion':
+                instructions+=' 当前图声证据暂缺或仅疑似，按控制器保留此前确认的身份、背景和权限；不声称刚重新认出，不反复问姓名或问候。'
+            else:instructions+=' 当前处于前台身份保持窗口，短暂低分、不同候选或丢脸不立即换人；保持原会话身份、背景和留言权限，不声称刚重新识别成功，不反复询问身份或问候。'
         elif reviewing:
             instructions+=' 之前的称呼暂时保留，正在复核；不反复问姓名、不触发重新问候，不加载个人背景或留言。'
         elif person:

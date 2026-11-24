@@ -57,6 +57,8 @@ def voice_configuration(speech,robot):
         memory_config=json.loads((ROOT/options['memory_config']).read_text());validate_config(memory_config)
         from vivis.interaction.continuity import configuration as continuity_configuration
         continuity_configuration(options.get('continuity_config'),ROOT)
+        from vivis.interaction.identity_fusion import configuration as fusion_configuration
+        fusion_configuration(options.get('identity_fusion_config'),ROOT)
         from vivis.interaction.robot_tasks import validate_config as validate_tasks
         task_config=json.loads((ROOT/options['tasks_config']).read_text());validate_tasks(task_config)
         if task_config['enabled'] and not memory_config['enabled']:raise ValueError('Robot tasks require persistent memory storage')
