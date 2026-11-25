@@ -193,6 +193,13 @@ class FusedVoiceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             s.input_generation+=1;s.begin_user_turn('next')
             self.assertEqual(s.turn_person,'alice')
 
+    async def test_speaker_status_distinguishes_gallery_readiness_and_current_result(self):
+        self.s.continuity.speaker=SimpleNamespace(c=dict(enrollment_samples=3),gallery=dict(alice=[{},{}]))
+        status=self.s.speaker_status('alice')
+        self.assertTrue(status['enabled']);self.assertTrue(status['library_present'])
+        self.assertFalse(status['current_person_eligible']);self.assertEqual(status['current_person_active_references'],2)
+        self.assertEqual(status['current_result']['state'],'unavailable')
+
     async def test_conflicting_voice_cannot_serve_current_actor_without_confirmed_image(self):
         from vivis.interaction.message_lane import StaleMessageTurn
         s=self.s

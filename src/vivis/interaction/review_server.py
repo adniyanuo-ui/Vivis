@@ -18,8 +18,13 @@ class ReviewServer(ThreadingHTTPServer):
     daemon_threads=True
     def __init__(self,root=ROOT,port=8766):
         self.data=ReviewData(root);self.token=secrets.token_urlsafe(32);self.media={}
+        from vivis.interaction.review_jobs import VoiceImportJobs
+        self.imports=VoiceImportJobs(root)
         self.page=Path(__file__).with_name('review_page.html').read_bytes()
         super().__init__(('127.0.0.1',port),ReviewHandler)
+
+    def server_close(self):
+        self.imports.close();super().server_close()
 
 
 class ReviewHandler(BaseHTTPRequestHandler):
@@ -45,6 +50,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
             if self.path=='/api/state':
                 state,media=self.server.data.snapshot();self.server.media=media;state['token']=self.server.token
                 return self.send_body(200,state)
+            if re.fullmatch(r'/api/import/[a-f0-9]{32}',self.path):
+                return self.send_body(200,self.server.imports.get(self.path.rsplit('/',1)[-1]))
             if re.fullmatch(r'/media/[a-f0-9]{64}',self.path):
                 key=self.path.removeprefix('/media/');path=self.server.media.get(key)
                 if path is None:
@@ -82,16 +89,19 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if (not self.trusted_host() or origin not in (f'http://localhost:{port}',f'http://127.0.0.1:{port}')
                 or not secrets.compare_digest(self.headers.get('X-Vivis-Review-Token',''),self.server.token)):
             return self.send_body(403,dict(error='请在本机审核页操作并刷新页面'))
-        if self.path!='/api/action':return self.send_body(404,dict(error='操作不存在'))
+        if self.path not in ('/api/action','/api/import'):return self.send_body(404,dict(error='操作不存在'))
         if self.headers.get_content_type()!='application/json':return self.send_body(415,dict(error='需要JSON请求'))
         try:
             length=int(self.headers.get('Content-Length','0'))
             if not 0<length<=8192:raise ValueError('请求大小无效')
             self.connection.settimeout(5)
-            request=json.loads(self.rfile.read(length));result=self.server.data.apply(request)
-            return self.send_body(200,result)
+            request=json.loads(self.rfile.read(length))
+            if self.path=='/api/import':
+                result=self.server.imports.start(self.server.data.voice_import_request(request))
+                return self.send_body(202,result)
+            return self.send_body(200,self.server.data.apply(request))
         except (SpeakerConflict,PhotoConflict) as exc:return self.send_body(409,dict(error=str(exc)))
-        except (OSError,ValueError,KeyError,TypeError) as exc:return self.send_body(400,dict(error=str(exc)))
+        except (OSError,ValueError,KeyError,TypeError,sqlite3.Error) as exc:return self.send_body(400,dict(error=str(exc)))
 
 
 def main():

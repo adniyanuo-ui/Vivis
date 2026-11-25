@@ -89,10 +89,12 @@ class RoundRecorder:
         if type(stamp) not in (int,float) or not np.isfinite(stamp):return
         self.visual_evidence=dict(evidence)
         changed=owner and self.sampling_owner and owner!=self.sampling_owner
-        changed=changed or evidence.get('blocked') or bool(pid and self.sampling_person and pid!=self.sampling_person)
+        # A brief multi-person/low-quality frame pauses enrollment locally.
+        # Only an independently confirmed new person or owner revokes the batch.
+        changed=changed or bool(evidence.get('confirmed') and pid and self.sampling_person and pid!=self.sampling_person)
         if changed:self.sampling_epoch+=1
         if owner:self.sampling_owner=owner
-        if pid:self.sampling_person=pid
+        if pid and evidence.get('confirmed'):self.sampling_person=pid
         point=dict(evidence,epoch=self.sampling_epoch)
         if not self.sampling_points or point!=self.sampling_points[-1]:self.sampling_points.append(point)
         if self.speaker and hasattr(self.speaker,'set_collection_epoch'):self.speaker.set_collection_epoch(self.sampling_epoch)
@@ -107,7 +109,8 @@ class RoundRecorder:
         # Existing fully verified turns remain eligible as a whole; business
         # attribution is never rewritten when only interior frames identify a face.
         evidence=clip.get('evidence') or {};pid=evidence.get('person_id')
-        if (not conflict and clip.get('sampling_epoch',self.sampling_epoch)==self.sampling_epoch
+        blocked=any(p.get('blocked') and start-seconds<=p['stamp']<=end for p in self.sampling_points)
+        if (not conflict and not blocked and clip.get('sampling_epoch',self.sampling_epoch)==self.sampling_epoch
                 and evidence.get('confirmed') and pid==clip['person']
                 and all(s['person_id']==pid for s in ranges)):
             ranges=[dict(start_s=0.,end_s=end-start,person_id=pid,epoch=self.sampling_epoch,

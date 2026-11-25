@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import time
 
 from vivis.interaction.memory import person_key
 
@@ -66,7 +67,9 @@ def edit_reference(path,model_hash,person,sample,action,expected_revision):
         if row is None:raise ValueError('录音已不存在，请刷新')
         media=(path.parent/person/(sample+'.wav')).resolve()
         if not media.is_relative_to(path.parent.resolve()):raise ValueError('录音路径越界')
-        if action=='activate':row.update(active=True,locked=True)
+        if action=='activate':
+            row.update(active=True,locked=True,administrator_verified=True,reviewed_at=time.time(),candidate_reason=None)
+            if row.get('origin')=='onsite_label_pending_review':row['origin']='manual_review'
         elif action=='deactivate':row.update(active=False,locked=False)
         elif action=='lock':
             if not row.get('active',True):raise ValueError('请先激活该录音')

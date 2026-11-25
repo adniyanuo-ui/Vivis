@@ -1879,6 +1879,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                         '同一张脸正在短暂复核，可沿用上次称呼；暂不读取个人历史、职业背景或留言。' if review else
                         '当前尚未本地确认身份。自报称呼不等于认出，不补全熟人姓名岗位，不读取他人留言。'),
                     memory_enabled=self.memory is not None,memory_attribution='frozen_turn_identity' if self.identity_fusion else 'confirmed_single_face_only',
+                    speaker_status=self.speaker_status(person_id),
                     speech_preference=self.speech_preference(),robot_tasks=self.task_overview(),
                     message_operation=self.message_operation(),
                     known_people=self.known_people() if person else [],

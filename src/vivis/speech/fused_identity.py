@@ -37,6 +37,19 @@ class FusedIdentityVoice:
         if not result or result['item_id']!=self.turn_item_id:return unavailable('current_turn_not_ready')
         return fresh(result.get('identity_evidence'),now,self.identity_fusion.c['voice_max_age_s'],self.knowledge.people)
 
+    def speaker_status(self,person=None):
+        """Capability, gallery readiness and this turn's result are separate facts."""
+        observer=getattr(getattr(self,'continuity',None),'speaker',None)
+        if observer is None:return dict(enabled=False,current_result=unavailable('speaker_disabled'))
+        rows=observer.gallery.get(person,[]) if person else []
+        active=sum(r.get('active',True) for r in rows)
+        return dict(enabled=True,library_present=bool(observer.gallery),
+            current_person_references=len(rows),current_person_active_references=active,
+            minimum_active_references=observer.c['enrollment_samples'],
+            current_person_eligible=active>=observer.c['enrollment_samples'],
+            current_result=self.current_voice_evidence() if self.identity_fusion else unavailable('observation_only'),
+            notice='当前声音无结果不等于没有声纹库；保留会话身份不代表刚刚听声认出。')
+
     def accept_speaker_identity(self,result):
         """Called by poll on the cloud loop, never from the model's worker."""
         token=self.sync_voice_binding()

@@ -34,7 +34,7 @@ def local_time(value):
     except (TypeError,ValueError):return value
 
 
-def export(root,output,rounds=20,person=None):
+def export(root,output,rounds=32,person=None):
     root=Path(root).resolve();private=root/'private';output=Path(output).resolve()
     if not output.is_relative_to(private):raise ValueError('审核页必须保存在本项目private目录下')
     if output.suffix.lower()!='.html':raise ValueError('审核页文件名必须以.html结尾，不能覆盖档案或录音')
@@ -139,7 +139,7 @@ article{border-top:1px solid #ddd;padding:14px 0}summary{cursor:pointer}nav a{ma
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--person');p.add_argument('--rounds',type=int,default=20)
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--person');p.add_argument('--rounds',type=int,default=32)
     p.add_argument('--output',type=Path,default=ROOT/'private/review/index.html');a=p.parse_args()
     print(export(ROOT,a.output,a.rounds,a.person))
 

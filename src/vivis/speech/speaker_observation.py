@@ -221,20 +221,24 @@ class SpeakerObserver:
         result['identity_evidence']=self._identity_evidence(result,source,group['source_turn_ids'])
         window.clear()  # Published windows are disjoint, never two votes from the same speech.
 
-    def _store_reference(self,person,samples,vector,turn_id,session,metadata=None):
+    def _store_reference(self,person,samples,vector,turn_id,session,metadata=None,*,active=True,locked=False):
         if not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}',turn_id):raise ValueError('Invalid speaker sample ID')
         from vivis.interaction.memory import person_key
         person_key(person)
         rows=self.gallery.get(person,[])
-        if len(rows)>=self.c['maximum_samples'] or any(r['turn_id']==turn_id for r in rows):return False
-        folder=self.directory/person;folder.mkdir(exist_ok=True,mode=0o700);path=folder/(turn_id+'.wav')
+        sources=set((metadata or {}).get('source_turn_ids',[turn_id]))
+        used={t for refs in self.gallery.values() for r in refs for t in r.get('source_turn_ids',[r['turn_id']])}
+        if len(rows)>=self.c['maximum_samples'] or sources&used or any(r['turn_id']==turn_id for r in rows):return False
+        folder=self.directory/person
+        if not folder.resolve().is_relative_to(self.directory.resolve()):raise ValueError('Private speaker path escaped')
+        folder.mkdir(exist_ok=True,mode=0o700);path=folder/(turn_id+'.wav')
         fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
         try:
             with os.fdopen(fd,'wb') as stream:
                 with wave.open(stream,'wb') as w:
                     w.setparams((1,2,16000,0,'NONE','not compressed'));w.writeframes(np.rint(samples*32767).astype('<i2').tobytes())
                 stream.flush();os.fsync(stream.fileno())
-            row=dict(turn_id=turn_id,session=session,created=time.time(),vector=vector.tolist(),active=True,locked=False)
+            row=dict(turn_id=turn_id,session=session,created=time.time(),vector=vector.tolist(),active=active,locked=locked)
             if metadata:row.update(metadata)
             self.save_gallery(dict(self.gallery,**{person:[*rows,row]}))
         except Exception:path.unlink(missing_ok=True);raise
@@ -259,9 +263,7 @@ class SpeakerObserver:
                     self.collector.defer()
                     self.results.put(dict(collection_event=True,status='voice_inconsistent',person_id=pid));return
             rows=self.gallery.get(pid,[]);active=[r for r in rows if r.get('active',True)]
-            if active and float(normalized(np.mean([r['vector'] for r in active],axis=0))@vector)<.65:
-                self.collector.defer()
-                self.results.put(dict(collection_event=True,status='face_voice_conflict',person_id=pid));return
+            own_score=float(normalized(np.mean([r['vector'] for r in active],axis=0))@vector) if active else None
             ranked=[]
             for other,refs in self.gallery.items():
                 refs=[r for r in refs if r.get('active',True)]
@@ -270,12 +272,16 @@ class SpeakerObserver:
             if ranked:
                 score,other=ranked[0];margin=score-ranked[1][0] if len(ranked)>1 else score
                 if other!=pid and score>=self.c['threshold'] and margin>=self.c['minimum_margin']:
-                    self.collector.clear()
+                    self.collector.reject_latest()
                     self.results.put(dict(collection_event=True,status='known_other_voice',person_id=pid));return
             if spans and spans[0]['epoch']!=self.collection_epoch:self.collector.clear();return
-            saved=self._store_reference(pid,samples,vector,group['turn_id'],group['session'],group['metadata'])
+            candidate=own_score is not None and own_score<self.c['threshold']
+            metadata=dict(group['metadata'],origin='automatic_visual',own_similarity=own_score)
+            if candidate:metadata['candidate_reason']='different_from_existing_references'
+            saved=self._store_reference(pid,samples,vector,group['turn_id'],group['session'],metadata,active=not candidate)
             self.collector.clear()
-            if saved:self.results.put(dict(collection_event=True,status='saved',person_id=pid,
+            if saved:self.results.put(dict(collection_event=True,status='candidate_saved' if candidate else 'saved',person_id=pid,
+                active=not candidate,own_similarity=own_score,
                 enrollment_samples=len(self.gallery[pid]),source_turn_ids=group['metadata']['source_turn_ids']))
         except Exception as exc:
             self.collector.clear();self.results.put(dict(collection_event=True,status='unavailable:'+type(exc).__name__))
@@ -324,18 +330,22 @@ class SpeakerObserver:
             if not source.get('_collection_managed') and source['enrollment_allowed'] and person and person==source['logical_person']:
                 rows=self.gallery.get(person,[])
                 active_rows=[r for r in rows if r.get('active',True)]
-                if active_rows and float(normalized(np.mean([r['vector'] for r in active_rows],axis=0))@vector)<.65:
-                    result['reason']='face_voice_conflict';return
                 if result['speaker_candidate'] not in (None,person):
                     result['reason']='known_other_voice';return
+                own_score=float(normalized(np.mean([r['vector'] for r in active_rows],axis=0))@vector) if active_rows else None
+                candidate=own_score is not None and own_score<self.c['threshold']
                 result.update(enrollment_samples=len(rows),reference_collection_complete=len(rows)>=self.c['maximum_samples'])
                 if len(rows)>=self.c['maximum_samples']:
                     result['reason']='reference_pool_full';return
                 if not any(row['turn_id']==source['turn_id'] for row in rows):
-                    self._store_reference(person,samples,vector,source['turn_id'],source['session'])
+                    saved=self._store_reference(person,samples,vector,source['turn_id'],source['session'],
+                        dict(origin='automatic_visual',source_turn_ids=[source['turn_id']],own_similarity=own_score,
+                            candidate_reason='different_from_existing_references' if candidate else None),active=not candidate)
+                    if not saved:return
                     result['enrollment_samples']=len(self.gallery[person])
                     result['reference_collection_complete']=len(self.gallery[person])>=self.c['maximum_samples']
                     result['reference_sample_saved']=True
+                    result['reference_sample_active']=not candidate
                     if len(self.gallery[person])<self.c['enrollment_samples']:result['reason']='collecting_reference_samples'
         except Exception as exc:result['reason']='speaker_unavailable:'+type(exc).__name__
         finally:
@@ -358,6 +368,7 @@ class SpeakerObserver:
                 name=self.labels.get(result.get('person_id'),'other');status=result['status']
                 if status=='accumulating':message=f'声纹短句暂存：{name}，有效发声{result["effective_s"]:.2f}/{result["target_s"]:.2f}秒，来自{result["turns"]}轮；尚未入库'
                 elif status=='saved':message=f'声纹聚合参考已入库：{name}，{result["enrollment_samples"]}/{self.c["maximum_samples"]}，来源{len(result["source_turn_ids"])}轮'
+                elif status=='candidate_saved':message=f'声纹候选已保存：{name}，{result["enrollment_samples"]}/{self.c["maximum_samples"]}；与旧模板差异较大，未激活、不参与识别'
                 else:message='声纹聚合参考未入库：'+name+'；'+status
                 self.emit(dict(kind='voice_warning',message=message,speaker_collection=result));continue
             self.log('speaker_observation',**result)
@@ -375,7 +386,7 @@ class SpeakerObserver:
             else:label=name(result['logical_person'])+'-'+name(result['visual_person'])+'/图-'+name(result['speaker_candidate'])+'/声'
             message='声纹观察［原话轮'+result['turn_id'][:8]+'］：'+label+'；'+result['reason']
             if result.get('reference_sample_saved'):
-                message+='；参考已入库（'+str(result['enrollment_samples'])+'/'+str(self.c['maximum_samples'])+'）'
+                message+=('；参考已入库（' if result.get('reference_sample_active',True) else '；候选已保存、未激活（')+str(result['enrollment_samples'])+'/'+str(self.c['maximum_samples'])+'）'
             elif result.get('enrollment_skip_reason'):
                 message+='；未入库：原话轮起止身份未确认或不一致'
             if result['reason']=='insufficient_speech':

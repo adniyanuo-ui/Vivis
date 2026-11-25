@@ -5,6 +5,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from vivis.paths import ROOT
 from vivis.interaction.review_server import ReviewServer
 
@@ -94,6 +95,19 @@ class ReviewServerTests(unittest.TestCase):
     def test_arbitrary_actions_and_paths_rejected(self):
         self.assertEqual(self.action('voice','../gallery','delete',0)[0],400);self.assertEqual(self.action('voice','0','execute',0)[0],400)
         self.assertEqual(self.request('/api/action','POST',dict(kind='voice',person='heyude',id='0',action='delete',revision=0,path='/etc/passwd'))[0],400)
+
+    def test_import_is_attested_background_work_and_never_reports_early_success(self):
+        request=dict(person='heyude',round_ids=['source'],revision=0,confirmed=True)
+        with patch.object(self.server.data,'voice_import_request',return_value=request),patch.object(self.server.imports,'start',return_value=dict(ok=True,job_id='a'*32)):
+            status,_,body=self.request('/api/import','POST',request)
+            self.assertEqual(status,202);self.assertIn('job_id',json.loads(body))
+        with patch.object(self.server.imports,'get',return_value=dict(state='running')):
+            self.assertEqual(json.loads(self.request('/api/import/'+'a'*32)[2])['state'],'running')
+
+    def test_import_without_confirmation_and_cross_origin_are_rejected(self):
+        request=dict(person='heyude',round_ids=['source'],revision=0,confirmed=False)
+        self.assertEqual(self.request('/api/import','POST',request)[0],400)
+        self.assertEqual(self.request('/api/import','POST',request,{'Origin':'https://example.com'})[0],403)
 
 
 if __name__=='__main__':unittest.main()

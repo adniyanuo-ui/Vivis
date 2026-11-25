@@ -52,6 +52,21 @@ class ReviewData:
         if dbpath.exists():
             db=sqlite3.connect(self.private_path(dbpath).as_uri()+'?mode=ro',uri=True,timeout=1)
             db.row_factory=sqlite3.Row
+        def recent(pid):
+            result=[]
+            if not db:return result
+            for item in db.execute('SELECT * FROM rounds WHERE person=? ORDER BY created DESC,id DESC LIMIT 32',(pid,)):
+                r=dict(id=item['id'],created=item['created'],user_text=item['user_text'],outcome=item['outcome'],replies=[])
+                r['alignment']=item['alignment']
+                r['selectable']=bool(item['closed'] and item['alignment']=='aligned' and item['user_text'])
+                r['used_for_voice']=any(item['id'] in row.get('source_turn_ids',[row['turn_id']])
+                    for refs in gallery['people'].values() for row in refs)
+                r['media']=url(self.archive/item['audio'],self.archive) if item['audio'] else None
+                for reply in db.execute('SELECT text,audio,outcome FROM replies WHERE round_id=?',(item['id'],)):
+                    r['replies'].append(dict(text=reply['text'],outcome=reply['outcome'],
+                        media=url(self.archive/reply['audio'],self.archive) if reply['audio'] else None))
+                result.append(r)
+            return result
         try:
             for profile in sorted(self.people.glob('*/profile.json')):
                 pid=profile.parent.name;folder=self.person_folder(pid)
@@ -66,19 +81,27 @@ class ReviewData:
                 person['voice_revision']=gallery['revision']
                 for row in gallery['people'].get(pid,[]):
                     person['voices'].append(dict(id=row['turn_id'],active=row.get('active',True),locked=row.get('locked',False),
-                        created=row.get('created'),media=url(self.speakers/pid/(row['turn_id']+'.wav'),self.speakers)))
-                if db:
-                    for item in db.execute('SELECT * FROM rounds WHERE person=? ORDER BY created DESC LIMIT 10',(pid,)):
-                        r=dict(id=item['id'],created=item['created'],user_text=item['user_text'],outcome=item['outcome'],replies=[])
-                        r['media']=url(self.archive/item['audio'],self.archive) if item['audio'] else None
-                        for reply in db.execute('SELECT text,audio,outcome FROM replies WHERE round_id=?',(item['id'],)):
-                            r['replies'].append(dict(text=reply['text'],outcome=reply['outcome'],
-                                media=url(self.archive/reply['audio'],self.archive) if reply['audio'] else None))
-                        person['rounds'].append(r)
+                        created=row.get('created'),origin=row.get('origin'),candidate_reason=row.get('candidate_reason'),
+                        source_turn_ids=row.get('source_turn_ids',[row['turn_id']]),
+                        media=url(self.speakers/pid/(row['turn_id']+'.wav'),self.speakers)))
+                person['rounds']=recent(pid)
                 people.append(person)
+            unknown=recent('other')
+            if unknown:people.append(dict(id='other',name='未归属聊天原话',photos=[],voices=[],rounds=unknown,
+                voice_revision=gallery['revision']))
         finally:
             if db:db.close()
         return dict(people=people),media
+
+    def voice_import_request(self,request):
+        if (not isinstance(request,dict) or set(request)!={'person','round_ids','revision','confirmed'}
+                or request['confirmed'] is not True or type(request['revision']) is not int or request['revision']<0):
+            raise ValueError('请先试听并确认录音身份，再收入候选')
+        self.person_folder(request['person'])
+        from vivis.speech.speaker_import import round_sources
+        # Reads source metadata only; model work runs in a separate bounded process.
+        round_sources(self.root,request['round_ids'])
+        return dict(request)
 
     def apply(self,request):
         if not isinstance(request,dict) or set(request)-{'kind','person','id','action','revision','replace'}:raise ValueError('请求字段不正确')

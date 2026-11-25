@@ -77,12 +77,31 @@ class ShortCollectionTests(unittest.TestCase):
         self.assertGreaterEqual(b['fragments'][0]['start_sample'],17600)
         self.assertEqual(self.s.gallery,{})
 
-    def test_confirmed_voice_conflict_and_visual_conflict_clear_batch(self):
-        self.feed('a');x=pcm(.4)
+    def test_bad_current_fragments_preserve_prior_reliable_batch(self):
+        self.feed('a');first=self.s.collector.batch;x=pcm(.4)
         self.s.collector.accept(x,bytes(len(x)),source('b'),dict(speaker_candidate='wangrunzhang'),0,32,[])
-        self.assertIsNone(self.s.collector.batch)
-        self.feed('c');self.feed('d',_sampling_conflict=True)
-        self.assertIsNone(self.s.collector.batch);self.assertEqual(self.s.gallery,{})
+        self.assertIs(self.s.collector.batch,first)
+        self.feed('bad',_sampling_conflict=True)
+        self.assertIs(self.s.collector.batch,first)
+        for name,reason in [('clip','clipping'),('mixed','mixed_or_unstable_speech')]:
+            self.s.collector.accept(x,bytes(len(x)),source(name),dict(reason=reason),0,32,[])
+        self.assertEqual(first['source_turns'],['a'])
+        for name in ['c','d','e']:self.feed(name)
+        self.assertEqual(self.s.gallery['heyude'][0]['source_turn_ids'],['a','c','d','e'])
+
+    def test_different_clean_voice_becomes_inactive_candidate_and_is_not_a_vote(self):
+        self.s._store_reference('heyude',np.ones(16000,np.float32)*.1,np.array([1.,0.]),'old','v')
+        self.s.feature=lambda x:np.array([.5,np.sqrt(.75)])
+        self.feed('different',2)
+        row=self.s.gallery['heyude'][-1]
+        self.assertFalse(row['active']);self.assertFalse(row['locked'])
+        self.assertEqual(row['candidate_reason'],'different_from_existing_references')
+        self.s.poll();self.assertTrue(any('候选已保存' in e['message'] for e in self.events))
+
+    def test_confirmed_other_composite_does_not_enroll_under_visual_person(self):
+        for i in range(3):self.s._store_reference('wangrunzhang',np.ones(16000,np.float32)*.1,np.array([1.,0.]),'old'+str(i),'v')
+        self.feed('wrong',2)
+        self.assertNotIn('heyude',self.s.gallery)
 
     def test_inconsistent_composite_waits_for_more_speech_then_discards_at_limit(self):
         with patch('vivis.speech.speaker_observation.consistency_windows',return_value=(None,{})):
@@ -174,10 +193,31 @@ class SamplingBoundsTests(unittest.TestCase):
         x=pcm(.4);s=source('a')
         self.collector.accept(x,bytes(len(x)),s,{},0,32,[],now=1)
         self.assertEqual(self.collector.accept(x,bytes(len(x)),s,{},0,32,[],now=2)[1]['status'],'already_used')
-        self.assertFalse(self.collector.expire(30,0));self.assertTrue(self.collector.expire(32,0))
+        self.assertFalse(self.collector.expire(90,0));self.assertTrue(self.collector.expire(92,0))
         self.collector.remember([str(i) for i in range(1100)]);self.assertEqual(len(self.collector.used),1024)
         source_ids=['a',*[str(i) for i in range(1100)]]
         self.assertEqual(self.collector.accept(x,bytes(len(x)),s,{},0,32,source_ids,now=32)[1]['status'],'already_used')
+
+    def test_blocked_frames_exclude_only_their_interval(self):
+        points=[dict(stamp=1.,person_id='heyude',confirmed=True,epoch=0),
+            dict(stamp=1.2,person_id=None,confirmed=False,blocked=True,epoch=0),
+            dict(stamp=1.4,person_id='heyude',confirmed=True,epoch=0)]
+        spans,conflict=visual_ranges(points,1.,1.8,.5)
+        self.assertFalse(conflict);self.assertEqual(len(spans),2)
+        self.assertAlmostEqual(spans[0]['end_s'],.2);self.assertAlmostEqual(spans[1]['start_s'],.4)
+
+    def test_normal_chat_gaps_accumulate_within_ninety_seconds(self):
+        x=pcm(.4);group=None
+        for i,stamp in enumerate([1,25,55,89]):
+            group,_=self.collector.accept(x,bytes(len(x)),source(str(i)),{},0,32,[],now=stamp)
+        self.assertIsNotNone(group);self.assertEqual(len(group['metadata']['source_turn_ids']),4)
+
+    def test_reject_latest_retains_previous_good_sources(self):
+        x=pcm(.4)
+        for i in range(2):self.collector.accept(x,bytes(len(x)),source(str(i)),{},0,32,[],now=i)
+        self.collector.reject_latest()
+        self.assertEqual(self.collector.batch['source_turns'],['0'])
+        self.assertAlmostEqual(self.collector.batch['effective_s'],.4)
 
     def test_bad_policy_rejected(self):
         for key,value in [('minimum_fragment_s',0),('maximum_window_s',1000),('maximum_speech_s',float('nan'))]:
