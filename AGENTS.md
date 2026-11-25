@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## Keep review position while selecting samples (2026-11-25)
+
+User requested continuous manual selection without re-opening recent rounds after each import. The review page now captures stable article anchors, details open/closed state, still-eligible checkbox IDs and other-person target before list replacement; restores open panels and scroll position relative to the same article after rendering. New candidates/receipt heights above must not move the current original out of view. Used/ineligible sources drop from selections, remaining selections survive. Same-tab sessionStorage/pagehide restores view on reload; identifiers/UI state only, never automatic submit/activate. CSS disables native scroll anchoring within list to avoid double compensation. Private/no storage support falls back to in-page preservation. Voice/gallery/quality/permissions and P1 lifecycle unchanged. See devlog7.99; review-only deployment, no head restart.
+
 ## Review count/selection follow-up (2026-11-25)
 
 Wang was10total/10active, not a ten-item display cap: real API+files agree, isolated HTTP/DOM replay displays all32. Remaining23 recent single clips were dry-checked without writes:15below1.5s,3consistency failures,1clipped,4would pass. Historical browser receipts were not retained, so do not invent their exact failure. UI now splits active/candidate counts, has separate per-record batch vs short-phrase merge buttons, and persists latest32 import receipts in private/review/import_receipts.json, including per-item partial failures and startup-unconfirmed status. Merged input remains ONE candidate; independently selected inputs may span visits, each checks the unchanged rules. Only this batch's own commits advance its expected revision; unrelated edits stop processing. No auto-activation or quota/threshold change.

@@ -7,14 +7,37 @@ img{width:100%;height:180px;object-fit:contain;background:#e6eaf0}button{font:in
 button{border:1px solid #b5c3d5;background:white;border-radius:6px}button:disabled{opacity:.5;cursor:wait}.danger{color:#a31d2d;border-color:#dbb0b8}
 .muted{color:#667085;font-size:14px}.notice{background:#fff2cc;padding:12px;border-radius:8px}audio{width:100%}.badge{color:#126638;font-weight:600}
 .candidate{color:#966400}code{font-size:12px;overflow-wrap:anywhere}#status{position:sticky;top:0;padding:10px;background:#e5edf9;z-index:1}nav a{margin:0 18px 8px 0;display:inline-block}
+#people{overflow-anchor:none}
 </style><header><h1>熟人照片与声纹样本管理</h1><p>点击按钮直接保存，不需要复制命令。照片最多32张，活动最多16张；声纹最多32段，停用的录音不参与匹配但仍占名额。删除后自动采集只补空缺。</p>
 <p>基础照片保持锁定；激活候选照片或声纹会同时锁定。自动采集不会覆盖已有样本。活动声纹用于声音识别；业务身份由图声核验结果决定，自报姓名不能替代核验。</p>
 <p>近期完整音文展示每人最近32轮，是普通聊天原音和文字，不是声纹候选。试听确认后可单独选样，或合并同次来访的几句短话收入候选，再激活并锁定；可优选16段声音，活动、候选和停用合计最多32段。</p>
 <div class="notice">试听建议用耳机。若用Orin音箱，请先在终端停止交互服务：sudo systemctl stop vivis-p1.service，避免把录音当成新话语；听完后用sudo systemctl start vivis-p1.service恢复。此管理页面可独立使用。</div>
 <p><button id="refresh">刷新清单</button> <a href="http://127.0.0.1:8765/">人脸跟随与交互日志</a></p><nav id="nav"></nav></header><p id="status" role="status">正在读取…</p><main id="people"></main>
 <script>
-let snapshot=null,busy=false;
+let snapshot=null,busy=false,viewEpoch=0;
 const $=s=>document.querySelector(s),el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
+const viewKey='vivis-review-view-1';
+function readView(){try{const value=JSON.parse(sessionStorage.getItem(viewKey));return value&&typeof value==='object'?value:null;}catch(e){return null;}}
+function captureView(){
+ const view={expanded:{},checked:{},targets:{},scrollY:window.scrollY,anchor:null};
+ for(const node of document.querySelectorAll('#people details[id]'))view.expanded[node.id]=node.open;
+ for(const node of document.querySelectorAll('#people input[data-person]'))if(node.checked){const person=node.dataset.person;(view.checked[person]??=[]).push(node.value);}
+ for(const node of document.querySelectorAll('#people select[data-person]'))view.targets[node.dataset.person]=node.value;
+ const cut=Math.min(100,window.innerHeight/3),visible=[];
+ for(const node of document.querySelectorAll('#people article[id]')){const rect=node.getBoundingClientRect();if(rect.bottom>cut&&rect.top<window.innerHeight)visible.push({id:node.id,top:rect.top});}
+ view.anchor=visible.find(row=>row.top<=cut)||visible[0]||null;
+ return view;
+}
+function saveView(view){try{sessionStorage.setItem(viewKey,JSON.stringify(view));}catch(e){}}
+function restoreView(view){
+ if(!view)return;
+ for(const node of document.querySelectorAll('#people details[id]'))if(typeof view.expanded?.[node.id]==='boolean')node.open=view.expanded[node.id];
+ const epoch=++viewEpoch;
+ requestAnimationFrame(()=>{if(epoch!==viewEpoch)return;const anchor=view.anchor&&document.getElementById(view.anchor.id);
+  const top=anchor?window.scrollY+anchor.getBoundingClientRect().top-view.anchor.top:view.scrollY;
+  if(Number.isFinite(top))window.scrollTo(0,Math.max(0,top));saveView(captureView());});
+}
+window.addEventListener('pagehide',()=>{if($('#people').childElementCount)saveView(captureView());});
 function player(src){if(!src)return el('p','原始文件不存在','muted');const n=el('audio');n.controls=true;n.preload='none';n.src=src;return n;}
 function actionButton(text,person,kind,row,action){const b=el('button',text,action==='delete'?'danger':'');b.onclick=()=>act(person,kind,row,action);return b;}
 async function act(person,kind,row,action){
@@ -39,19 +62,19 @@ async function importVoice(person,ids,mode='merge'){
  finally{busy=false;await load();$('#status').textContent=notice;}
 }
 function photoCard(person,row){
- const card=el('article');if(row.media){const a=el('a'),i=el('img');a.href=row.media;a.target='_blank';i.src=row.media;i.loading='lazy';a.append(i);card.append(a);}
+ const card=el('article');card.id='photo-'+person.id+'-'+row.id;if(row.media){const a=el('a'),i=el('img');a.href=row.media;a.target='_blank';i.src=row.media;i.loading='lazy';a.append(i);card.append(a);}
  card.append(el('p',(row.active?'活动':'候选')+(row.base?' · 基础照':row.locked?' · 人工锁定':''),'badge'+(row.active?'':' candidate')),el('code',row.filename));
  if(row.base){card.append(el('p','基础照片保持锁定','muted'));return card;}
  if(row.active){card.append(actionButton('停用',person,'photo',row,'deactivate'));card.append(actionButton(row.locked?'解锁':'锁定',person,'photo',row,row.locked?'unlock':'lock'));}
  else card.append(actionButton('激活',person,'photo',row,'activate'));
  card.append(actionButton(row.active?'永久删除':'删除',person,'photo',row,'delete'));return card;
 }
-function voiceCard(person,row){const card=el('article');card.append(el('p',(row.active?'参与声纹匹配':row.candidate_reason?'候选 · 未参与匹配':'已停用')+(row.locked?' · 已锁定':''),'badge'),el('code',row.id),player(row.media));
+function voiceCard(person,row){const card=el('article');card.id='voice-'+person.id+'-'+row.id;card.append(el('p',(row.active?'参与声纹匹配':row.candidate_reason?'候选 · 未参与匹配':'已停用')+(row.locked?' · 已锁定':''),'badge'),el('code',row.id),player(row.media));
  if(row.source_turn_ids)card.append(el('p','来源 '+row.source_turn_ids.length+' 轮 · '+(row.origin==='onsite_label_pending_review'?'待管理员试听核验':row.origin==='manual_review'?'人工选样':row.candidate_reason==='different_from_existing_references'?'与旧模板差异较大，待审核':'已保留来源'),'muted'));
  card.append(actionButton(row.active?'停用':'激活并锁定',person,'voice',row,row.active?'deactivate':'activate'));
  if(row.active)card.append(actionButton(row.locked?'解锁':'锁定',person,'voice',row,row.locked?'unlock':'lock'));
  card.append(actionButton('永久删除',person,'voice',row,'delete'));return card;}
-function render(){const main=$('#people'),nav=$('#nav');main.replaceChildren();nav.replaceChildren();
+function render(){const main=$('#people'),nav=$('#nav'),view=main.childElementCount?captureView():readView();main.replaceChildren();nav.replaceChildren();
  for(const person of snapshot.people){const a=el('a',person.name);a.href='#person-'+person.id;nav.append(a);const section=el('section');section.id='person-'+person.id;
  section.append(el('h2',person.name+' · '+person.id));
  if(person.id!=='other')section.append(el('p','照片 '+person.photos.length+'/32；活动 '+person.photos.filter(r=>r.active).length+'/16；声纹 '+person.voices.length+'/32；参与匹配 '+person.voices.filter(r=>r.active).length+' 段。'));
@@ -60,21 +83,23 @@ function render(){const main=$('#people'),nav=$('#nav');main.replaceChildren();n
  section.append(el('h3','声纹参考录音 · 总计'+person.voices.length+'/32'));
  for(const active of [true,false]){const rows=person.voices.filter(r=>r.active===active);section.append(el('h3',(active?'已激活、参与识别':'候选／停用、未参与识别')+'（'+rows.length+'条）'));const voices=el('div',undefined,'grid');for(const row of rows)voices.append(voiceCard(person,row));section.append(voices);if(!rows.length)section.append(el('p',active?'暂无活动声音':'暂无未激活候选；未通过选样校验的录音不会进入此处。','muted'));}
  const receipts=(snapshot.voice_imports||[]).filter(r=>r.person===person.id);
- if(receipts.length){const history=el('details');history.open=true;history.append(el('summary','最近选样结果（'+receipts.length+'次）'));for(const row of receipts){const state=row.state==='running'?'检查中':row.state==='complete'?'成功':row.state==='partial'?'部分保存':row.state==='unconfirmed'?'尚未确认':'未保存';history.append(el('p',new Date(row.created*1000).toLocaleString()+' · '+(row.source_turn_ids||[]).length+'轮原话 → '+state+'：'+(row.error||row.message||''),row.state==='failed'||row.state==='partial'?'candidate':'muted'));for(const item of row.items||[]){const original=person.rounds.find(r=>r.id===item.source_turn_id),label=original?original.user_text:item.source_turn_id;history.append(el('p','原话“'+label+'”：'+(item.ok?item.already_saved?'已存在，未重复':'候选已保存':item.error),'muted'));}}section.append(history);}
+ if(receipts.length){const history=el('details');history.id='imports-'+person.id;history.open=true;history.append(el('summary','最近选样结果（'+receipts.length+'次）'));for(const row of receipts){const state=row.state==='running'?'检查中':row.state==='complete'?'成功':row.state==='partial'?'部分保存':row.state==='unconfirmed'?'尚未确认':'未保存';history.append(el('p',new Date(row.created*1000).toLocaleString()+' · '+(row.source_turn_ids||[]).length+'轮原话 → '+state+'：'+(row.error||row.message||''),row.state==='failed'||row.state==='partial'?'candidate':'muted'));for(const item of row.items||[]){const original=person.rounds.find(r=>r.id===item.source_turn_id),label=original?original.user_text:item.source_turn_id;history.append(el('p','原话“'+label+'”：'+(item.ok?item.already_saved?'已存在，未重复':'候选已保存':item.error),'muted'));}}section.append(history);}
  if(!person.voices.length)section.append(el('p','尚无合格参考。普通聊天录音在下方；不能直接当作可靠声纹。','muted'));
  }
- const details=el('details');details.append(el('summary','近期完整音文（最近'+person.rounds.length+'轮，可试听选样）'));
+ const details=el('details');details.id='recent-'+person.id;details.append(el('summary','近期完整音文（最近'+person.rounds.length+'轮，可试听选样）'));
  details.append(el('p','原始聊天记录不修改。勾选同次来访的短句可合成一条候选：至少1.5秒有效发声、最多12秒音频；单条合格录音可直接收入候选。','muted'));
- const selected=new Set(),merge=el('button','合并短句为一条候选'),separate=el('button','逐条收入候选'),target=el('select'),selection=el('p','已勾选0轮。逐条加入：每轮独立生成候选；合并短句：多轮只生成1条。','muted');details.append(selection);
- if(person.id==='other'){target.append(el('option','请选择实际说话的熟人'));for(const p of snapshot.people.filter(p=>p.id!=='other')){const option=el('option',p.name);option.value=p.id;target.append(option);}details.append(el('p','管理员可试听后把声音登记给选定熟人，原始聊天记录仍留在other，不回写业务身份。','muted'),target);}
+ const wanted=Array.isArray(view?.checked?.[person.id])?view.checked[person.id]:[],selectable=new Set(person.rounds.filter(r=>r.selectable&&r.media&&!r.used_for_voice).map(r=>r.id));
+ const selected=new Set(wanted.filter(id=>selectable.has(id))),merge=el('button','合并短句为一条候选'),separate=el('button','逐条收入候选'),target=el('select'),selection=el('p',undefined,'muted');details.append(selection);
+ const updateSelection=()=>{selection.textContent='已勾选'+selected.size+'轮；逐条加入最多生成'+selected.size+'条，合并短句只生成1条。';};updateSelection();
+ if(person.id==='other'){target.dataset.person=person.id;const empty=el('option','请选择实际说话的熟人');empty.value='';target.append(empty);for(const p of snapshot.people.filter(p=>p.id!=='other')){const option=el('option',p.name);option.value=p.id;target.append(option);}target.value=view?.targets?.[person.id]||'';details.append(el('p','管理员可试听后把声音登记给选定熟人，原始聊天记录仍留在other，不回写业务身份。','muted'),target);}
  const selectedPerson=()=>person.id==='other'?snapshot.people.find(p=>p.id===target.value&&p.id!=='other'):person;
  merge.onclick=()=>importVoice(selectedPerson(),[...selected],'merge');separate.onclick=()=>importVoice(selectedPerson(),[...selected],'separate');details.append(separate,merge);
- for(const r of person.rounds){const article=el('article');article.append(el('p',r.created+' · '+r.outcome,'muted'),el('p','用户：'+(r.user_text||'尚无定稿文字')),player(r.media));
- if(r.selectable&&r.media&&!r.used_for_voice){const label=el('label'),check=el('input');check.type='checkbox';check.onchange=()=>{if(check.checked)selected.add(r.id);else selected.delete(r.id);selection.textContent='已勾选'+selected.size+'轮；逐条加入最多生成'+selected.size+'条，合并短句只生成1条。';};label.append(check,document.createTextNode(' 选择这句用户原音 '));const b=el('button','收入声纹候选');b.onclick=()=>importVoice(selectedPerson(),[r.id]);article.append(label,b);}
+ for(const r of person.rounds){const article=el('article');article.id='round-'+person.id+'-'+r.id;article.append(el('p',r.created+' · '+r.outcome,'muted'),el('p','用户：'+(r.user_text||'尚无定稿文字')),player(r.media));
+ if(r.selectable&&r.media&&!r.used_for_voice){const label=el('label'),check=el('input');check.type='checkbox';check.dataset.person=person.id;check.value=r.id;check.checked=selected.has(r.id);check.onchange=()=>{if(check.checked)selected.add(r.id);else selected.delete(r.id);updateSelection();};label.append(check,document.createTextNode(' 选择这句用户原音 '));const b=el('button','收入声纹候选');b.onclick=()=>importVoice(selectedPerson(),[r.id]);article.append(label,b);}
  else article.append(el('p',r.used_for_voice?'该原话已用于声纹，不能重复选样':'该原话未结束、录音不完整或文件缺失，不能选样','muted'));
  for(const reply of r.replies)article.append(el('p','小帅：'+(reply.text||'未取得回答文字')+' · '+reply.outcome),player(reply.media));details.append(article);}
  section.append(details);main.append(section);
- }}
+ }restoreView(view);}
 async function load(){try{const r=await fetch('/api/state',{cache:'no-store'}),data=await r.json();if(!r.ok)throw new Error(data.error);snapshot=data;render();$('#status').textContent='已刷新。操作后立即保存；网页提示以实际保存结果为准。';}
  catch(e){$('#status').textContent='读取失败：'+e.message;}finally{document.querySelectorAll('button').forEach(b=>b.disabled=false);}}
 $('#refresh').onclick=()=>{if(!busy)load();};load();
