@@ -13,6 +13,9 @@ def configuration(path,root):
         value=data.get(key)
         if type(value) not in (int,float) or not math.isfinite(value) or not low<=value<=high:
             raise ValueError('Invalid identity fusion duration: '+key)
+    wait=data.get('status_wait_s',1.5)
+    if type(wait) not in (int,float) or not math.isfinite(wait) or not .1<=wait<=3:
+        raise ValueError('Invalid identity status wait')
     if type(data.get('pair_confirmation_samples')) is not int or not 2<=data['pair_confirmation_samples']<=4:
         raise ValueError('Invalid joint identity confirmation count')
     return data

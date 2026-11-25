@@ -25,7 +25,7 @@ from vivis.interaction.message_status import message_view,operation_failure
 from vivis.interaction.message_lane import MessageLane,StaleMessageTurn,extract_qwen
 from vivis.speech.message_receipts import MessageReceipts,ReceiptRejected,MESSAGE_REQUEST
 from vivis.speech.continuity_voice import ContinuityVoice
-from vivis.speech.fused_identity import FusedIdentityVoice
+from vivis.speech.fused_identity import FusedIdentityVoice,StaleIdentityStatus
 
 
 CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负责，没有本地ASR或本地语义模型备用。'
@@ -1820,8 +1820,10 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
             if not isinstance(raw,str) or len(raw)>4096:raise ValueError('Invalid tool arguments')
             args=json.loads(raw)
             revision=self.response_revisions.get(event.get('response_id'))
-            if revision!=self.context['revision']:raise ValueError('Stale tool result after state change')
             generation=self.response_inputs.get(event.get('response_id'),self.input_generation)
+            if name=='get_robot_status' and (revision!=self.context['revision'] or generation!=self.input_generation):
+                raise StaleIdentityStatus('身份查询已过期，不改变当前话轮的回复状态。')
+            if revision!=self.context['revision']:raise ValueError('Stale tool result after state change')
             if name in ('robot_program','set_expression','set_speech_dialect','program_followup','defer_reception') and generation!=self.input_generation:
                 raise ValueError('Stale tool result after a new user turn')
             if self.program_turn_only() and name not in ('robot_program','program_followup'):
@@ -1866,6 +1868,8 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                 output=await self.organize_archives(args,event)
             elif name=='get_robot_status':
                 if args!={}:raise ValueError('Status tool takes no arguments')
+                if (generation!=self.input_generation or not await self.wait_current_voice_status()):
+                    raise StaleIdentityStatus('身份查询原话已变化，旧查询不再继续；等待当前用户请求。')
                 person_id=self.identified_person()
                 person=(dict(person_id=person_id,**self.knowledge.people[person_id])
                         if person_id in self.knowledge.people else None)
@@ -1884,6 +1888,13 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                     message_operation=self.message_operation(),
                     known_people=self.known_people() if person else [],
                     robot_memory_scope='all_archived_conversations_via_bounded_search')
+                voice=output['speaker_status'].get('current_result',{})
+                if voice.get('state')=='confirmed':
+                    label=voice.get('preferred_address') or voice.get('display_name') or voice['person_id']
+                    output['identity_notice']=('本轮声音已确认：'+label+'。回答听声认人时据此称呼；'
+                        'current_person是业务会话身份，可能尚未接纳本轮结果，不因此否认已通过的声纹。'
+                        '图像只有current_face_result.state=confirmed时才可声称看出来；图声确认冲突时分别说明，以图像为主。'
+                        '本结果不回写已接纳原话，不额外授权私人记忆或留言。')
                 self.tool_repair=None
                 self.continue_response=self.can_speak()
             elif name=='program_followup':
@@ -2007,6 +2018,9 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                     error='普通留言仅由最终识别文字启动固定流程，不接受聊天模型直接写入。')
                 self.continue_response=False;self.tool_repair=None
             else:raise ValueError('Unknown tool')
+        except StaleIdentityStatus as exc:
+            # This old read must not overwrite a newer turn's response flags.
+            output.update(status='stale_user_turn',error=str(exc))
         except StaleMessageRequest as exc:
             output.update(status='stale_user_turn',error=str(exc));self.tool_repair=None;self.continue_response=False
         except MessageSourcePending as exc:
@@ -2356,7 +2370,8 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                             self.response_waiting_user_end=False
                             if self.continuity:self.continuity.end(event.get('item_id'),journal_timeline.at(event.get('audio_end_ms')),
                                 event.get('reason')!='turn_invalid',self.continuity_evidence(self.turn_person))
-                        if kind=='response.function_call_arguments.done':await self.tool(ws,event);continue
+                        if kind=='response.function_call_arguments.done':
+                            await self.dispatch_cloud_tool(ws,event,tasks);continue
                         if (kind=='conversation.item.input_audio_transcription.completed' and self.question_onset
                                 and event.get('item_id')==self.turn_item_id==self.question_onset['item']
                                 and self.question_onset['generation']==self.input_generation and self.turn_ended_at is not None):

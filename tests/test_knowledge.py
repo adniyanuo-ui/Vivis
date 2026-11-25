@@ -102,7 +102,8 @@ class KnowledgeTests(unittest.TestCase):
         unknown=k.person_context(20.)
         self.assertFalse(unknown['recognized']);self.assertIsNone(unknown['person_id'])
         self.assertIn('"state": "unknown", "person": null',unknown['instructions'])
-        self.assertIn('unknown应坦诚说暂时没有确认身份',unknown['instructions'])
+        self.assertIn('本轮声纹也未确认时',unknown['instructions'])
+        self.assertIn('暂时没有确认身份',unknown['instructions'])
 
     def test_review_retains_only_a_social_name_and_never_a_verified_profile(self):
         k=self.knowledge();path=self.root/config()['state_file'];path.parent.mkdir(parents=True)

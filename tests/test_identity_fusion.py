@@ -200,6 +200,91 @@ class FusedVoiceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(status['current_person_eligible']);self.assertEqual(status['current_person_active_references'],2)
         self.assertEqual(status['current_result']['state'],'unavailable')
 
+    async def test_read_status_waits_for_this_voice_but_never_reassigns_original_actor(self):
+        import asyncio,time
+        s=self.s;s.continuity.speaker=SimpleNamespace(c=dict(enrollment_samples=3),gallery={})
+        s.begin_user_turn('current');original=s.turn_person;s.turn_ended_at=time.monotonic();s.in_speech=False
+        waiting=asyncio.create_task(s.wait_current_voice_status());await asyncio.sleep(0)
+        self.assertFalse(waiting.done())
+        result=self.result();result['identity_evidence']=evidence(stamp=time.monotonic())
+        s.accept_speaker_identity(result)
+        self.assertTrue(await waiting)
+        status=s.speaker_status();self.assertEqual(status['current_result']['state'],'confirmed')
+        self.assertEqual(status['current_result']['preferred_address'],'何工')
+        self.assertEqual(status['current_face_result']['state'],'unavailable')
+        self.assertEqual(s.turn_person,original);self.assertIsNone(s.identified_person())
+
+    async def test_new_turn_cancels_old_read_waiter(self):
+        import asyncio,time
+        s=self.s;s.continuity.speaker=SimpleNamespace(c=dict(enrollment_samples=3),gallery={})
+        s.begin_user_turn('old');s.turn_ended_at=time.monotonic();s.in_speech=False
+        waiting=asyncio.create_task(s.wait_current_voice_status());await asyncio.sleep(0)
+        s.input_generation+=1;s.begin_user_turn('new')
+        self.assertFalse(await waiting);self.assertIsNone(s.voice_display)
+
+    async def test_status_timeout_is_honest_and_does_not_change_identity(self):
+        import time
+        s=self.s;s.continuity.speaker=SimpleNamespace(c=dict(enrollment_samples=3),gallery={})
+        s.identity_fusion.c['status_wait_s']=.01
+        s.begin_user_turn('current');s.turn_ended_at=time.monotonic();s.in_speech=False
+        self.assertTrue(await s.wait_current_voice_status())
+        self.assertEqual(s.speaker_status()['current_result']['state'],'unavailable')
+        self.assertIsNone(s.identified_person())
+
+    async def test_identity_tool_returns_current_voice_without_business_permission(self):
+        import asyncio,json,time
+        from unittest.mock import AsyncMock
+        s=self.s;s.continuity.speaker=SimpleNamespace(c=dict(enrollment_samples=3),gallery={})
+        s.begin_user_turn('current');s.turn_ended_at=time.monotonic();s.in_speech=False
+        s.response_revisions['response']=1;s.response_inputs['response']=s.input_generation
+        socket=SimpleNamespace(send=AsyncMock())
+        event=dict(call_id='identity-query',name='get_robot_status',arguments='{}',response_id='response')
+        task=asyncio.create_task(s.tool(socket,event));await asyncio.sleep(0)
+        result=self.result();result['identity_evidence']=evidence(stamp=time.monotonic())
+        s.accept_speaker_identity(result);await task
+        output=json.loads(json.loads(socket.send.call_args.args[0])['item']['output'])
+        self.assertTrue(output['accepted']);self.assertFalse(output['identity_verified']);self.assertIsNone(output['current_person'])
+        self.assertEqual(output['speaker_status']['current_result']['preferred_address'],'何工')
+        self.assertIn('本轮声音已确认',output['identity_notice'])
+
+    async def test_pending_status_does_not_block_other_cloud_tools(self):
+        import asyncio
+        s=self.s;gate=asyncio.Event();handled=[];tasks=[]
+        async def tool(ws,event):
+            if event['name']=='get_robot_status':await gate.wait()
+            handled.append(event['name'])
+        s.tool=tool
+        await s.dispatch_cloud_tool(None,dict(name='get_robot_status'),tasks);await asyncio.sleep(0)
+        self.assertFalse(tasks[0].done())
+        await s.dispatch_cloud_tool(None,dict(name='robot_program'),tasks)
+        self.assertEqual(handled,['robot_program'])
+        gate.set();await asyncio.gather(*tasks)
+        self.assertEqual(handled,['robot_program','get_robot_status'])
+
+    async def test_old_status_does_not_mute_new_user_turn(self):
+        import asyncio,json,time
+        from unittest.mock import AsyncMock
+        s=self.s;s.continuity.speaker=SimpleNamespace(c=dict(enrollment_samples=3),gallery={})
+        s.begin_user_turn('old');s.turn_ended_at=time.monotonic();s.in_speech=False
+        s.response_revisions['response']=1;s.response_inputs['response']=s.input_generation
+        socket=SimpleNamespace(send=AsyncMock());event=dict(call_id='old-status',name='get_robot_status',arguments='{}',response_id='response')
+        task=asyncio.create_task(s.tool(socket,event));await asyncio.sleep(0)
+        s.input_generation+=1;s.begin_user_turn('new');s.continue_response=True;s.tool_repair={'new_request':True}
+        await task
+        output=json.loads(json.loads(socket.send.call_args.args[0])['item']['output'])
+        self.assertFalse(output['accepted']);self.assertEqual(output['status'],'stale_user_turn')
+        self.assertTrue(s.continue_response);self.assertEqual(s.tool_repair,{'new_request':True})
+
+    async def test_already_stale_status_never_overwrites_new_response_flags(self):
+        import json
+        from unittest.mock import AsyncMock
+        s=self.s;s.response_revisions['old']=0;s.response_inputs['old']=s.input_generation-1
+        s.continue_response=True;s.tool_repair={'current':True};socket=SimpleNamespace(send=AsyncMock())
+        await s.tool(socket,dict(call_id='late',name='get_robot_status',arguments='{}',response_id='old'))
+        output=json.loads(json.loads(socket.send.call_args.args[0])['item']['output'])
+        self.assertFalse(output['accepted']);self.assertEqual(output['status'],'stale_user_turn')
+        self.assertTrue(s.continue_response);self.assertEqual(s.tool_repair,{'current':True})
+
     async def test_conflicting_voice_cannot_serve_current_actor_without_confirmed_image(self):
         from vivis.interaction.message_lane import StaleMessageTurn
         s=self.s
