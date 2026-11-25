@@ -12,7 +12,7 @@ from vivis.paths import ROOT
 from vivis.interaction.continuity import RoundStore
 from vivis.interaction.review_data import ReviewData
 from vivis.speech.speaker_gallery import read_gallery,edit_reference
-from vivis.speech.speaker_import import import_rounds
+from vivis.speech.speaker_import import import_rounds,import_separately
 from vivis.speech.speaker_observation import SpeakerObserver
 
 
@@ -100,6 +100,30 @@ class SpeakerImportTests(unittest.TestCase):
         self.run_import([rid],confirmed=True)
         state,_=ReviewData(self.root).snapshot();p=next(p for p in state['people'] if p['id']=='heyude')
         self.assertTrue(next(r for r in p['rounds'] if r['id']==rid)['used_for_voice'])
+
+    def test_two_selected_long_recordings_can_make_two_candidates_without_merging(self):
+        first,_=self.make_round(6.5,session='first_visit');second,_=self.make_round(6.5,session='second_visit')
+        with self.assertRaisesRegex(ValueError,'同一次来访'):self.run_import([first,second],confirmed=True)
+        result=import_separately(self.root,'heyude',[first,second],0,confirmed=True,extractor=lambda x:[1.,0.])
+        self.assertEqual(result['saved_count'],2);self.assertEqual(result['failed_count'],0)
+        rows=read_gallery(self.gallery,self.c['sha256'])['people']['heyude']
+        self.assertEqual(len(rows),2);self.assertTrue(all(not r['active'] for r in rows))
+        retry=import_separately(self.root,'heyude',[first,second],2,confirmed=True,extractor=lambda x:[1.,0.])
+        self.assertEqual(retry['existing_count'],2);self.assertEqual(retry['saved_count'],0)
+
+    def test_one_short_failure_does_not_discard_another_valid_selected_recording(self):
+        first,_=self.make_round(.5);second,_=self.make_round(2)
+        result=import_separately(self.root,'heyude',[first,second],0,confirmed=True,extractor=lambda x:[1.,0.])
+        self.assertTrue(result['partial']);self.assertEqual(result['saved_count'],1);self.assertEqual(result['failed_count'],1)
+        self.assertFalse(result['items'][0]['ok']);self.assertTrue(result['items'][1]['ok'])
+        self.assertEqual(len(read_gallery(self.gallery,self.c['sha256'])['people']['heyude']),1)
+
+    def test_near_threshold_rejection_shows_distinguishable_numbers_without_relaxing_gate(self):
+        rid,_=self.make_round(6)
+        similarity=.5995825529;vectors=iter([[1.,0.],[similarity,np.sqrt(1-similarity**2)]])
+        with self.assertRaisesRegex(ValueError,'0.5996低于0.6000'):
+            import_rounds(self.root,'heyude',[rid],0,confirmed=True,extractor=lambda x:next(vectors))
+        self.assertFalse(self.gallery.exists())
 
 
 if __name__=='__main__':unittest.main()

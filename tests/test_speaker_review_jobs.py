@@ -32,6 +32,18 @@ class VoiceImportJobsTests(unittest.TestCase):
             result=self.jobs.start({});self.jobs.job.wait(2)
         self.assertEqual(self.jobs.get(result['job_id'])['state'],'failed')
         self.assertFalse(self.jobs.get(result['job_id'])['ok'])
+        restored=VoiceImportJobs(self.jobs.root);self.addCleanup(restored.close)
+        self.assertEqual(restored.get(result['job_id'])['error'],'录音混说')
+
+    def test_history_is_bounded_and_survives_restart_without_replaying_running_import(self):
+        for i in range(40):self.jobs.reject(dict(person='heyude',round_ids=[str(i)]),'有效发声不足')
+        self.assertEqual(len(self.jobs.snapshot()),32)
+        with self.jobs.lock:
+            self.jobs.rows['pending']=dict(id='pending',state='running',person='heyude')
+            self.jobs.trim();self.jobs.persist()
+        restored=VoiceImportJobs(self.jobs.root);self.addCleanup(restored.close)
+        self.assertEqual(restored.get('pending')['state'],'unconfirmed')
+        self.assertFalse(restored.get('pending')['ok'])
 
 
 if __name__=='__main__':unittest.main()

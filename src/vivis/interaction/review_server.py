@@ -49,6 +49,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
             if self.path=='/':return self.send_body(200,self.server.page,'text/html; charset=utf-8')
             if self.path=='/api/state':
                 state,media=self.server.data.snapshot();self.server.media=media;state['token']=self.server.token
+                state['voice_imports']=self.server.imports.snapshot()
                 return self.send_body(200,state)
             if re.fullmatch(r'/api/import/[a-f0-9]{32}',self.path):
                 return self.send_body(200,self.server.imports.get(self.path.rsplit('/',1)[-1]))
@@ -91,6 +92,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self.send_body(403,dict(error='请在本机审核页操作并刷新页面'))
         if self.path not in ('/api/action','/api/import'):return self.send_body(404,dict(error='操作不存在'))
         if self.headers.get_content_type()!='application/json':return self.send_body(415,dict(error='需要JSON请求'))
+        request=None
         try:
             length=int(self.headers.get('Content-Length','0'))
             if not 0<length<=8192:raise ValueError('请求大小无效')
@@ -101,7 +103,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self.send_body(202,result)
             return self.send_body(200,self.server.data.apply(request))
         except (SpeakerConflict,PhotoConflict) as exc:return self.send_body(409,dict(error=str(exc)))
-        except (OSError,ValueError,KeyError,TypeError,sqlite3.Error) as exc:return self.send_body(400,dict(error=str(exc)))
+        except (OSError,ValueError,KeyError,TypeError,sqlite3.Error) as exc:
+            if self.path=='/api/import':self.server.imports.reject(request,str(exc))
+            return self.send_body(400,dict(error=str(exc)))
 
 
 def main():

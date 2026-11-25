@@ -34,7 +34,7 @@ def read_pcm(path):
     return pcm
 
 
-def round_sources(root,ids):
+def round_sources(root,ids,*,same_visit=True):
     if not isinstance(ids,list) or not 1<=len(ids)<=32 or len(set(ids))!=len(ids):raise ValueError('请选择1至32条不重复的原话轮')
     for rid in ids:sample_key(rid)
     c=json.loads((Path(root)/'configs/interaction/continuity.json').read_text())
@@ -50,7 +50,7 @@ def round_sources(root,ids):
             rows.append(dict(row))
     finally:db.close()
     # A manual short-speech group still belongs to one visit, not mixed visitors.
-    if len({r['session'] for r in rows})!=1:raise ValueError('合并短句须来自同一次来访，请分次选择')
+    if same_visit and len({r['session'] for r in rows})!=1:raise ValueError('合并短句须来自同一次来访，请分次选择')
     rows.sort(key=lambda r:(r['created'],r['id']))
     for row in rows:
         row['path']=private_path(root,folder/row['audio'])
@@ -111,8 +111,10 @@ def import_rounds(root,person,ids,revision,*,confirmed=False,prepare=False,extra
     try:
         if len(parts)>1 or len(samples)>=80000:
             windows,detail=consistency_windows(samples,c['minimum_seconds'])
-            if windows is None or float(observer.feature(windows[0])@observer.feature(windows[1]))<CONSISTENCY_THRESHOLD:
-                raise ValueError('分段声音不够一致，可能混说或质量不足，请改选录音')
+            if windows is None:raise ValueError('两个独立片段的有效发声不足，请选择其他录音或补充短句')
+            similarity=float(observer.feature(windows[0])@observer.feature(windows[1]))
+            if similarity<CONSISTENCY_THRESHOLD:
+                raise ValueError(f'分段一致性{similarity:.4f}低于{CONSISTENCY_THRESHOLD:.4f}，未收入候选；这不等于确认混说，请改选录音')
         vector=observer.feature(samples);ranked=[]
         for pid,refs in observer.gallery.items():
             refs=[r for r in refs if r.get('active',True)]
@@ -137,15 +139,47 @@ def import_rounds(root,person,ids,revision,*,confirmed=False,prepare=False,extra
     finally:observer.job.close()
 
 
+def import_separately(root,person,ids,revision,*,confirmed=False,extractor=None):
+    """One selected original produces at most one candidate; failures stay local."""
+    # Validate the entire source list before starting any writes. Independent
+    # recordings may span visits; merging across visits remains prohibited.
+    round_sources(root,ids,same_visit=False)
+    results=[];saved=0;existing=0
+    for rid in ids:
+        try:
+            result=import_rounds(root,person,[rid],revision,confirmed=confirmed,extractor=extractor)
+            results.append(dict(source_turn_id=rid,**result))
+            if result.get('already_saved'):existing+=1
+            else:saved+=1;revision+=1
+        except RevisionConflict:
+            # Do not silently adopt an unrelated administrator's new revision.
+            for remaining in ids[len(results):]:results.append(dict(source_turn_id=remaining,ok=False,error='样本清单已变化，请刷新后重试；已保存部分保留。'))
+            break
+        except Exception as exc:
+            error=str(exc) if isinstance(exc,(ValueError,OSError,sqlite3.Error)) else '声纹检查未完成：'+type(exc).__name__
+            results.append(dict(source_turn_id=rid,ok=False,error=error))
+    failed=sum(not r['ok'] for r in results)
+    message=f'逐条选样完成：新保存{saved}条候选，已有{existing}条未重复，{failed}条未保存。'
+    if saved:message+='新候选尚未激活，请试听核对后激活并锁定。'
+    return dict(ok=bool(saved or existing),partial=bool(failed and (saved or existing)),
+        saved_count=saved,existing_count=existing,failed_count=failed,items=results,
+        message=message,error=message if failed and not(saved or existing) else None)
+
+
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path,required=True)
     p.add_argument('--prepare',action='store_true',help='只准备未激活候选，不能宣称管理员已试听')
     a=p.parse_args()
     try:
         request=json.loads(sys.stdin.read(8193))
-        if set(request)-{'person','round_ids','revision','confirmed'}:raise ValueError('导入字段不正确')
-        result=import_rounds(a.root,request['person'],request['round_ids'],request['revision'],
-            confirmed=request.get('confirmed') is True,prepare=a.prepare)
+        if set(request)-{'person','round_ids','revision','confirmed','mode'}:raise ValueError('导入字段不正确')
+        mode=request.get('mode','merge')
+        if mode=='separate' and not a.prepare:
+            result=import_separately(a.root,request['person'],request['round_ids'],request['revision'],confirmed=request.get('confirmed') is True)
+        elif mode=='merge':
+            result=import_rounds(a.root,request['person'],request['round_ids'],request['revision'],
+                confirmed=request.get('confirmed') is True,prepare=a.prepare)
+        else:raise ValueError('无效选样模式')
     except Exception as exc:result=dict(ok=False,error=str(exc) if isinstance(exc,(ValueError,OSError,sqlite3.Error)) else '声纹处理失败：'+type(exc).__name__)
     print(json.dumps(result,ensure_ascii=False))
     return 0 if result['ok'] else 1

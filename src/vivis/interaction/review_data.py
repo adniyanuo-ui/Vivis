@@ -94,13 +94,15 @@ class ReviewData:
         return dict(people=people),media
 
     def voice_import_request(self,request):
-        if (not isinstance(request,dict) or set(request)!={'person','round_ids','revision','confirmed'}
+        fields={'person','round_ids','revision','confirmed'}
+        if (not isinstance(request,dict) or not fields<=set(request) or set(request)-fields-{'mode'}
                 or request['confirmed'] is not True or type(request['revision']) is not int or request['revision']<0):
             raise ValueError('请先试听并确认录音身份，再收入候选')
+        if request.get('mode','merge') not in ('merge','separate'):raise ValueError('无效选样模式')
         self.person_folder(request['person'])
         from vivis.speech.speaker_import import round_sources
         # Reads source metadata only; model work runs in a separate bounded process.
-        round_sources(self.root,request['round_ids'])
+        round_sources(self.root,request['round_ids'],same_visit=request.get('mode','merge')=='merge')
         return dict(request)
 
     def apply(self,request):

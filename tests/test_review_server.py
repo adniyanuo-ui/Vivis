@@ -53,6 +53,15 @@ class ReviewServerTests(unittest.TestCase):
         self.assertEqual(before,self.gallery.read_bytes());self.assertNotIn('vector',json.dumps(data))
         status,_,page=self.request('/');self.assertEqual(status,200);self.assertIn(b'textContent',page);self.assertNotIn(b'innerHTML',page)
 
+    def test_state_returns_all_thirty_two_voices_without_ten_sample_cap(self):
+        gallery=json.loads(self.gallery.read_text())
+        for i in range(3,32):
+            gallery['people']['heyude'].append(dict(turn_id=str(i),vector=[1.,0.],active=i<16))
+            (self.speaker/'heyude'/f'{i}.wav').write_bytes(b'RIFF0123456789')
+        self.gallery.write_text(json.dumps(gallery))
+        rows=self.state()['people'][0]['voices']
+        self.assertEqual(len(rows),32);self.assertEqual(sum(r['active'] for r in rows),16)
+
     def test_photo_deactivation_activation_and_stale_revision(self):
         self.assertEqual(self.action('photo',self.hashes[1],'deactivate',1)[0],200)
         self.assertEqual(self.action('photo',self.hashes[16],'activate',1)[0],409)
@@ -107,6 +116,9 @@ class ReviewServerTests(unittest.TestCase):
     def test_import_without_confirmation_and_cross_origin_are_rejected(self):
         request=dict(person='heyude',round_ids=['source'],revision=0,confirmed=False)
         self.assertEqual(self.request('/api/import','POST',request)[0],400)
+        receipt=self.state()['voice_imports'][0]
+        self.assertEqual(receipt['person'],'heyude');self.assertEqual(receipt['state'],'failed')
+        self.assertIn('试听',receipt['error'])
         self.assertEqual(self.request('/api/import','POST',request,{'Origin':'https://example.com'})[0],403)
 
 

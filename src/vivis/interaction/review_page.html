@@ -25,12 +25,13 @@ async function act(person,kind,row,action){
  catch(e){notice='连接未确认，请刷新清单核对；不要把网络失败当作保存成功。';}
  finally{busy=false;await load();$('#status').textContent=notice;}
 }
-async function importVoice(person,ids){
+async function importVoice(person,ids,mode='merge'){
  if(!person){$('#status').textContent='请先选择已试听确认的熟人；原始聊天归属保持不变。';return;}
  if(busy||!ids.length)return;
- if(!confirm('已试听，确认所选'+ids.length+'轮均为'+person.name+'单独说话，没有旁人混说或明显机器人回声？这些原音保持不变，将另存一条未激活候选。'))return;
+ const plan=mode==='separate'?'逐条检查，每轮最多生成一条候选，失败会逐条说明。':'将合并生成一条候选。';
+ if(!confirm('已试听，确认所选'+ids.length+'轮均为'+person.name+'单独说话，没有旁人混说或明显机器人回声？原音保持不变；'+plan))return;
  busy=true;document.querySelectorAll('button').forEach(b=>b.disabled=true);$('#status').textContent='正在提交选样，尚未保存…';let notice='';
- try{const r=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json','X-Vivis-Review-Token':snapshot.token},body:JSON.stringify({person:person.id,round_ids:ids,revision:person.voice_revision,confirmed:true})});const data=await r.json();if(!r.ok)throw new Error(data.error);
+ try{const r=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json','X-Vivis-Review-Token':snapshot.token},body:JSON.stringify({person:person.id,round_ids:ids,revision:person.voice_revision,confirmed:true,mode})});const data=await r.json();if(!r.ok)throw new Error(data.error);
   $('#status').textContent=data.message;
   for(let i=0;i<130;i++){await new Promise(resolve=>setTimeout(resolve,1000));const response=await fetch('/api/import/'+data.job_id,{cache:'no-store'}),state=await response.json();if(!response.ok)throw new Error(state.error);if(state.state!=='running'){notice=state.ok?state.message:state.error;break;}}
   if(!notice)notice='处理结果尚未确认，请刷新候选库核对；同一原话不会重复添加。';
@@ -56,17 +57,20 @@ function render(){const main=$('#people'),nav=$('#nav');main.replaceChildren();n
  if(person.id!=='other')section.append(el('p','照片 '+person.photos.length+'/32；活动 '+person.photos.filter(r=>r.active).length+'/16；声纹 '+person.voices.length+'/32；参与匹配 '+person.voices.filter(r=>r.active).length+' 段。'));
  if(person.id!=='other'){
  for(const active of [true,false]){const rows=person.photos.filter(r=>r.active===active);section.append(el('h3',(active?'活动照片':'候选照片')+'（'+rows.length+'）'));const grid=el('div',undefined,'grid');for(const row of rows)grid.append(photoCard(person,row));section.append(grid);}
- section.append(el('h3','声纹参考录音'));const voices=el('div',undefined,'grid');for(const row of person.voices)voices.append(voiceCard(person,row));section.append(voices);
+ section.append(el('h3','声纹参考录音 · 总计'+person.voices.length+'/32'));
+ for(const active of [true,false]){const rows=person.voices.filter(r=>r.active===active);section.append(el('h3',(active?'已激活、参与识别':'候选／停用、未参与识别')+'（'+rows.length+'条）'));const voices=el('div',undefined,'grid');for(const row of rows)voices.append(voiceCard(person,row));section.append(voices);if(!rows.length)section.append(el('p',active?'暂无活动声音':'暂无未激活候选；未通过选样校验的录音不会进入此处。','muted'));}
+ const receipts=(snapshot.voice_imports||[]).filter(r=>r.person===person.id);
+ if(receipts.length){const history=el('details');history.open=true;history.append(el('summary','最近选样结果（'+receipts.length+'次）'));for(const row of receipts){const state=row.state==='running'?'检查中':row.state==='complete'?'成功':row.state==='partial'?'部分保存':row.state==='unconfirmed'?'尚未确认':'未保存';history.append(el('p',new Date(row.created*1000).toLocaleString()+' · '+(row.source_turn_ids||[]).length+'轮原话 → '+state+'：'+(row.error||row.message||''),row.state==='failed'||row.state==='partial'?'candidate':'muted'));for(const item of row.items||[]){const original=person.rounds.find(r=>r.id===item.source_turn_id),label=original?original.user_text:item.source_turn_id;history.append(el('p','原话“'+label+'”：'+(item.ok?item.already_saved?'已存在，未重复':'候选已保存':item.error),'muted'));}}section.append(history);}
  if(!person.voices.length)section.append(el('p','尚无合格参考。普通聊天录音在下方；不能直接当作可靠声纹。','muted'));
  }
  const details=el('details');details.append(el('summary','近期完整音文（最近'+person.rounds.length+'轮，可试听选样）'));
  details.append(el('p','原始聊天记录不修改。勾选同次来访的短句可合成一条候选：至少1.5秒有效发声、最多12秒音频；单条合格录音可直接收入候选。','muted'));
- const selected=new Set(),merge=el('button','将勾选短句合成一条候选'),target=el('select');
+ const selected=new Set(),merge=el('button','合并短句为一条候选'),separate=el('button','逐条收入候选'),target=el('select'),selection=el('p','已勾选0轮。逐条加入：每轮独立生成候选；合并短句：多轮只生成1条。','muted');details.append(selection);
  if(person.id==='other'){target.append(el('option','请选择实际说话的熟人'));for(const p of snapshot.people.filter(p=>p.id!=='other')){const option=el('option',p.name);option.value=p.id;target.append(option);}details.append(el('p','管理员可试听后把声音登记给选定熟人，原始聊天记录仍留在other，不回写业务身份。','muted'),target);}
  const selectedPerson=()=>person.id==='other'?snapshot.people.find(p=>p.id===target.value&&p.id!=='other'):person;
- merge.onclick=()=>importVoice(selectedPerson(),[...selected]);details.append(merge);
+ merge.onclick=()=>importVoice(selectedPerson(),[...selected],'merge');separate.onclick=()=>importVoice(selectedPerson(),[...selected],'separate');details.append(separate,merge);
  for(const r of person.rounds){const article=el('article');article.append(el('p',r.created+' · '+r.outcome,'muted'),el('p','用户：'+(r.user_text||'尚无定稿文字')),player(r.media));
- if(r.selectable&&r.media&&!r.used_for_voice){const label=el('label'),check=el('input');check.type='checkbox';check.onchange=()=>check.checked?selected.add(r.id):selected.delete(r.id);label.append(check,document.createTextNode(' 选择这句用户原音 '));const b=el('button','收入声纹候选');b.onclick=()=>importVoice(selectedPerson(),[r.id]);article.append(label,b);}
+ if(r.selectable&&r.media&&!r.used_for_voice){const label=el('label'),check=el('input');check.type='checkbox';check.onchange=()=>{if(check.checked)selected.add(r.id);else selected.delete(r.id);selection.textContent='已勾选'+selected.size+'轮；逐条加入最多生成'+selected.size+'条，合并短句只生成1条。';};label.append(check,document.createTextNode(' 选择这句用户原音 '));const b=el('button','收入声纹候选');b.onclick=()=>importVoice(selectedPerson(),[r.id]);article.append(label,b);}
  else article.append(el('p',r.used_for_voice?'该原话已用于声纹，不能重复选样':'该原话未结束、录音不完整或文件缺失，不能选样','muted'));
  for(const reply of r.replies)article.append(el('p','小帅：'+(reply.text||'未取得回答文字')+' · '+reply.outcome),player(reply.media));details.append(article);}
  section.append(details);main.append(section);
