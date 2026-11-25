@@ -101,11 +101,11 @@ class SpeakerTests(unittest.TestCase):
         for pcm,far in [(bytes(100),bytes(100)),(bytes(96000),bytes(96000)),(b'\xff\x7f'*48000,bytes(96000)),(self.pcm,self.pcm)]:
             self.assertIsNone(audio_quality(pcm,far)[0])
 
-    def test_effective_speech_threshold_is_point_six_seconds(self):
+    def test_effective_speech_threshold_is_point_five_seconds(self):
         # Total WAV duration includes silence; admission counts energized20ms frames.
         frame=np.rint(np.sin(np.arange(320)*.1)*3000).astype('<i2').tobytes()
-        self.assertEqual(self.c['minimum_seconds'],.6)
-        for frames,expected in ((29,'insufficient_speech'),(30,'accepted')):
+        self.assertEqual(self.c['minimum_seconds'],.5)
+        for frames,expected in ((24,'insufficient_speech'),(25,'accepted')):
             pcm=bytes(16000)+frame*frames+bytes(16000)
             statistics={};_,reason=audio_quality(pcm,bytes(len(pcm)),self.c['minimum_seconds'],statistics)
             self.assertEqual(reason,expected)
@@ -113,8 +113,8 @@ class SpeakerTests(unittest.TestCase):
         pcm=frame*50
         self.assertEqual(audio_quality(pcm,bytes(len(pcm)),1.5)[1],'too_short')
 
-    def test_sub_point_six_configuration_is_rejected(self):
-        for value in (.59,0):
+    def test_sub_point_five_configuration_is_rejected(self):
+        for value in (.49,0):
             with self.assertRaises(ValueError):
                 SpeakerObserver(dict(self.c,minimum_seconds=value),Path(self.tmp.name),self.events.append,lambda *a,**kw:None)
 

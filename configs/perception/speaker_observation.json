@@ -10,8 +10,8 @@
   "suspect_threshold": 0.45,
   "enrollment_samples": 3,
   "maximum_samples": 32,
-  "minimum_seconds": 0.6,
-  "consistency_window_mode": "speech_aligned",
+  "minimum_seconds": 0.5,
+  "consistency_window_mode": "speech_coverage",
   "short_recognition": {
     "enabled": true,
     "minimum_fragment_s": 0.2,

@@ -67,37 +67,9 @@ class ShortSpeechCollector:
 
     def fragments(self,pcm,far,ranges,reference_end_aligned=False):
         """Exclude robot-output frames/tails; retain source ranges and speech context."""
-        from vivis.speech.speaker_observation import audio_quality
-        x=np.frombuffer(pcm,dtype='<i2').astype(np.float32)/32768
-        ref=np.frombuffer(far,dtype='<i2').astype(np.float32)/32768
-        missing=0
-        if len(ref)!=len(x):
-            if not reference_end_aligned:return [],'reference_alignment_unavailable'
-            missing=max(0,len(x)-len(ref))
-            # The recorder explicitly aligns reference to the server endpoint.
-            # Missing prefix is excluded, never invented as silent reference.
-            ref=np.r_[np.zeros(missing,np.float32),ref][-len(x):]
-        result=[];pad=round(self.c['padding_ms']*16)
-        for span in ranges:
-            left=max(missing,0,round(span['start_s']*16000));right=min(len(x),round(span['end_s']*16000))
-            n=(right-left)//320
-            if n<=0:continue
-            power=np.sqrt(np.mean(ref[left:left+n*320].reshape(-1,320)**2,axis=1))
-            bad=power>.004
-            for offset in range(1,6):bad[offset:]|=(power[:-offset]>.004);bad[:-offset]|=(power[offset:]>.004)
-            allowed=~bad;edges=np.diff(np.r_[False,allowed,False].astype(int))
-            for a,b in zip(np.flatnonzero(edges==1),np.flatnonzero(edges==-1)):
-                i=left+int(a)*320;j=left+int(b)*320
-                reference_pcm=np.rint(ref[i:j]*32768).astype('<i2').tobytes()
-                stats={};samples,reason=audio_quality(pcm[i*2:j*2],reference_pcm,self.c['minimum_fragment_s'],stats)
-                if samples is None:continue
-                energy=np.sqrt(np.mean(x[i:j].reshape(-1,320)**2,axis=1));v=np.flatnonzero(energy>.01)
-                if not len(v):continue
-                begin=max(i,i+int(v[0])*320-pad);end=min(j,i+(int(v[-1])+1)*320+pad)
-                result.append(dict(samples=x[begin:end].copy(),effective_s=stats['effective_speech_s'],
-                    start_sample=begin,end_sample=end,visual_stamp=span.get('visual_stamp'),
-                    visual_stamps=span.get('visual_stamps',[]),proof=span.get('proof','confirmed_frame')))
-        return result,None
+        from vivis.speech.speaker_segments import clean_fragments
+        return clean_fragments(pcm,far,ranges,minimum_fragment_s=self.c['minimum_fragment_s'],
+            padding_ms=self.c['padding_ms'],reference_end_aligned=reference_end_aligned)
 
     def accept(self,pcm,far,source,query,current_epoch,maximum,existing_ids,now=None):
         now=time.monotonic() if now is None else now

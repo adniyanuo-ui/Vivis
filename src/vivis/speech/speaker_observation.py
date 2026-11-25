@@ -12,6 +12,7 @@ import wave
 import numpy as np
 
 from vivis.runtime.best_effort import BestEffortJob
+from vivis.speech.speaker_segments import PLAYBACK_RMS
 
 CONSISTENCY_THRESHOLD=.6
 
@@ -37,12 +38,12 @@ def audio_quality(pcm,far,minimum_seconds=0.6,statistics=None):
     if speech_s<minimum_seconds:return None,'insufficient_speech'
     # Enrollment/observation during strong robot playback is deliberately skipped
     # even with AEC: one visible face does not prove whose voice remains.
-    if len(ref) and float(np.sqrt(np.mean(ref*ref)))>.004:return None,'robot_playback'
+    if len(ref) and float(np.sqrt(np.mean(ref*ref)))>PLAYBACK_RMS:return None,'robot_playback'
     return x[-192000:],'accepted'
 
 
-def consistency_windows(samples,minimum_seconds):
-    """Two non-overlapping voiced-edge windows, never two copies of one short word.
+def consistency_windows(samples,minimum_seconds,mode='speech_aligned'):
+    """Independent voiced windows, never two copies of one short word.
 
     Only the consistency probes move. The main query embedding and stored WAV
     retain their original samples and the same gallery/model contract.
@@ -50,6 +51,34 @@ def consistency_windows(samples,minimum_seconds):
     energy=np.sqrt(np.mean(samples[:len(samples)//320*320].reshape(-1,320)**2,axis=1))
     voiced=np.flatnonzero(energy>.01)
     if not len(voiced):return None,dict(reason='no_voiced_frames')
+    if mode=='speech_coverage':
+        # Split by voiced evidence BEFORE extracting any embeddings. No gallery
+        # score can cherry-pick a convenient speaker or skip the middle of a clip.
+        required=int(np.ceil(minimum_seconds/.02-1e-9))
+        # Two complementary probes keep enough phonetic context for CAM++.
+        # Three shorter probes over-rejected normal speakers in held-out replay.
+        count=2
+        if len(voiced)<count*required:return None,dict(reason='insufficient_independent_speech')
+        groups=np.array_split(voiced,count)
+        edges=[max(0,int(voiced[0])-5)]
+        edges.extend((int(groups[i][-1])+int(groups[i+1][0])+1)//2 for i in range(count-1))
+        edges.append(min(len(energy),int(voiced[-1])+6))
+        windows=[];probes=[]
+        for i in range(count):
+            first,last=edges[i:i+2];size=min(125,last-first)
+            if size<1:return None,dict(reason='window_too_short')
+            mask=(energy[first:last]>.01).astype(int)
+            sums=np.convolve(mask,np.ones(size,dtype=int),mode='valid')
+            starts=np.flatnonzero(sums==sums.max())
+            # Prefer the temporal center among equally speech-rich windows.
+            offset=int(starts[np.argmin(np.abs(starts-(last-first-size)/2))])
+            a=(first+offset)*320;b=a+size*320;effective=float(sums[offset]*.02)
+            probes.append(dict(start_sample=a,end_sample=b,effective_s=effective))
+            windows.append(samples[a:b])
+        evidence=dict(probes=probes,left_speech_s=probes[0]['effective_s'],right_speech_s=probes[-1]['effective_s'])
+        if any(p['effective_s']+1e-9<minimum_seconds for p in probes):
+            return None,dict(evidence,reason='insufficient_independent_speech')
+        return tuple(windows),evidence
     start=max(0,int(voiced[0])*320-1600);end=min(len(samples),(int(voiced[-1])+1)*320+1600)
     size=min(40000,(end-start)//2)
     if size<320:return None,dict(reason='window_too_short')
@@ -78,8 +107,8 @@ class SpeakerObserver:
         if (c.get('observation_only') is not True or not .3<=c.get('threshold',0)<=.95
                 or not .01<=c.get('minimum_margin',0)<=.5
                 or not 3<=c.get('enrollment_samples',0)<=c.get('maximum_samples',0)<=32
-                or not .6<=c.get('minimum_seconds',0)<=12
-                or c.get('consistency_window_mode','fixed') not in ('fixed','speech_aligned')):raise ValueError('Invalid speaker observation policy')
+                or not .5<=c.get('minimum_seconds',0)<=12
+                or c.get('consistency_window_mode','fixed') not in ('fixed','speech_aligned','speech_coverage')):raise ValueError('Invalid speaker observation policy')
         weak=c.get('suspect_threshold',c['threshold'])
         if type(weak) not in (int,float) or not np.isfinite(weak) or not 0<=weak<=c['threshold']:
             raise ValueError('Invalid speaker suspect threshold')
@@ -164,9 +193,22 @@ class SpeakerObserver:
             sampling_conflict=clip.get('sampling_conflict',False))
         if self.collector:
             source.update(_collection_managed=True,_sampling_ranges=clip.get('sampling_ranges',[]),
-                _sampling_conflict=clip.get('sampling_conflict',False),_reference_end_aligned=True,
-                _source_start=clip.get('speaker_start',clip.get('start')))
+                _sampling_conflict=clip.get('sampling_conflict',False))
+        source.update(_reference_end_aligned=True,_source_start=clip.get('speaker_start',clip.get('start')))
         return self.job.offer(self.infer,pcm,far,source)
+
+    def check_consistency(self,samples,*,independent=False):
+        mode=self.c.get('consistency_window_mode','fixed')
+        if independent and mode=='fixed':mode='speech_aligned'
+        if mode=='fixed':windows,evidence=(samples[:40000],samples[-40000:]),{}
+        else:windows,evidence=consistency_windows(samples,self.c['minimum_seconds'],mode)
+        detail=dict(mode=mode,threshold=CONSISTENCY_THRESHOLD,**evidence)
+        if not windows:return None,dict(detail,similarity=None)
+        vectors=[self.feature(part) for part in windows]
+        pairs=[dict(left=i,right=j,similarity=float(vectors[i]@vectors[j]))
+            for i in range(len(vectors)) for j in range(i+1,len(vectors))]
+        similarity=min(p['similarity'] for p in pairs)
+        return similarity,dict(detail,similarity=similarity,pairs=pairs)
 
     def set_collection_epoch(self,epoch):self.collection_epoch=epoch
 
@@ -191,11 +233,11 @@ class SpeakerObserver:
         result['identity_evidence']=self._identity_evidence(result,source)
         window=self.recognition_window
         if not window:return
+        if result.get('recognition_audio_error'):window.clear();return
         if result['identity_evidence']['state']=='confirmed':window.clear();return
         group=window.add(pcm,far,source,result,self.audio_epoch)
         if not group:return
-        samples=group['samples'];windows,detail=consistency_windows(samples,self.c['minimum_seconds'])
-        similarity=float(self.feature(windows[0])@self.feature(windows[1])) if windows else None
+        samples=group['samples'];similarity,detail=self.check_consistency(samples,independent=True)
         result['window_match']=dict(source_turn_ids=group['source_turn_ids'],
             effective_speech_s=group['effective_speech_s'],consistency=similarity,**detail)
         if similarity is None or similarity<CONSISTENCY_THRESHOLD:window.defer();return
@@ -258,8 +300,8 @@ class SpeakerObserver:
             pid=group['person_id'];samples=group['samples'];vector=self.feature(samples)
             # A composite reference must contain two independent, consistent speech portions.
             if len(group['metadata']['source_turn_ids'])>1 or len(samples)>=80000:
-                windows,evidence=consistency_windows(samples,self.c['minimum_seconds'])
-                if windows is None or float(self.feature(windows[0])@self.feature(windows[1]))<CONSISTENCY_THRESHOLD:
+                similarity,_=self.check_consistency(samples,independent=True)
+                if similarity is None or similarity<CONSISTENCY_THRESHOLD:
                     self.collector.defer()
                     self.results.put(dict(collection_event=True,status='voice_inconsistent',person_id=pid));return
             rows=self.gallery.get(pid,[]);active=[r for r in rows if r.get('active',True)]
@@ -291,8 +333,20 @@ class SpeakerObserver:
             audio_quality_accepted=False,reference_sample_saved=False,enrollment_skip_reason=None,
             best_candidate=None,score_threshold=self.c['threshold'],minimum_margin=self.c['minimum_margin'],
             recognition_reason='quality_rejected')
+        query_pcm,query_far=pcm,far
         try:
-            statistics={};samples,reason=audio_quality(pcm,far,self.c['minimum_seconds'],statistics)
+            # Reject clipping before removing playback; do not conceal distortion
+            # by selecting only the quieter part of an already clipped recording.
+            if len(pcm) and np.mean(np.abs(np.frombuffer(pcm,dtype='<i2').astype(np.float32)/32768)>.98)>.005:
+                result['reason']='clipping';return
+            from vivis.speech.speaker_segments import recognition_audio
+            query_pcm,query_far,detail,error=recognition_audio(pcm,far,
+                minimum_fragment_s=(self.c.get('short_recognition') or {}).get('minimum_fragment_s',.2),
+                reference_end_aligned=source.get('_reference_end_aligned',False))
+            if detail:result['recognition_segments']=detail
+            if error:
+                result.update(reason=error,recognition_audio_error=error);return
+            statistics={};samples,reason=audio_quality(query_pcm,query_far,self.c['minimum_seconds'],statistics)
             result.update(reason=reason,audio_quality=statistics)
             if samples is None:return
             result['audio_quality_accepted']=True
@@ -316,15 +370,11 @@ class SpeakerObserver:
             else:result['recognition_reason']='insufficient_reference_samples'
             # Matching diagnostics may be computed now, but no identity candidate
             # is published until independent-speaker consistency also passes.
-            if len(samples)>=80000:
-                mode=self.c.get('consistency_window_mode','fixed')
-                if mode=='speech_aligned':windows,evidence=consistency_windows(samples,self.c['minimum_seconds'])
-                else:windows,evidence=(samples[:40000],samples[-40000:]),{}
-                result['consistency']=dict(mode=mode,threshold=CONSISTENCY_THRESHOLD,**evidence)
-                similarity=float(self.feature(windows[0])@self.feature(windows[1])) if windows else None
-                result['consistency']['similarity']=similarity
+            if len(samples)>=80000 or len(detail.get('clean_fragments',[]))>1:
+                similarity,result['consistency']=self.check_consistency(samples,independent=len(samples)<80000)
                 if similarity is None or similarity<CONSISTENCY_THRESHOLD:
-                    result.update(reason='mixed_or_unstable_speech',recognition_reason='consistency_rejected');return
+                    result.update(reason='mixed_or_unstable_speech' if similarity is not None else 'insufficient_independent_speech',
+                        recognition_reason='consistency_rejected');return
             if result['recognition_reason']=='matched':result['speaker_candidate']=result['best_candidate']
             person=source['visual_person']
             if not source.get('_collection_managed') and source['enrollment_allowed'] and person and person==source['logical_person']:
@@ -338,18 +388,22 @@ class SpeakerObserver:
                 if len(rows)>=self.c['maximum_samples']:
                     result['reason']='reference_pool_full';return
                 if not any(row['turn_id']==source['turn_id'] for row in rows):
-                    saved=self._store_reference(person,samples,vector,source['turn_id'],source['session'],
-                        dict(origin='automatic_visual',source_turn_ids=[source['turn_id']],own_similarity=own_score,
-                            candidate_reason='different_from_existing_references' if candidate else None),active=not candidate)
+                    metadata=dict(origin='automatic_visual',source_turn_ids=[source['turn_id']],own_similarity=own_score,
+                        candidate_reason='different_from_existing_references' if candidate else None)
+                    if detail.get('clean_fragments'):
+                        metadata['source_fragments']=[dict(f,turn_id=source['turn_id']) for f in detail['clean_fragments']]
+                    saved=self._store_reference(person,samples,vector,source['turn_id'],source['session'],metadata,active=not candidate)
                     if not saved:return
                     result['enrollment_samples']=len(self.gallery[person])
                     result['reference_collection_complete']=len(self.gallery[person])>=self.c['maximum_samples']
                     result['reference_sample_saved']=True
                     result['reference_sample_active']=not candidate
                     if len(self.gallery[person])<self.c['enrollment_samples']:result['reason']='collecting_reference_samples'
-        except Exception as exc:result['reason']='speaker_unavailable:'+type(exc).__name__
+        except Exception as exc:
+            result['reason']='speaker_unavailable:'+type(exc).__name__
+            if not result['speaker_candidate']:result['recognition_reason']='processing_failed'
         finally:
-            try:self._enrich_recognition(pcm,far,source,result)
+            try:self._enrich_recognition(query_pcm,query_far,source,result)
             except Exception as exc:
                 from vivis.interaction.identity_fusion import unavailable
                 result['identity_evidence']=unavailable('recognition_window:'+type(exc).__name__)
@@ -392,6 +446,9 @@ class SpeakerObserver:
             if result['reason']=='insufficient_speech':
                 stats=result.get('audio_quality',{});effective=stats.get('effective_speech_s')
                 if effective is not None:message+=f'；有效发声{effective:.2f}秒，需要{self.c["minimum_seconds"]:.2f}秒'
+            if result.get('recognition_segments'):
+                detail=result['recognition_segments'];count=len(detail['clean_fragments'])
+                message+=f'；已排除自播／缺失回采及保护区{detail["excluded_reference_s"]:.2f}秒，保留{count}段干净声音'
             if result['reason']=='face_voice_conflict':message+='；与该人已有声纹参考不一致，未新增样本'
             decision=result.get('recognition_reason');candidate=name(result.get('best_candidate'))
             if decision=='low_similarity':message+=f'；声纹未确认：候选{candidate}，相似度{result["score"]:.3f}低于{self.c["threshold"]:.3f}'

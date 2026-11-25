@@ -15,7 +15,7 @@ import numpy as np
 
 from vivis.interaction.memory import person_key
 from vivis.speech.speaker_gallery import RevisionConflict,read_gallery,sample_key
-from vivis.speech.speaker_observation import SpeakerObserver,audio_quality,consistency_windows,normalized,CONSISTENCY_THRESHOLD
+from vivis.speech.speaker_observation import SpeakerObserver,audio_quality,normalized,CONSISTENCY_THRESHOLD
 
 
 def private_path(root,path):
@@ -110,9 +110,8 @@ def import_rounds(root,person,ids,revision,*,confirmed=False,prepare=False,extra
     observer=SpeakerObserver(c,root,lambda e:None,lambda *a,**kw:None,extractor=extractor)
     try:
         if len(parts)>1 or len(samples)>=80000:
-            windows,detail=consistency_windows(samples,c['minimum_seconds'])
-            if windows is None:raise ValueError('两个独立片段的有效发声不足，请选择其他录音或补充短句')
-            similarity=float(observer.feature(windows[0])@observer.feature(windows[1]))
+            similarity,_=observer.check_consistency(samples,independent=True)
+            if similarity is None:raise ValueError('独立片段的有效发声不足，请选择其他录音或补充短句')
             if similarity<CONSISTENCY_THRESHOLD:
                 raise ValueError(f'分段一致性{similarity:.4f}低于{CONSISTENCY_THRESHOLD:.4f}，未收入候选；这不等于确认混说，请改选录音')
         vector=observer.feature(samples);ranked=[]
