@@ -25,7 +25,7 @@ class ShortRecognitionTests(unittest.TestCase):
         start=10+i if start is None else start;x=pcm(seconds)
         source=dict(turn_id='turn'+str(i),item_id='item'+str(i),session='visit',logical_person='anonymous',visual_person=None,
             enrollment_allowed=False,_collection_managed=True,_sampling_ranges=[],audio_started=start,audio_ended=start+seconds,
-            sample_epoch=0,voice_context='context',source_generation=i)
+            sample_epoch=0,audio_epoch=0,voice_context='context',source_generation=i)
         source.update(extra);self.s.infer(x,bytes(len(x)),source)
         results=[]
         while not self.s.results.empty():results.append(self.s.results.get())
@@ -46,7 +46,7 @@ class ShortRecognitionTests(unittest.TestCase):
         self.assertNotIn('window_match',result);self.assertIsNone(self.s.recognition_window.batch)
 
     def test_session_epoch_overlap_long_gap_and_source_retry_discard_window(self):
-        for changes in (dict(session='another'),dict(sample_epoch=1),dict(voice_context='new'),dict(audio_started=9,audio_ended=9.4)):
+        for changes in (dict(session='another'),dict(audio_epoch=1),dict(voice_context='new'),dict(audio_started=9,audio_ended=9.4)):
             self.s.recognition_window=ShortRecognitionWindow(self.c['short_recognition'])
             self.feed(0);self.feed(1,**changes)
             batch=self.s.recognition_window.batch
@@ -98,15 +98,22 @@ class ShortRecognitionTests(unittest.TestCase):
 
     def test_no_gallery_is_none_and_robot_playback_cannot_fill_window(self):
         window=self.s.recognition_window;x=pcm(.4)
-        source=dict(turn_id='robot',session='v',audio_started=10,audio_ended=10.4,sample_epoch=0,voice_context='v')
+        source=dict(turn_id='robot',session='v',audio_started=10,audio_ended=10.4,sample_epoch=0,audio_epoch=0,voice_context='v')
         self.assertIsNone(window.add(x,x,source,dict(reason='robot_playback'),0));self.assertIsNone(window.batch)
         self.s.gallery={};self.s.refresh_gallery=lambda:None
         self.assertEqual(self.feed(0,.8)['identity_evidence']['state'],'unavailable')
 
-    def test_recognition_conflict_gate_does_not_depend_on_reference_collection(self):
+    def test_visual_conflict_does_not_block_recognition_window_when_collection_disabled(self):
         self.s.collector=None
-        self.feed(0,sampling_conflict=True)
-        self.assertIsNone(self.s.recognition_window.batch)
+        for i in range(3):self.feed(i,sampling_conflict=True,sample_epoch=i)
+        result=self.feed(3,sampling_conflict=True,sample_epoch=3)
+        self.assertEqual(result['identity_evidence']['state'],'confirmed')
+
+    def test_visual_conflict_still_blocks_enrollment_without_blocking_matching(self):
+        spans=[dict(person_id='alice',epoch=0,start_s=0,end_s=2)]
+        result=self.feed(0,2,_sampling_conflict=True,sampling_conflict=True,_sampling_ranges=spans)
+        self.assertEqual(result['identity_evidence']['state'],'confirmed')
+        self.assertEqual(len(self.s.gallery['alice']),3)
 
     def test_full_reference_pool_keeps_matching_without_new_samples(self):
         for i in range(3,32):self.s._store_reference('alice',np.ones(16000,np.float32)*.1,np.array([1.,0.]),'ref'+str(i),'v')

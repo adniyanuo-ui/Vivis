@@ -231,6 +231,11 @@ class RecorderWitnessTests(unittest.TestCase):
                 recorder.on_sampling_identity(dict(stamp=1.5,person_id='wangrunzhang',confirmed=True,blocked=False,owner='vision'))
                 recorder.offer_speaker(clip)
                 self.assertTrue(recorder.speaker.offer.call_args.args[0]['sampling_conflict'])
+                self.assertEqual(recorder.audio_epoch,0)
+                recorder.on_sampling_identity(dict(stamp=1.6,person_id=None,confirmed=False,blocked=True,owner='vision'))
+                self.assertEqual(recorder.audio_epoch,0)
+                recorder.invalidate_identity_audio()
+                self.assertEqual(recorder.audio_epoch,1)
             finally:recorder.close()
 
 

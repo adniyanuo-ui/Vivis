@@ -26,8 +26,10 @@ class ShortRecognitionWindow:
     def add(self,pcm,far,source,result,current_epoch):
         from vivis.speech.speaker_observation import audio_quality
         turn=source['turn_id'];start=source.get('audio_started');end=source.get('audio_ended')
-        epoch=source.get('sample_epoch');context=(source['session'],source.get('voice_context'),epoch)
-        if (source.get('_sampling_conflict') or source.get('sampling_conflict') or epoch!=current_epoch
+        epoch=source.get('audio_epoch');context=(source['session'],source.get('voice_context'),epoch)
+        # A second visible person is not evidence of simultaneous speech.
+        # Image provenance gates reference enrollment, not independent matching.
+        if (epoch!=current_epoch
                 or result.get('reason') in ('clipping','mixed_or_unstable_speech','robot_playback')):
             self.clear();return None
         if turn in self.used:return None

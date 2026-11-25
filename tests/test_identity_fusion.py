@@ -115,7 +115,7 @@ class FusedVoiceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         self.events=[];self.s=CloudBackendTests().service(temp.name,self.events);self.addCleanup(self.s.log.close)
         self.s.knowledge.people=copy.deepcopy(PEOPLE)
-        self.s.continuity=SimpleNamespace(speaker=None,visual_evidence={},sampling_epoch=0,submit=Mock(),
+        self.s.continuity=SimpleNamespace(speaker=None,visual_evidence={},sampling_epoch=0,audio_epoch=0,submit=Mock(),
             blocked_people=set(),finalized={})
         self.s.init_fused_identity();self.s.context.update(revision=1,mode='interaction',target='interaction',ready=True)
         self.s.enabled=True;self.s.can_speak=Mock(return_value=True);self.s.presence.visible=Mock(return_value=True)
@@ -125,7 +125,7 @@ class FusedVoiceIntegrationTests(unittest.IsolatedAsyncioTestCase):
     def result(self,state='confirmed',person='alice',**kw):
         s=self.s
         return dict(voice_context=s.sync_voice_binding(),session=s.memory_session,item_id=s.turn_item_id,
-            source_generation=s.input_generation,sample_epoch=0,turn_id='original',
+            source_generation=s.input_generation,sample_epoch=0,audio_epoch=0,turn_id='original',
             identity_evidence=evidence(state,person),**kw)
 
     async def test_voice_result_waits_for_next_boundary_and_never_reassigns_original_round(self):
@@ -160,7 +160,7 @@ class FusedVoiceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with patch('time.monotonic',return_value=10):
             s.begin_user_turn('current')
             result=self.result()
-            for key,value in [('item_id','old'),('session','old'),('voice_context','old'),('sample_epoch',1),('source_generation',999)]:
+            for key,value in [('item_id','old'),('session','old'),('voice_context','old'),('audio_epoch',1),('source_generation',999)]:
                 invalid=dict(result);invalid[key]=value;s.accept_speaker_identity(invalid)
                 self.assertIsNone(s.voice_pending)
             s.message_connection=object();s.accept_speaker_identity(result);self.assertIsNone(s.voice_pending)
@@ -176,13 +176,22 @@ class FusedVoiceIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(s.identity_fusion.pairs,[])
             self.assertIsNone(s.voice_pending)
 
-    async def test_invalidated_turn_or_multiple_people_never_apply_voice(self):
+    async def test_invalidated_audio_never_applies_voice(self):
+        s=self.s
+        with patch('time.monotonic',return_value=10):
+            s.begin_user_turn('current')
+            s.accept_speaker_identity(self.result());s.continuity.audio_epoch=1;s.admit_voice_identity()
+            self.assertIsNone(s.identified_person())
+
+    async def test_visual_collection_epoch_and_conflict_do_not_revoke_valid_voice(self):
         s=self.s
         with patch('time.monotonic',return_value=10):
             s.begin_user_turn('current');result=self.result(sampling_conflict=True)
-            s.accept_speaker_identity(result);self.assertIsNone(s.voice_pending)
-            s.accept_speaker_identity(self.result());s.continuity.sampling_epoch=1;s.admit_voice_identity()
-            self.assertIsNone(s.identified_person())
+            s.continuity.sampling_epoch=9
+            s.accept_speaker_identity(result)
+            self.assertIsNotNone(s.voice_pending)
+            s.input_generation+=1;s.begin_user_turn('next')
+            self.assertEqual(s.turn_person,'alice')
 
     async def test_conflicting_voice_cannot_serve_current_actor_without_confirmed_image(self):
         from vivis.interaction.message_lane import StaleMessageTurn

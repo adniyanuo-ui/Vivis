@@ -44,7 +44,7 @@ class RoundRecorder:
         self.contexts={};self.speaker=None;self.previous_round=None;self.invalid_inputs={};self.finished_inputs={}
         self.admissions={};self.finalized={};self.source_keys={};self.blocked_people=set()
         self.sampling_points=deque(maxlen=400);self.sampling_epoch=0;self.sampling_person=None;self.sampling_owner=None
-        self.visual_evidence=None
+        self.visual_evidence=None;self.audio_epoch=0
         from vivis.runtime.best_effort import BestEffortJob
         self.sampling_job=BestEffortJob('voice-sampling-visual')
         self.thread=threading.Thread(target=self.work,name='conversation-journal',daemon=True);self.thread.start()
@@ -76,6 +76,13 @@ class RoundRecorder:
         if self.speaker and hasattr(self.speaker,'set_collection_epoch'):self.speaker.set_collection_epoch(self.sampling_epoch)
 
     def on_invalidate_sampling(self):self.invalidate_sampling()
+
+    def invalidate_identity_audio(self):
+        """Only capture/connection invalidation revokes voice evidence."""
+        self.audio_epoch+=1;self.invalidate_sampling()
+        if self.speaker and hasattr(self.speaker,'set_audio_epoch'):self.speaker.set_audio_epoch(self.audio_epoch)
+
+    def on_invalidate_identity_audio(self):self.invalidate_identity_audio()
 
     def on_sampling_identity(self,evidence):
         stamp=evidence.get('stamp');pid=evidence.get('person_id');owner=evidence.get('owner')
@@ -214,7 +221,7 @@ class RoundRecorder:
         alignment='aligned' if self.ring and self.ring[0][0]<=stamp else 'missing_preroll'
         clip=dict(rid=rid,path=relative,writer=writer,stream=stream,start=stamp,end=None,
             last=None,alignment=alignment,near=deque(),far=deque(),person=person,evidence=evidence,session=session,item=item,
-            drop_generation=self.drop_generation,sampling_epoch=self.sampling_epoch)
+            drop_generation=self.drop_generation,sampling_epoch=self.sampling_epoch,audio_epoch=self.audio_epoch)
         self.active[item]=clip
         for frame in self.ring:self.append_input(clip,*frame)
         self.store.input_audio(rid,relative,'recording')
@@ -272,14 +279,14 @@ class RoundRecorder:
             writer,stream=self.writer(clip['path'],16000);writer.writeframes(pcm);writer.close();stream.close()
         else:clip['alignment']='end_offset_unavailable'
         if not valid:
-            self.invalidate_sampling()
+            self.invalidate_identity_audio()
             self.invalid_inputs[item]=dict(session=clip['session'],person=clip['person'],pcm=b''.join(clip['near'])[-384000:])
             while len(self.invalid_inputs)>16:self.invalid_inputs.pop(next(iter(self.invalid_inputs)))
             self.store.discard(clip['rid']);self.live.pop(item,None);return
         if not evidence or evidence.get('person_id')!=(clip.get('evidence') or {}).get('person_id') or not evidence.get('confirmed'):
             if clip.get('evidence'):clip['evidence']['confirmed']=False
         if self.drop_generation!=clip['drop_generation']:
-            clip['alignment']='recording_queue_gap';self.invalidate_sampling()
+            clip['alignment']='recording_queue_gap';self.invalidate_identity_audio()
         self.store.input_audio(clip['rid'],clip['path'],clip['alignment'])
         if self.speaker and clip['alignment']=='aligned':
             # Remove any audio captured after the late server endpoint, retaining

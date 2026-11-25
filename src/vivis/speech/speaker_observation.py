@@ -90,7 +90,7 @@ class SpeakerObserver:
         self.extractor=extractor
         self.gallery_path=self.directory/'gallery.json'
         self.gallery={};self.gallery_stamp=None;self.gallery_revision=0
-        self.collector=None;self.collection_epoch=0;self.collection_housekeeping=0.
+        self.collector=None;self.collection_epoch=0;self.audio_epoch=0;self.collection_housekeeping=0.
         self.result_handler=None;self.recognition_window=None
         if (c.get('short_recognition') or {}).get('enabled'):
             from vivis.speech.speaker_window import ShortRecognitionWindow
@@ -157,7 +157,8 @@ class SpeakerObserver:
             logical_person=clip['person'],visual_person=(clip.get('evidence') or {}).get('person_id'),
             enrollment_allowed=bool((clip.get('evidence') or {}).get('confirmed') and clip['alignment']=='aligned'))
         source.update(audio_started=clip.get('speaker_start',clip.get('start')),audio_ended=clip.get('end'),
-            sample_epoch=clip.get('sampling_epoch'),voice_context=(clip.get('evidence') or {}).get('voice_context'),
+            sample_epoch=clip.get('sampling_epoch'),audio_epoch=clip.get('audio_epoch'),
+            voice_context=(clip.get('evidence') or {}).get('voice_context'),
             source_generation=(clip.get('evidence') or {}).get('source_generation'))
         source.update(source_visual_evidence=(clip.get('evidence') or {}).get('identity_evidence'),
             sampling_conflict=clip.get('sampling_conflict',False))
@@ -168,6 +169,8 @@ class SpeakerObserver:
         return self.job.offer(self.infer,pcm,far,source)
 
     def set_collection_epoch(self,epoch):self.collection_epoch=epoch
+
+    def set_audio_epoch(self,epoch):self.audio_epoch=epoch
 
     def _identity_evidence(self,result,source,turns=None):
         from vivis.interaction.identity_fusion import unavailable
@@ -189,7 +192,7 @@ class SpeakerObserver:
         window=self.recognition_window
         if not window:return
         if result['identity_evidence']['state']=='confirmed':window.clear();return
-        group=window.add(pcm,far,source,result,self.collection_epoch)
+        group=window.add(pcm,far,source,result,self.audio_epoch)
         if not group:return
         samples=group['samples'];windows,detail=consistency_windows(samples,self.c['minimum_seconds'])
         similarity=float(self.feature(windows[0])@self.feature(windows[1])) if windows else None

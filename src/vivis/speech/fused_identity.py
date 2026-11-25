@@ -22,7 +22,7 @@ class FusedIdentityVoice:
             self.voice_binding=binding;self.voice_context=uuid.uuid4().hex
             self.voice_display=None;self.voice_pending=None;self.voice_business=unavailable('new_connection_or_visit')
             self.identity_fusion.reset_pairs()
-            if self.continuity:self.continuity.submit('invalidate_sampling')
+            if self.continuity:self.continuity.submit('invalidate_identity_audio')
         return self.voice_context
 
     def fused_face_evidence(self,now=None):
@@ -40,18 +40,19 @@ class FusedIdentityVoice:
     def accept_speaker_identity(self,result):
         """Called by poll on the cloud loop, never from the model's worker."""
         token=self.sync_voice_binding()
-        if (result.get('voice_context')!=token or result.get('session')!=self.memory_session
-                or result.get('item_id')!=self.turn_item_id
-                or result.get('source_generation')!=self.input_generation
-                or result.get('sample_epoch')!=self.continuity.sampling_epoch
-                or result.get('sampling_conflict')):
-            self.log.write('speaker_identity_stale',turn_id=result['turn_id'],not_applied=True);return
+        rejected=[name for name,bad in (
+            ('connection_changed',result.get('voice_context')!=token),('visit_changed',result.get('session')!=self.memory_session),
+            ('item_changed',result.get('item_id')!=self.turn_item_id),('generation_changed',result.get('source_generation')!=self.input_generation),
+            ('audio_invalidated',result.get('audio_epoch')!=self.continuity.audio_epoch)) if bad]
+        if rejected:
+            self.log.write('speaker_identity_stale',turn_id=result['turn_id'],not_applied=True,reasons=rejected);return
         self.voice_display=dict(result)
         evidence=result.get('identity_evidence') or unavailable()
         judged=self.identity_fusion.stage_voice(self.fused_face_evidence(),evidence,time.monotonic(),self.knowledge.people)
         self.voice_pending=dict(result,adjudicated_evidence=judged)
         self.log.write('speaker_identity_ready',turn_id=result['turn_id'],identity=evidence,
-            applies_at_next_boundary=True,original_actor_unchanged=True)
+            applies_at_next_boundary=True,original_actor_unchanged=True,
+            sampling_conflict_only=bool(result.get('sampling_conflict')))
 
     def admit_voice_identity(self,*,previous_turn=False):
         if not self.identity_fusion:return
@@ -60,7 +61,7 @@ class FusedIdentityVoice:
         self.voice_pending=None
         generations={self.input_generation,self.input_generation-1} if previous_turn else {self.input_generation}
         if (result.get('item_id')!=self.turn_item_id or result.get('source_generation') not in generations
-                or result.get('sample_epoch')!=self.continuity.sampling_epoch):return
+                or result.get('audio_epoch')!=self.continuity.audio_epoch):return
         self.voice_business=fresh(result.get('adjudicated_evidence') or result.get('identity_evidence'),time.monotonic(),
             self.identity_fusion.c['voice_max_age_s'],self.knowledge.people)
 
