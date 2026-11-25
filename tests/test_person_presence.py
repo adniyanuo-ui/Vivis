@@ -124,7 +124,7 @@ class ThreeWakeRulesTests(unittest.IsolatedAsyncioTestCase):
         sent=[]
         async def send(text):sent.append(json.loads(text))
         self.s.response_revisions['r']=1
-        await self.s.tool(SimpleNamespace(send=send),dict(call_id='c-'+args.get('wake_reason',''),response_id='r',name='robot_program',arguments=json.dumps(args)))
+        await self.s.tool(SimpleNamespace(send=send),dict(call_id='c-'+args.get('wake_reason','')+str(self.s.input_generation),response_id='r',name='robot_program',arguments=json.dumps(args)))
         return json.loads(sent[-1]['item']['output'])
 
     async def test_face_arrival_without_identity_wakes_after_existing_hold(self):
@@ -161,6 +161,30 @@ class ThreeWakeRulesTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(s.admit_explicit_wake(self.final('小帅你好'),self.state))
         self.assertTrue(self.events[-1]['arguments']['explicit_wake'])
         self.assertGreater(s.presence.wake_until,time.monotonic())
+
+    async def test_body_contact_greeting_wakes_without_face_or_identity_and_is_not_repeated(self):
+        self.publish(persons=1);s=self.s;event=self.final('你好，有人在吗？')
+        self.assertTrue(s.admit_explicit_wake(event,self.state))
+        self.assertEqual(self.events[-1]['arguments'],dict(action='wake',program='',explicit_wake=False,wake_reason='greeting'))
+        self.assertFalse(s.presence.visible());self.assertIsNone(s.identified_person())
+        self.assertFalse(s.admit_explicit_wake(event,self.state))
+        self.assertEqual(len(self.events),1);self.assertEqual(s.presence.wake_until,0)
+
+    async def test_model_tool_also_accepts_body_contact_greeting_from_same_final_turn(self):
+        self.publish(persons=1);self.final('你好，有人在吗？')
+        result=await self.tool(dict(action='wake',wake_reason='greeting',explicit_wake=False))
+        self.assertTrue(result['accepted']);self.assertEqual(len(self.events),1)
+
+    async def test_contact_greeting_still_needs_visible_person_and_excludes_echo(self):
+        s=self.s
+        for text in ('你好，有人在吗？','你好，有人吗？','Hello，在吗？'):
+            self.publish();self.assertFalse(s.admit_explicit_wake(self.final(text),self.state))
+            result=await self.tool(dict(action='wake',wake_reason='greeting',explicit_wake=False))
+            self.assertFalse(result['accepted'])
+        self.publish(persons=1)
+        self.state.generating='robot';self.state.responses['robot']=dict(transcript='你好，有人在吗？')
+        self.assertFalse(s.admit_explicit_wake(self.final('你好，有人在吗？'),self.state))
+        self.assertFalse(self.events)
 
     async def test_body_quote_and_playback_echo_are_not_greetings(self):
         self.publish(persons=1);s=self.s

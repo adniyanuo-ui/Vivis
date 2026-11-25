@@ -1,7 +1,8 @@
 """Presence-entry policy: cloud semantics, bounded greeting evidence only.
 
 This is not an offline command recognizer. The final-text check only recovers
-audio/wake permission for whole greetings already transcribed by Qwen.
+audio/wake permission for direct greetings already transcribed by Qwen,
+optionally followed by a bounded contact check such as“有人在吗”.
 """
 import json
 import re
@@ -20,6 +21,11 @@ def configuration():
                 or any(not isinstance(v,str) or not v.strip() or len(v)>40 for v in values)
                 or len(set(values)) != len(values)):
             raise ValueError('Invalid presence entry examples: '+key)
+    checks=c.get('contact_checks',[])
+    if (not isinstance(checks,list) or len(checks)>16
+            or any(not isinstance(v,str) or not v.strip() or len(v)>40 for v in checks)
+            or len(set(checks))!=len(checks)):
+        raise ValueError('Invalid presence entry contact checks')
     return c
 
 
@@ -29,21 +35,26 @@ def whole_greeting(text, config):
         return False
     value = re.sub(r'[\s，,。.!！?？、；;]+','',text).casefold()
     words='|'.join(re.escape(v.casefold()) for v in sorted(config['greetings'],key=len,reverse=True))
-    # A whole greeting can contain repeated or bilingual greetings. Keep this
-    # anchored: reports, quotations, negations and another addressee are not
-    # admitted merely because they contain a greeting word.
-    return re.fullmatch(r'(?:(?:'+words+r')(?:呀|啊|哟|哦|哈)*){1,4}',value) is not None
+    # Keep the entire utterance anchored. A contact check is not permission to
+    # accept an arbitrary suffix, another addressee, quotation or instruction.
+    greeting=r'(?:(?:'+words+r')(?:呀|啊|哟|哦|哈)*){1,4}'
+    checks='|'.join(re.escape(v.casefold()) for v in sorted(config.get('contact_checks',[]),key=len,reverse=True))
+    suffix=r'(?:(?:'+checks+r')(?:呀|啊|哟|哦|哈)*)?' if checks else ''
+    return re.fullmatch(greeting+suffix,value) is not None
 
 
 def instructions(config):
     if not config['enabled']:
         return (' 待机仅接受配置的明确唤醒词；wake_reason=name，explicit_wake=true。'
                 '停止／结束回交互，待机／自己玩回待机。')
+    checks=config.get('contact_checks',[])
+    contact_hint=('招呼后附带简短询问是否在场（如“你好，'+checks[0]+'？”）仍是直接招呼，同样先wake再有声回应。' if checks else '')
     return (' 交流进退规则：语音意图仍由你理解，不是关键词命中就执行。'
         '待机时，明确呼唤配置名字可用robot_program wake，wake_reason=name且explicit_wake=true。'
         '仅当controller_state.greeting_wake_allowed=true，用户明确面对你打招呼（例如'+
         '、'.join(config['greetings'])+'），也可wake，wake_reason=greeting且explicit_wake=false。'
         '连续、重复及中英组合的直接招呼（如hello，你好）同样先调用wake，不能只生成待机下无声的回答。'
+        +contact_hint+
         'greeting_wake_allowed=false时绝不能用greeting调用唤醒；“他刚才说你好”是叙述，不是对你问好，不调用wake。'
         '摄像头持续看到人脸时控制器会主动唤醒，不要求先认出姓名。'
         '仅看到人体但看不到脸时，必须听到对你的直接招呼才能唤醒；看到人体本身不会自动唤醒。'

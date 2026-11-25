@@ -3,6 +3,7 @@
   "enabled": true,
   "visible_greeting_wake": true,
   "greetings": ["你好", "您好", "喂", "嗨", "hi", "hello"],
+  "contact_checks": ["有人在吗", "有人吗", "在吗", "你在吗"],
   "stop_examples": ["好了", "可以了", "停止", "结束", "退出", "不用播了"],
   "standby_examples": ["我走了", "你自己玩", "休眠", "休息吧"]
 }

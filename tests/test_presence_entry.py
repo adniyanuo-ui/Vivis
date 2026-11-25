@@ -17,10 +17,19 @@ class EntryEvidenceTests(unittest.TestCase):
         c=configuration()
         for text in ('你好','您好呀','喂！','嗨','Hi','HELLO！','hello，你好。','你好，您好呀','Hi! Hello.','喂啊，你好呀'):
             self.assertTrue(whole_greeting(text,c),text)
+        for text in ('你好，有人在吗？','你好，有人吗？','喂，在吗？','您好，你在吗？','Hello，你好，有人在吗？','嗨，有人在吗呀？'):
+            self.assertTrue(whole_greeting(text,c),text)
         for text in ('他说你好','不要说你好','你好小王','“你好”是什么意思','hello王教授','好了吗','我走了',
-                     '他说hello你好','不要说hello你好','hello，你好，小王','“hello，你好”','hi' * 5):
+                     '他说hello你好','不要说hello你好','hello，你好，小王','“hello，你好”','hi' * 5,
+                     '他说你好有人在吗','“你好，有人在吗？”是什么意思','你好小王有人在吗','你好有人在吗小王',
+                     '不要说你好有人在吗','你好不要唤醒','你好播放歌曲','有人在吗','在吗'):
             self.assertFalse(whole_greeting(text,c),text)
         self.assertFalse(whole_greeting('你好',{**c,'enabled':False}))
+
+    def test_legacy_config_retains_pure_greetings_without_accepting_arbitrary_suffix(self):
+        c=configuration();c.pop('contact_checks',None)
+        self.assertTrue(whole_greeting('Hello，你好。',c))
+        self.assertFalse(whole_greeting('你好，有人在吗？',c))
 
     def test_single_face_requires_fresh_valid_publisher_data(self):
         with tempfile.TemporaryDirectory() as folder:

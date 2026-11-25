@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+## Body-only greeting with contact question (2026-11-25, latest)
+
+Onsite PID100095 restarted by operator20:57:28. At20:58:19 final“你好，有人在吗？”was heard,61 nearby vision frames all showed one fresh body, no face. Qwen generated“您好！我在呢，我是小帅…”as text but no wake action: whole_greeting accepted ONLY pure greetings and rejected the contact suffix. Fix BOTH final-ASR recovery and model wake verification through their shared anchored whole_greeting predicate. Canonical presence_entry.contact_checks permits bounded suffixes“有人在吗／有人吗／在吗／你在吗”; legacy absent field keeps pure greetings only. Never change this to arbitrary greeting-prefix substring matching. Keep final-item/generation/revision/connection, onset/current presence, echo, dedup and standby-fault guards. Three rules remain: face arrival can proactively wake; fresh face/body+direct greeting can wake; empty frame needs addressed configured name. Identity None is not absence. User restart is needed for full deployment; do not restart/move hardware while testing code. See devlog7.102 and outputs/diagnostics/body_greeting_20261125.
+
 ## Clean voice segments and0.5s speech admission (2026-11-25, latest)
 
 User approved selective playback exclusion, speech-rich disjoint consistency windows and existing bounded short recognition. Keep+9dB for Qwen, speaker sampling and recognition; minimum_seconds now0.5 effective speech, not0.6. This supersedes older effective-duration instructions ONLY; identity cosine0.65/margin0.12, suspect0.45, consistency cosine0.6, three active references,32 total/fill-stop, source/epoch protections and all motion/audio device settings remain. Single-query minimum is NOT the short-window target: fragments>=0.2s, try1.5s, defer up to3s, max12s span/gap6s/audio6s. Never substitute an old longer sentence's identity for the newest short speaker.
