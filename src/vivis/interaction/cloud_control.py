@@ -36,7 +36,7 @@ def tools(program_ids):
         dict(type='function',name='set_speech_dialect',description='用户明确要求切换聊天方言或恢复普通话时调用。粤语选择广东话，沪语选择上海话。普通话使用原默认男声，方言使用已同意的许南川男声；pending_voice_reconnect须等待服务器确认，不把请求收到说成已换好。只改变本次访客后续回复，不改变预录节目；偶尔说方言不代表要切换。',
             parameters=dict(type='object',properties=dict(dialect=dict(type='string',enum=dialect_configuration()['dialects'])),
                 required=['dialect'],additionalProperties=False)),
-        dict(type='function',name='get_robot_status',description='查询本地图像／本轮声纹及机器人状态。回答你认识我吗、能听出我是谁吗或我的背景时必须先查询；程序会有界等待本轮声纹。听声认人看speaker_status.current_result，confirmed时可用其中preferred_address称呼；图像来源看current_face_result，不能凭历史称呼假称摄像头认出。current_person是业务身份，可能稍后接纳；观察不回写原话或增加权限。identity_state=reviewing可保留称呼；identity_verified=false不读取个人历史或留言。',
+        dict(type='function',name='get_robot_status',description='查询本地图像／本轮声纹及机器人状态。回答你认识我吗、能听出我是谁吗、你咋听出来的、怎么知道我是谁、为什么叫我某某或我的背景时必须先查询；程序会有界等待本轮声纹。identity_recognition说明当前称呼依据和各通道是否确认：can_claim_current_voice=false不能说一听就认出，retained_previous只能说沿用之前确认的称呼。听声认人看speaker_status.current_result，confirmed时可用其中preferred_address称呼；图像来源看current_face_result，不能凭历史称呼假称摄像头认出。current_person是业务身份，可能稍后接纳；观察不回写原话或增加权限。identity_state=reviewing可保留称呼；identity_verified=false不读取个人历史或留言。',
             parameters=dict(type='object',properties={},additionalProperties=False)),
         dict(type='function',name='search_person_memory',description='检索当前已识别熟人本人的过往聊天事实与约定。跨人任务背景改用search_robot_memory。询问上次聊什么时keywords填空数组[]，不要传空字符串或空白元素。',
             parameters=dict(type='object',properties=dict(keywords=dict(type='array',items=dict(type='string',minLength=1,maxLength=32),minItems=0,maxItems=5)),required=['keywords'],additionalProperties=False)),

@@ -1273,6 +1273,14 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         facts=dict(**self.context,unattributed_source_notice=self.unattributed_source_notice,face_visible=self.presence.last_visible,
             wake_permission=permission and not self.presence.last_visible)
         facts['body_visible']=self.presence.person_count()>0
+        if self.identity_fusion:
+            from vivis.interaction.identity_fusion import recognition_report
+            # Make current channel evidence available even when the model skips
+            # the status tool. A retained address is not a fresh voice match.
+            status=self.speaker_status(confirmed)
+            facts['identity_recognition']=recognition_report(confirmed,self.knowledge.people,
+                self.fused_face_evidence(),status.get('current_result',{}),
+                (self.fusion_last or {}).get('reason'))
         if self.continuity:
             from vivis.interaction.continuity import actor
             facts['recent_memory_paused']=actor(confirmed) in self.continuity.blocked_people
@@ -1889,7 +1897,14 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                     known_people=self.known_people() if person else [],
                     robot_memory_scope='all_archived_conversations_via_bounded_search')
                 voice=output['speaker_status'].get('current_result',{})
-                if voice.get('state')=='confirmed':
+                if self.identity_fusion:
+                    from vivis.interaction.identity_fusion import recognition_report
+                    output['identity_recognition']=recognition_report(person_id,self.knowledge.people,
+                        self.fused_face_evidence(),voice,(self.fusion_last or {}).get('reason'))
+                    output['identity_notice']=output['identity_recognition']['notice']+(
+                        'current_person是业务身份，声纹或图像本轮确认以identity_recognition分别标注的结果为准。'
+                        '本说明不回写原话归属、不改变业务权限。')
+                elif voice.get('state')=='confirmed':
                     label=voice.get('preferred_address') or voice.get('display_name') or voice['person_id']
                     output['identity_notice']=('本轮声音已确认：'+label+'。回答听声认人时据此称呼；'
                         'current_person是业务会话身份，可能尚未接纳本轮结果，不因此否认已通过的声纹。'

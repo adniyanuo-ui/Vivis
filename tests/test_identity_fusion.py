@@ -200,6 +200,48 @@ class FusedVoiceIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(status['current_person_eligible']);self.assertEqual(status['current_person_active_references'],2)
         self.assertEqual(status['current_result']['state'],'unavailable')
 
+    async def test_conversation_context_contains_pending_then_suspected_voice_without_a_tool(self):
+        import json
+        s=self.s;s.continuity.speaker=SimpleNamespace(c=dict(enrollment_samples=3),gallery={})
+        def report():
+            text=s.context_snapshot()[0]
+            return json.JSONDecoder().raw_decode(text.split(' controller_state=',1)[1])[0]['identity_recognition']
+        with patch('time.monotonic',return_value=10):
+            s.identity_fusion.person='alice';s.begin_user_turn('current');original=s.turn_person
+            before=report();self.assertEqual(before['business_basis'],'retained_previous')
+            self.assertFalse(before['can_claim_current_voice'])
+            s.accept_speaker_identity(self.result('suspected'))
+            after=report();self.assertEqual(after['current_voice']['state'],'suspected')
+            self.assertFalse(after['can_claim_current_voice']);self.assertEqual(s.turn_person,original)
+            s.input_generation+=1;s.begin_user_turn('next')
+            self.assertEqual(report()['current_voice']['state'],'unavailable')
+
+    async def test_suspected_voice_status_cannot_describe_retained_actor_as_new_match(self):
+        import json
+        from unittest.mock import AsyncMock
+        s=self.s;s.continuity.speaker=SimpleNamespace(c=dict(enrollment_samples=3),gallery={})
+        for profile in s.knowledge.people.values():profile['display_name']=profile['preferred_address']
+        with patch('time.monotonic',return_value=10):
+            s.identity_fusion.person='alice';s.begin_user_turn('current');s.turn_ended_at=10;s.in_speech=False
+            s.accept_speaker_identity(self.result('suspected'))
+            s.response_revisions['r']=1;s.response_inputs['r']=s.input_generation
+            socket=SimpleNamespace(send=AsyncMock())
+            await s.tool(socket,dict(call_id='status-suspected',name='get_robot_status',arguments='{}',response_id='r'))
+            output=json.loads(json.loads(socket.send.call_args.args[0])['item']['output'])
+            self.assertTrue(output['accepted']);self.assertTrue(output['identity_verified'])
+            self.assertFalse(output['identity_recognition']['can_claim_current_voice'])
+            self.assertIn('本轮声音只是疑似',output['identity_notice'])
+            self.assertEqual(s.turn_person,'alice');self.assertEqual(s.identified_person(),'alice')
+
+    async def test_image_claims_remain_independent_when_voice_observer_disabled(self):
+        import json
+        s=self.s
+        with patch('time.monotonic',return_value=10):
+            self.face(evidence());s.begin_user_turn('current')
+            text=s.context_snapshot()[0]
+            report=json.JSONDecoder().raw_decode(text.split(' controller_state=',1)[1])[0]['identity_recognition']
+            self.assertTrue(report['can_claim_current_image']);self.assertFalse(report['can_claim_current_voice'])
+
     async def test_read_status_waits_for_this_voice_but_never_reassigns_original_actor(self):
         import asyncio,time
         s=self.s;s.continuity.speaker=SimpleNamespace(c=dict(enrollment_samples=3),gallery={})

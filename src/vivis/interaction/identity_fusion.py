@@ -45,6 +45,41 @@ def evidence_label(evidence,people,channel):
     return name+'/'+channel+('/疑' if state=='suspected' else '')
 
 
+def recognition_report(person_id,people,face,voice,decision=None):
+    """Public explanation only; never upgrades evidence or authorizes an actor."""
+    def public(evidence):
+        state=evidence.get('state','unavailable');pid=evidence.get('person_id')
+        profile=people.get(pid,{}) if state in ('confirmed','suspected') else {}
+        return dict(state=state,person_id=pid if profile else None,
+            address=profile.get('preferred_address') or profile.get('display_name'),reason=evidence.get('reason'))
+    image,sound=public(face),public(voice)
+    profile=people.get(person_id,{})
+    address=profile.get('preferred_address') or profile.get('display_name')
+    voice_confirmed=sound['state']=='confirmed' and sound['person_id'] is not None
+    image_confirmed=image['state']=='confirmed' and image['person_id'] is not None
+    basis=('current_image' if image_confirmed and image['person_id']==person_id else
+        'current_voice' if voice_confirmed and sound['person_id']==person_id else
+        'joint_evidence' if profile and decision=='joint_confirmed' else
+        'retained_previous' if profile else 'unknown')
+    if voice_confirmed:notice='本轮声音已确认：'+str(sound['address'])+'。'
+    elif sound['state']=='suspected':notice='本轮声音只是疑似'+str(sound['address'])+'，尚未确认，不能说“一听就认出来”。'
+    elif sound['state']=='other':notice='本轮声音未匹配到熟人，不能声称已经听声认出。'
+    elif sound['reason']=='current_turn_not_ready':notice='本轮声音结果尚未返回，不能提前声称听声认出。'
+    else:notice='本轮没有可用于确认身份的声音结果，不能声称听声认出。'
+    if basis=='current_image':notice+='当前称呼由本轮图像确认。'
+    elif basis=='retained_previous':notice+='当前称呼'+str(address)+'沿用此前已确认的会话身份，不代表本轮刚认出。'
+    elif basis=='joint_evidence':notice+='当前称呼由图声联合证据确认，不能归因于单独听声或单独看脸。'
+    elif basis=='unknown':
+        notice+=('本轮通道已有确认，但业务身份尚未接纳；可据本轮确认结果回答称呼，不因此扩大权限。'
+            if voice_confirmed or image_confirmed else '目前没有已确认的业务称呼，不猜姓名。')
+    if not image_confirmed:notice+='本轮图像也未确认，不能说摄像头认出。'
+    if image_confirmed and voice_confirmed and image['person_id']!=sound['person_id']:
+        notice+='图像和声音分别确认了不同人物，分开说明；业务仍按原图像优先规则。'
+    return dict(business_person_id=person_id if profile else None,business_address=address,business_basis=basis,
+        current_face=image,current_voice=sound,can_claim_current_voice=voice_confirmed,
+        can_claim_current_image=image_confirmed,notice=notice)
+
+
 class IdentityFusion:
     def __init__(self,config):
         self.c=config;self.person=None;self.released_since=None;self.last_now=None
