@@ -52,6 +52,7 @@ class ContinuityVoice:
     def collection_visual_evidence(self,now):
         """Raw selected-frame evidence for sampling only; no business identity update."""
         unknown=dict(stamp=now,person_id=None,confirmed=False,blocked=False,owner=None)
+        if getattr(self,'sound_attention',None) is not None:return dict(unknown,blocked=True)
         config=getattr(self.knowledge,'recognition',None)
         if not config:return unknown
         try:

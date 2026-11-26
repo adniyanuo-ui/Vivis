@@ -27,6 +27,7 @@ from vivis.interaction.message_lane import MessageLane,StaleMessageTurn,extract_
 from vivis.speech.message_receipts import MessageReceipts,ReceiptRejected,MESSAGE_REQUEST
 from vivis.speech.continuity_voice import ContinuityVoice
 from vivis.speech.fused_identity import FusedIdentityVoice,StaleIdentityStatus
+from vivis.speech.sound_attention_voice import SoundAttentionVoice
 
 
 CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负责，没有本地ASR或本地语义模型备用。'
@@ -124,7 +125,7 @@ class ControllerEventGate:
         if future is not None and not future.done():future.set_result(True)
 
 
-class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
+class CloudManagedVoice(SoundAttentionVoice,ContinuityVoice,FusedIdentityVoice,ManagedVoice):
     def __init__(self,*args,**kwargs):
         super().__init__(*args,**kwargs)
         self.presence=SpeechPresence(json.loads((ROOT/'configs/perception/speech_presence.json').read_text()))
@@ -198,6 +199,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         self.log.write('cloud_control_backend',name='qwen_realtime',local_asr_started=False,reception_enabled=reception['enabled'],memory_enabled=self.memory is not None)
         self.init_continuity()
         self.init_fused_identity()
+        self.init_sound_attention()
 
     def sync_conversation_animation(self):
         animation=getattr(self,'conversation_animation',None)
@@ -561,6 +563,8 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         return self.stable_identity()['person_id']
 
     def stable_identity(self):
+        attention=getattr(self,'sound_attention',None)
+        if attention is not None:return attention['stable']
         if self.identity_fusion:return self.fused_identity()
         with self.identity_stability.lock:
             return self.identity_stability.observe(self.recognized_person(),time.monotonic())
@@ -582,6 +586,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                     identity_retained=True,hold_remaining_s=stable['remaining_s'])
 
     def verify_identity(self,state):
+        if getattr(self,'sound_attention',None) is not None:return
         now=time.monotonic()
         if (self.identity_fusion and not self.user_turn_pending(state) and not state.generating
                 and not self.player.count):self.admit_voice_identity()
@@ -2244,6 +2249,12 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
     async def _connection(self):
         tasks=[];state=None;preserve_output=False
         try:
+            self.cancel_sound_attention('new_connection')
+            self.side_wire_item=None
+            self.side_items.clear();self.side_responses.clear();self.side_commands.clear()
+            self.side_onsets.clear()
+            self.side_response_sources.clear()
+            if self.sound_gate:self.sound_gate.reset()
             self.message_connection=object();self.courier_waiters.clear()
             self.program_waiters.clear()
             self.social_turns.clear()
@@ -2378,6 +2389,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                     nonlocal transcript_response_id
                     async for message in ws:
                         event=json.loads(message);kind=event.get('type');rid=event.get('response_id')
+                        if await self.filter_side_event(event,journal_timeline,ws):continue
                         self.observe_program_response(event)
                         if kind=='response.audio.delta':event['_network_received_monotonic']=time.monotonic()
                         transcript_response_id=rid
@@ -2495,6 +2507,8 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                     previous_tools=initial['tools']
                     while True:
                         await asyncio.sleep(self.speech['managed_voice'].get('control_poll_interval_s',.05))
+                        self.acoustic_tick()
+                        if self.sound_frozen():continue
                         for released in self.message_receipts.drain_released():
                             rid=released.get('response_id') or released.get('response',{}).get('id')
                             if released.get('type')=='response.done' or (self.response_inputs.get(rid)==self.input_generation and rid not in self.blocked):

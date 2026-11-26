@@ -46,6 +46,16 @@ class VoiceBuffer:
         self.resume_fades={};self.resume_waiting=set()
         self.mouth=None;self.consumed={};self.audio_observer=None
         self.expression_clock=None;self.expression_clock_errors=0
+        self.priority_response=None
+
+    def begin_priority(self,response_id):
+        with self.lock:
+            if self.priority_response not in (None,response_id):raise ValueError('Priority audio already owned')
+            self.priority_response=response_id
+
+    def end_priority(self,response_id):
+        with self.lock:
+            if self.priority_response==response_id:self.priority_response=None
 
     def expression_notice(self, method, *args):
         if self.expression_clock is None:return
@@ -64,7 +74,12 @@ class VoiceBuffer:
             if self.mouth:self.mouth.add(response_id,pcm)
             self.filters[response_id]=state
             self.clipped+=int(np.count_nonzero(np.abs(values)>1.))
-            self.blocks.append((response_id,np.clip(values,-1,1).astype(np.float32)))
+            block=(response_id,np.clip(values,-1,1).astype(np.float32))
+            if response_id==self.priority_response:
+                # Keep this clip's order ahead of retained ordinary PCM.
+                index=next((i for i,(sid,_) in enumerate(self.blocks) if sid!=response_id),len(self.blocks))
+                self.blocks.insert(index,block)
+            else:self.blocks.append(block)
             self.count+=len(values);return True
 
     def finish(self, response_id):

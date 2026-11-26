@@ -5,6 +5,7 @@ import json
 import math
 from pathlib import Path
 import time
+import threading
 
 from vivis.paths import ROOT
 from vivis.hardware.haokai import DirectionParser, DirectionState, open_receiver, select_port
@@ -13,12 +14,55 @@ from vivis.hardware.haokai import DirectionParser, DirectionState, open_receiver
 CONFIG = ROOT / 'configs/perception/sound_direction.json'
 
 
+class DirectionObserver:
+    """One optional read-only UART owner, detached from audio/control scheduling."""
+    def __init__(self,c,protected_port):
+        self.c=c;self.protected_port=protected_port;self.latest=None;self.error=None
+        self.stop=threading.Event();self.thread=None
+
+    def start(self):
+        self.thread=threading.Thread(target=self.run,daemon=True,name='sound-direction-uart')
+        self.thread.start();return self
+
+    def run(self):
+        while not self.stop.is_set():
+            receiver=None
+            try:
+                from serial.tools.list_ports import comports
+                port=select_port(list(comports()),self.c['serial'],self.protected_port)
+                receiver=open_receiver(port,self.c['serial'])
+                verify=self.c.get('verify_checksum',True)
+                parser=DirectionParser(verify)
+                state=DirectionState(self.c['coordinates'],self.c['monitor']['max_age_s'],verify)
+                self.error=None
+                while not self.stop.is_set():
+                    data=receiver.read(min(4096,max(1,receiver.in_waiting)))
+                    now=time.monotonic()
+                    for frame in parser.feed(data):state.observe(frame,now)
+                    self.latest=dict(state.snapshot(now),updated_monotonic=state.received)
+            except Exception as exc:
+                self.latest=None;self.error=type(exc).__name__+': '+str(exc)[:160]
+            finally:
+                if receiver is not None:
+                    try:receiver.close()
+                    except OSError:pass
+            self.stop.wait(10.)  # Optional observer failure never restarts the head.
+
+    def close(self):
+        self.stop.set()
+        if self.thread:self.thread.join(timeout=.5)
+
+
 def configuration(path=CONFIG):
     c = json.loads(Path(path).read_text())
     if (c.get('schema_version') != 'vivis-sound-direction-1.0'
             or c.get('protocol') != 'hk-qxmic-v3-sector12' or c.get('motion_enabled') is not False):
         raise ValueError('Invalid sound-direction protocol or motion permission')
     s, angles, monitor = c['serial'], c['coordinates'], c['monitor']
+    if type(c.get('verify_checksum',True)) is not bool:raise ValueError('Invalid checksum policy')
+    if 'attention' in c:
+        from vivis.interaction.sound_attention import configuration as attention_configuration
+        attention_configuration(path)
     document = c.get('protocol_document')
     if (not isinstance(document, dict) or not isinstance(document.get('name'), str)
             or not document['name'] or not isinstance(document.get('sha256'), str)
@@ -85,8 +129,9 @@ class Evidence:
 
 
 def monitor_receiver(receiver, c, seconds, evidence, emit=print, clock=time.monotonic):
-    parser = DirectionParser()
-    state = DirectionState(c['coordinates'], c['monitor']['max_age_s'])
+    verify = c.get('verify_checksum',True)
+    parser = DirectionParser(verify)
+    state = DirectionState(c['coordinates'], c['monitor']['max_age_s'],verify)
     start = clock()
     next_publish = start
     outcome, error, failure_stage = 'complete', None, None
@@ -157,10 +202,11 @@ def main(argv=None):
         hardware = json.loads((args.robot.parent/robot['hardware']).read_text())
         protected = hardware['runtime']['port']
         if args.check:
-            parser = DirectionParser()
+            parser = DirectionParser(c.get('verify_checksum',True))
             if [f.sector for f in parser.feed(bytes.fromhex('55 AA 05 FA 00 E2 7E'))] != [5]:
                 raise ValueError('Vendor direction example did not pass replay')
-            print('声源方位离线检查通过：1000000/8N1，12方位，校验FF－坐标；未打开设备')
+            print('声源方位离线检查通过：1000000/8N1，12方位，'+
+                  ('校验FF－坐标' if c.get('verify_checksum',True) else '按用户设置忽略校验码，仍检查帧头及坐标范围')+'；未打开设备')
             return 0
         from serial.tools.list_ports import comports
         ports = [p for p in comports() if p.vid is not None]

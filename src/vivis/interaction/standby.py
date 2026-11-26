@@ -24,6 +24,7 @@ from vivis.interaction.follow import MonotonicClock
 from vivis.interaction.animation import FrameMapper
 from vivis.motion.mapping import compile_trajectory,read_json,live_preflight,direct_mouth_ids
 from vivis.motion.ownership import MojiaPlaybackGaze,PreviewPublisher
+from vivis.vision.pursuit import NeckCommandScheduler
 from vivis.motion.upstream import configure as configure_trajectory
 from vivis.vision.parallel_follow import configure as configure_parallel
 from vivis.vision.independent_follow import configure as configure_independent
@@ -236,12 +237,54 @@ class StandbyGaze(MojiaPlaybackGaze):
         self.neutral=source.mapper.neutral
         self.low=np.array([m['safe_min'] for sid in ids for m in profile['motors'] if m['id']==sid])
         self.high=np.array([m['safe_max'] for sid in ids for m in profile['motors'] if m['id']==sid])
+        self.acoustic=None;self.acoustic_mailbox=None;self.acoustic_owned=False
+        path=getattr(source,'acoustic_path',None)
+        if path is not None:
+            from vivis.interaction.sound_attention import GlanceMotion,Mailbox,configuration
+            c=configuration()
+            if c['enabled']:
+                motors={m['id']:m for m in profile['motors']}
+                axes={a['id']:a for a in config['control']['axes']}
+                axes.update({sid:{} for sid in (32,33,34) if sid in self.owned})
+                self.acoustic=GlanceMotion(c,ids,{s:motors[s]['safe_min'] for s in axes},
+                    {s:motors[s]['safe_max'] for s in axes},{s:motors[s]['max_speed_counts_s'] for s in axes},
+                    self.neutral,axes,config['neck']['upstream_trajectory'])
+                self.acoustic_mailbox=Mailbox(path,path.with_name('sound_attention_feedback.json')).start()
+
+    def finish(self,completed,error):
+        if self.acoustic_mailbox:self.acoustic_mailbox.close()
+        return super().finish(completed,error)
+
+    def reseed_acoustic(self,values,now):
+        """Hand actual returned targets back to pursuit, never an old side goal."""
+        self.previous=np.asarray(values)[self.controller_columns].copy()
+        self.controller.observe_eye(self.previous[self.controller_ids.index(self.camera_eye_id)],now)
+        if self.controller.upstream:self.controller.upstream.reset(self.previous[self.controller_ids.index(32)])
+        if self.platform:self.platform.reset(dict(zip(self.ids,map(float,values))),now)
+        if self.scheduler:
+            self.scheduler=NeckCommandScheduler(self.previous[self.controller_ids.index(32)],now,self.speeds[-1],
+                adaptive_speed=self.config['neck']['adaptive_speed'],endpoints=self.controller.neck_bounds,
+                filter_tau_s=self.config['neck'].get('target_filter_tau_s',0.))
 
     def apply(self,base,last,dt,now):
         packet=self.receiver.poll(now);visible=False
         try:
             validate_packet(packet,now,self.receiver.max_age);visible=packet['target'] is not None
         except (ValueError,KeyError,TypeError,AttributeError):pass
+        if self.acoustic:
+            override,status=self.acoustic.step(self.acoustic_mailbox.latest,last,packet,now)
+            self.acoustic_mailbox.submit(status)
+            if override is not None:
+                result=np.array(base,copy=True)
+                for sid,value in override.items():result[self.ids.index(sid)]=value
+                self.speed_overrides={32:int(self.speeds[-1])}
+                self.last_diagnostic=dict(state='acoustic_attention',sound_attention=status)
+                self.source.publish(now,result,self.last_diagnostic)
+                self.acoustic_owned=True
+                if self.acoustic.episode is None:self.reseed_acoustic(result,now)
+                return result
+            if self.acoustic_owned:
+                self.reseed_acoustic(last,now);self.acoustic_owned=False
         attention=self.source.attention.step(visible,now,self.source.smile>.1)
         options={'attention_hold':True} if attention['pause'] else {}
         result=super().apply(base,last,dt,now,**options)
@@ -381,6 +424,7 @@ def main(argv=None,default_config=None):
         if behavior!='interaction':parser.error('Speech animation is only owned by interaction')
         from vivis.speech.mouth import MouthReceiver
         source.mouth=MouthReceiver(args.speech_animation,mapper.order)
+        if robot.definition['name']=='xiaoshuai':source.acoustic_path=args.speech_animation.with_name('sound_attention.json')
     if args.expression_intent is not None:
         if behavior!='interaction':parser.error('Expression intents are only owned by interaction')
         from vivis.interaction.expression_intent import IntentEnvelope,configuration

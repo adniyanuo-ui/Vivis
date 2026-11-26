@@ -100,6 +100,9 @@ class FusedIdentityVoice:
 
     def accept_speaker_identity(self,result):
         """Called by poll on the cloud loop, never from the model's worker."""
+        if getattr(self,'sound_attention',None) is not None:
+            self.log.write('speaker_identity_stale',turn_id=result['turn_id'],not_applied=True,reasons=['side_attention'])
+            return
         token=self.sync_voice_binding()
         rejected=[name for name,bad in (
             ('connection_changed',result.get('voice_context')!=token),('visit_changed',result.get('session')!=self.memory_session),

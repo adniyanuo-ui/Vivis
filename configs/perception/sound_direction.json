@@ -27,5 +27,25 @@
     "max_raw_bytes": 1048576,
     "max_event_bytes": 2097152
   },
-  "motion_enabled": false
+  "motion_enabled": false,
+  "verify_checksum": false,
+  "attention": {
+    "enabled": true,
+    "budget_s": 2.0,
+    "direction_difference_deg": 60,
+    "cooldown_s": 5.0,
+    "lease_s": 0.5,
+    "speech_run_s": 0.08,
+    "camera_half_fov_deg": 30.0,
+    "yaw_counts_per_deg": 11.377777777777778,
+    "search_s": 2.0,
+    "minimum_clean_rms": 0.003,
+    "maximum_reference_rms": 0.001,
+    "mount": {
+      "front_sector": 8,
+      "sector_sign": -1,
+      "calibrated": false,
+      "allow_provisional": true
+    }
+  }
 }

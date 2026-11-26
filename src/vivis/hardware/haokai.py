@@ -15,7 +15,9 @@ class DirectionFrame:
 
 class DirectionParser:
     """Resynchronise a byte stream; suffix bytes in the vendor example are unknown."""
-    def __init__(self):
+    def __init__(self, verify_checksum=True):
+        if type(verify_checksum) is not bool:raise ValueError('Invalid checksum policy')
+        self.verify_checksum = verify_checksum
         self.pending = bytearray()
         self.bytes_received = self.frames = self.invalid = self.discarded = 0
 
@@ -35,13 +37,14 @@ class DirectionParser:
             if start:
                 self.discarded += start
                 del self.pending[:start]
-            if len(self.pending) < 4:
+            size = 4 if self.verify_checksum else 3
+            if len(self.pending) < size:
                 break
-            sector, checksum = self.pending[2:4]
-            if sector < 12 and checksum == 0xff - sector:
-                result.append(DirectionFrame(sector, bytes(self.pending[:4])))
+            sector = self.pending[2]
+            if sector < 12 and (not self.verify_checksum or self.pending[3] == 0xff - sector):
+                result.append(DirectionFrame(sector, bytes(self.pending[:size])))
                 self.frames += 1
-                del self.pending[:4]
+                del self.pending[:size]
             else:
                 self.invalid += 1
                 self.discarded += 1
@@ -56,16 +59,17 @@ class DirectionParser:
 
 class DirectionState:
     """Host receive time is not a speech timestamp or a voice-activity indicator."""
-    def __init__(self, coordinates, max_age_s):
+    def __init__(self, coordinates, max_age_s, verify_checksum=True):
         self.coordinates = coordinates
         self.max_age_s = max_age_s
         self.frame = None
         self.received = None
         self.sequence = 0
+        self.verify_checksum = verify_checksum
 
     def observe(self, frame, now):
         if (not isinstance(frame, DirectionFrame) or not 0 <= frame.sector < 12
-                or frame.raw != HEADER + bytes((frame.sector, 0xff-frame.sector))
+                or frame.raw != HEADER + bytes((frame.sector, 0xff-frame.sector) if self.verify_checksum else (frame.sector,))
                 or not math.isfinite(now)):
             raise ValueError('Invalid direction observation')
         self.frame, self.received = frame, now
@@ -89,6 +93,7 @@ class DirectionState:
                     sector_step_deg=self.coordinates['sector_step_deg'],
                     coordinate_reference=self.coordinates['reference'],
                     raw_frame_hex=frame.raw.hex(' ').upper() if frame else None,
+                    checksum_verified=bool(frame) and self.verify_checksum,
                     speech_active=None, confidence=None, robot_azimuth_deg=None,
                     elevation_deg=None, distance_m=None, motion_authorized=False)
 

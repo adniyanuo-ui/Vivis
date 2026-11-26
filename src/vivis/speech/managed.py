@@ -328,20 +328,27 @@ class ManagedVoice:
                     try:stamp,pcm,raw,far=self.audio.uplink.get_nowait()
                     except queue.Empty:break
                     self.last_input=now
+                    level=lambda data:float(np.sqrt(np.mean((np.frombuffer(data,'<i2')/32768.)**2)))
+                    metrics=dict(raw_rms=level(raw),clean_rms=level(pcm),reference_rms=level(far))
+                    acoustic=getattr(self,'acoustic_microphone',None)
+                    try:side=acoustic(stamp,pcm,metrics) if acoustic else False
+                    except Exception as exc:
+                        side=False
+                        self.log.write('sound_attention_disabled',reason=type(exc).__name__,primary_voice_continues=True)
+                        self.cancel_sound_attention('observer_error');self.sound_gate=None
+                    routed_pcm=bytes(len(pcm)) if side else pcm
                     journal=getattr(self,'continuity',None)
-                    if journal:journal.capture(stamp,pcm,far)
+                    if journal:journal.capture(stamp,routed_pcm,far)
                     for name,data in [('microphone',raw),('reference',far),('uplink',pcm)]:
                         if name in self.writers:self.writers[name].writeframesraw(data)
                     if self.frame_log:
                         self.frame_log.write(json.dumps(dict(sample=self.recorded_samples,adc_monotonic=stamp))+'\n')
                         self.recorded_samples+=320
-                    level=lambda data:float(np.sqrt(np.mean((np.frombuffer(data,'<i2')/32768.)**2)))
-                    metrics=dict(raw_rms=level(raw),clean_rms=level(pcm),reference_rms=level(far))
                     if self.decoder is not None:
                         try:self.local.put_nowait((stamp,pcm,metrics,far))
                         except queue.Full:raise RuntimeError('Local ASR queue exceeded500ms')
                     if self.cloud_queue is not None:
-                        try:self.cloud_queue.put_nowait((stamp,pcm))
+                        try:self.cloud_queue.put_nowait((stamp,routed_pcm))
                         except asyncio.QueueFull:
                             if hasattr(self,'input_overflow'):
                                 self.input_overflow();continue
@@ -359,6 +366,12 @@ class ManagedVoice:
                 await asyncio.sleep(.005)
         finally:
             self.shutdown.set()
+            cancel_attention=getattr(self,'cancel_sound_attention',None)
+            if cancel_attention:cancel_attention('shutdown')
+            side_task=getattr(self,'side_task',None)
+            if side_task:await asyncio.gather(side_task,return_exceptions=True)
+            closer=getattr(self,'close_sound_attention',None)
+            if closer:await asyncio.to_thread(closer)
             if getattr(self,'audio_recovery',None):
                 self.audio_recovery.cancel();await asyncio.gather(self.audio_recovery,return_exceptions=True)
             if self.cloud_task:
