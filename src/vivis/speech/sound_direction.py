@@ -170,7 +170,7 @@ def main(argv=None):
                 print(f'{port.device}  {port.description}  {port.hwid}  '
                       f'{"匹配声源CH340" if match else "其他设备，不打开"}')
             if not ports:
-                print('未枚举到USB串口；请检查USB主控、转接板和连接')
+                print('未枚举到USB串口节点；请先用lsusb核对转接板。USB可见但无串口节点时，请检查串口驱动；CH340需要ch341驱动。')
             return 0
         port = select_port(ports, c['serial'], protected, args.port)
         receiver = open_receiver(port, c['serial'])

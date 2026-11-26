@@ -1,5 +1,11 @@
 # Repository Guidelines
 
+## Live DOA adapter driver restored, UART data pending (2026-11-26, latest)
+
+Operator stoppedP1 normally18:41 to test DOA; keep it stopped for their60s acceptance. USB host and devices currently enumerate. CH3401a86:7523 was present but unbound; current6.8.12-1021-tegra lacked ch341. HeadCH3431a86:55d3 remained usb_ch343 /dev/ttyCH343USB0. Built unmodified official gregkh/linux v6.8.12 ch341.c against exact installed headers (source SHA b286d49dd1f2a3a8f96188888b4df7869f65c4d9bead51d5291d50150b235951); vermagic matches usbserial. Loaded dependency/newdriver only, no USB reset, head open or service restart. Verified head binding unchanged, target now /dev/ttyUSB0. Installed /lib/modules/6.8.12-1021-tegra/extra/vivis/ch341.ko +depmod for alias autoload. Evidence/source/build/install manifest outputs/diagnostics/ch341_driver_20261126; external GPL source/binary stay ignored.
+
+5s actualserial read at1M/8N1 opened/closed cleanly but0bytes/0frames, so DOA NOT passed. Wait operator talking/station tests; ifstill0 check vendor TX→RX +GND, no guessedpower/firmware commands. Do not conflate current missing-driver issue with earlier xHCI controller death. --list no-node message now points out USB presence vs missing driver; parser/motion/baud configs unchanged. HK_QXMIC_V3_INTEGRATION12.3 contains updated status.
+
 ## General reply permission across presence expiry (2026-11-26, latest)
 
 User rejects phrase-specific workarounds and authorizes fixing the general race. At18:07 last face~27.6s, speech start39.8s, reply creation42.6s crossed15s face grace; live resp_W6rKH2iqMk6xSc3iWVm1u was preblocked despite complete generated answer. Diagnosis outputs/diagnostics/missing_reply_20261126_180742/finding.json. Current servicePID21977 remains running; do not restart hardware/service while operator tests unless authorized.
