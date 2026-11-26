@@ -45,6 +45,12 @@ class VoiceBuffer:
         self.paused=set();self.pause_fade_left=0;self.pause_reported=set()
         self.resume_fades={};self.resume_waiting=set()
         self.mouth=None;self.consumed={};self.audio_observer=None
+        self.expression_clock=None;self.expression_clock_errors=0
+
+    def expression_notice(self, method, *args):
+        if self.expression_clock is None:return
+        try:getattr(self.expression_clock,method)(*args)
+        except Exception:self.expression_clock_errors+=1  # Optional animation never stops DAC.
 
     def add(self, response_id, pcm):
         if not isinstance(response_id,str) or not response_id or len(pcm)%2:raise ValueError('Invalid audio response packet')
@@ -76,6 +82,7 @@ class VoiceBuffer:
             fresh=ids-self.paused
             self.paused.update(ids)
             if fresh:self.pause_fade_left=self.fade
+            self.expression_notice('pause',ids)
             return dict(responses=sorted(ids),retained_samples=sum(len(v) for sid,v in self.blocks if sid in ids))
 
     def response_ids(self,response_id=None):
@@ -94,12 +101,14 @@ class VoiceBuffer:
             self.paused.difference_update(ids);self.pause_reported.difference_update(ids)
             for sid in ids:
                 self.resume_fades[sid]=self.fade;self.resume_waiting.add(sid)
+            self.expression_notice('resume',ids)
             return dict(responses=sorted(ids),retained_samples=sum(len(v) for sid,v in self.blocks if sid in ids))
 
     def cancel(self, response_id=None):
         with self.lock:
             if self.mouth:self.mouth.deactivate()
             ids=({sid for sid,_ in self.blocks}|set(self.filters)|self.paused) if response_id is None else {response_id}
+            self.expression_notice('cancel',response_id)
             fade_left=self.fade;kept=deque();dropped=0;faded=0
             for sid,values in self.blocks:
                 if sid not in ids:kept.append((sid,values));continue
@@ -154,6 +163,8 @@ class VoiceBuffer:
                 if len(self.consumed)>128:self.consumed.pop(next(iter(self.consumed)))
                 if len(values)>take:self.blocks.appendleft((sid,values[take:]))
                 if np.any(np.abs(values[:take])>1e-6):
+                    if sid not in self.cancelled:
+                        self.expression_notice('played',sid,position,position+take,dac_time+cursor/48000)
                     self.started_responses.add(sid)
                     if self.last_audible!=sid:
                         self.notices.put(dict(kind='playback_started',response_id=sid,dac_monotonic=dac_time+cursor/48000))

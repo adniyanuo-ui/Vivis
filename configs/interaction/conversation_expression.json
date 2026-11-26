@@ -1,0 +1,24 @@
+{
+  "schema_version": "vivis-conversation-expression-1.0",
+  "enabled": true,
+  "publish_interval_s": 0.05,
+  "max_age_s": 0.3,
+  "attack_s": 0.3,
+  "release_s": 0.6,
+  "cancel_release_s": 0.15,
+  "late_intent_s": 0.35,
+  "attention_hold_s": 6.0,
+  "listening_intensity": 0.35,
+  "thinking_intensity": 0.2,
+  "listening_smile_scale": 0.4,
+  "speaking_weights": {
+    "BrowOuterUpLeft": 0.06,
+    "BrowOuterUpRight": 0.06
+  },
+  "shared_mouth": {
+    "enabled": true,
+    "max_blend": 0.12,
+    "articulation_threshold": 0.25,
+    "max_range_fraction": 0.02
+  }
+}

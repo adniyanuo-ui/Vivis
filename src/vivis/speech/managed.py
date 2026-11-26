@@ -64,6 +64,8 @@ def voice_configuration(speech,robot):
         if task_config['enabled'] and not memory_config['enabled']:raise ValueError('Robot tasks require persistent memory storage')
         from vivis.interaction.expression_intent import configuration as expression_configuration
         expression_configuration()
+        from vivis.interaction.conversation_expression import configuration as conversation_expression_configuration
+        conversation_expression_configuration()
         from vivis.interaction.presence_entry import configuration as entry_configuration
         entry_configuration()
         from vivis.interaction.social_conversation import configuration as social_configuration,SocialConversation
@@ -361,6 +363,13 @@ class ManagedVoice:
                 self.audio_recovery.cancel();await asyncio.gather(self.audio_recovery,return_exceptions=True)
             if self.cloud_task:
                 self.cloud_task.cancel();await asyncio.gather(self.cloud_task,return_exceptions=True)
+            conversation_animation=getattr(self,'conversation_animation',None)
+            if conversation_animation:
+                conversation_animation.close()
+                self.summary['conversation_expression']=dict(enabled=conversation_animation.c['enabled'],
+                    error=conversation_animation.error,no_extra_llm=True,
+                    published_packets=conversation_animation.published,
+                    callback_errors=getattr(self.player,'expression_clock_errors',0))
             self.audio.close()
             if self.mouth:
                 self.mouth.close()

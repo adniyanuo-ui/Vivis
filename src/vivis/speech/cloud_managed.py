@@ -3,6 +3,7 @@ import asyncio
 import base64
 from collections import deque
 import json
+import queue
 import sqlite3
 import time
 import uuid
@@ -58,6 +59,11 @@ CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负�
     'controller_state.unattributed_source_notice=true表示识别片段没有可靠的话轮归属，不能据此办理业务或宣称已记录；请用户完整表达当前请求，只问缺项，不把查询误说成登记取件码失败。'
     '交互态用户说笑一个/别笑了/认真一点/恢复自然时，调用set_expression，source=command；不能只口头答应。'
     '聊天自动回应使用同一个set_expression，source=social，结合当前话语、上下文和可观察表情；不要机械模仿。'
+    '用户分享明确的实验成功、好消息时，回答前选择surprise或joy；表达疲惫或烦恼时选concern，严肃解释选listening或attentive。'
+    '在需要改变表达时，为当前回答开始前安排一次source=social；普通简短事实保持自然，不每句都调用。'
+    '只读恢复、节目接续或留言专用朗读遵守更窄权限，不额外调用自动表情工具；本地自然状态仍可继续。'
+    '自动表情scheduled_for_current_reply只是排入本句播放，不是已经做完动作；自然回答用户，不念调度状态，不等待表情回执。'
+    'skipped_late_expression表示本句已经出声、表情来晚了，继续回答，不补做旧表情、不重说本句。'
     '已有四种固定组合：joy开心、concern温和关切、listening认真倾听、surprise惊喜。用户明确要求用source=command；聊天语义适合时可用source=social。它们是标定通道组合，不是新舵机动作。主动话题由本地空闲调度，不能只因视觉变化就自行插话。'
     '用户苦笑、抱怨、表达难过或谈严肃事情时，优先attentive或neutral收起笑容；愉快交流可温和smile，不每句都调用。'
     '视觉数据只是面部动作观察，不证明内心情绪。52基础表情均可调用：单通道用标准通道名，多通道用custom和weights。'
@@ -178,6 +184,10 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         self.announcement_revision=None;self.announcement_kind='welcome';self.tool_retry_budget=2;self.idle_sleep_revision=None
         self.tool_repair=None;self.control_pending=False;self.expression_pending=None;self.expression_outcome=None
         self.expression=IntentWriter(self.folder/'expression_intent.json',expression_configuration())
+        from vivis.interaction.conversation_expression import configuration as conversation_configuration
+        from vivis.speech.conversation_animation import ConversationAnimation
+        self.conversation_animation=ConversationAnimation(self.folder/'conversation_expression.json',
+            conversation_configuration(),self.expression.c)
         self.dialect=SpeechDialect()
         self.active_voice=self.session['voice'];self.pending_voice_switch=None
         self.service_recovery=ServiceRecovery(self.config['service_recovery'])
@@ -189,9 +199,20 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         self.init_continuity()
         self.init_fused_identity()
 
+    def sync_conversation_animation(self):
+        animation=getattr(self,'conversation_animation',None)
+        if animation is None:return None
+        scope=(id(self.message_connection),self.memory_session,self.conversation_person,
+            self.context['revision'],self.input_generation)
+        enabled=(self.context['mode']=='interaction' and self.context['ready']
+            and self.presence.allowed() and self.health_available)
+        animation.context(scope,enabled,self.in_speech)
+        return scope
+
     def health(self,available,reason,*,recovery_kind=None):
         if available==self.health_available:return
         self.health_available=available
+        self.sync_conversation_animation()
         if not available:
             self.message_connection=object()
             if self.message_lane:self.message_lane.reset_context()
@@ -453,6 +474,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                 elif previous['ready'] and not command['ready']:self.announcement_kind='quiet'
             if mode!='standby' and self.memory_task and not self.memory_task.done():self.memory_task.cancel()
             self.context={k:command[k] for k in ('revision','mode','target','ready')}
+            self.sync_conversation_animation()
             if 'speech_ready' in command:self.context['speech_ready']=command['speech_ready']
             if 'standby_fault' in command:self.context['standby_fault']=command['standby_fault']
             if self.explicit_wake_pending:
@@ -1983,7 +2005,15 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
             elif name=='set_expression':
                 if self.context['mode']!='interaction' or not self.context['ready'] or not self.presence.allowed():
                     raise ValueError('Expression is only available in ready interaction; stop the current programme first if user requested it')
-                result=self.expression.publish(args,revision)
+                animation=getattr(self,'conversation_animation',None)
+                if animation is not None and animation.c['enabled'] and args.get('source')=='social':
+                    active=self.expression.active
+                    if (active and active['source']=='command' and active['expression']!='auto'
+                            and time.monotonic()<active['expires_monotonic']):
+                        result=dict(status='suppressed_by_explicit_command',intent_id=active['id'])
+                    else:
+                        result=animation.stage(args,self.sync_conversation_animation())
+                else:result=self.expression.publish(args,revision)
                 if followup:followup['expression_used']=True
                 if expression_recovery:self.recovered_expression['consumed']=True
                 output=dict(accepted=True,**result)
@@ -2119,6 +2149,13 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         if switch_request is not None:switch_request['ready']=True
 
     async def cloud(self,_epoch):
+        try:
+            await self.conversation_cloud_loop(_epoch)
+        finally:
+            animation=getattr(self,'conversation_animation',None)
+            if animation:await asyncio.to_thread(animation.close)
+
+    async def conversation_cloud_loop(self,_epoch):
         while not self.shutdown.is_set():
             try:
                 await self._connection();return
@@ -2219,6 +2256,9 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                     self.emit(dict(kind='voice_warning',epoch=self.epoch,message='Qwen连接已恢复，请继续说话；刚才未完成的指令不会自动重放。'))
                 self.log.write('knowledge_context_initial',epoch=self.epoch,recognized=identity['recognized'],person_id=identity['person_id'])
                 self.player.mouth=self.mouth
+                self.player.expression_clock=self.conversation_animation
+                self.sync_conversation_animation()
+                self.conversation_animation.start()
                 transcript_response_id=None
                 def transcript(role,text):
                     if not isinstance(text,str) or not text.strip():return
@@ -2352,6 +2392,9 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                             source_item=(state.current_user_turn or {}).get('item_id')
                             self.message_receipts.bind(rid,self.input_generation,source_item)
                             self.reply_people[rid]=self.turn_person
+                            scope=self.sync_conversation_animation()
+                            if source_item and source_item==self.turn_item_id and self.can_speak():
+                                self.conversation_animation.register(rid,scope)
                             if len(self.reply_people)>128:self.reply_people.pop(next(iter(self.reply_people)))
                             if len(self.response_revisions)>128:self.response_revisions.pop(next(iter(self.response_revisions)))
                             if self.can_speak() and self.message_claimed!=self.input_generation:self.speech_responses.append(rid)
@@ -2370,6 +2413,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                             self.presence.continued_turn()
                             if self.can_speak():self.announcement_revision=None
                             self.begin_user_turn(event.get('item_id'))
+                            self.sync_conversation_animation()
                             self.continuity_start(event,journal_timeline)
                             self.question_started(event.get('item_id'),state)
                             self.message_receipts.source_turns[event.get('item_id')]=self.input_generation
@@ -2382,6 +2426,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                                 self.turn_item_id=None;self.turn_ended_at=None
                             else:self.turn_ended_at=time.monotonic()
                         if kind=='input_audio_buffer.speech_stopped':
+                            self.sync_conversation_animation()
                             self.response_waiting_user_end=False
                             if self.continuity:self.continuity.end(event.get('item_id'),journal_timeline.at(event.get('audio_end_ms')),
                                 event.get('reason')!='turn_invalid',self.continuity_evidence(self.turn_person))
@@ -2447,6 +2492,16 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                         if self.turn_engaged and self.presence.wake_until>0 and (self.in_speech or state.generating or self.player.count):
                             self.presence.wake()
                         instructions,identity,permission=self.context_snapshot()
+                        self.sync_conversation_animation()
+                        animation=self.conversation_animation
+                        if animation.error!=getattr(self,'conversation_animation_error',None):
+                            self.conversation_animation_error=animation.error
+                            self.log.write('conversation_expression_publisher',error=animation.error,
+                                audio_blocked=False)
+                        for _ in range(16):
+                            try:pose=animation.events.get_nowait()
+                            except queue.Empty:break
+                            self.log.write('conversation_expression_state',**pose)
                         arrived=self.context['ready'] and self.reception.observe(self.presence.last_visible,self.context['mode'],
                             person_id=self.identified_person(),occupied=self.presence.person_count()>0)
                         if arrived and (self.continuing_program_turn() or self.reception_turn_in_progress(state)):
@@ -2587,6 +2642,9 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
             if self.program_check_task:
                 self.program_check_task.cancel();await asyncio.gather(self.program_check_task,return_exceptions=True)
             self.cancel_public_prompt()
+            animation=getattr(self,'conversation_animation',None)
+            if animation:
+                animation.context(None,False,False)
             if self.public_prompt_task:await asyncio.gather(self.public_prompt_task,return_exceptions=True)
             self.cancel_farewell('connection_closed')
             if self.farewell_task:

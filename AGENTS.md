@@ -1,5 +1,15 @@
 # Repository Guidelines
 
+## Conversational expressions implemented, onsite pending (2026-11-26, latest)
+
+User reprioritized this ahead of liveDOA and approved all three steps with NO side LLM; operator will reboot Orin after code/self-test. Do not restart P1, resetUSB or drive head now. Baseline2872263. New conversation_expression config owns cosmetic envelope/lease/shared-smile settings. SameQwen set_expression now requires explicit source in its tool schema: command retains old motor ack, social stages one current-reply intent and never waits for motion ack. Recovered/read-only/program-followup authority stays narrower, unchanged.
+
+VoiceBuffer records only tiny response/sample/DAC spans via optional in-memory hook; publisher writes outside callback. Scope includes connection/session/person/revision/input-generation, semantics bind only registered current reply. No hard total wait timeout; actual audio can wait on network, intents arriving>.35s after firstDAC are skipped. Voice end drives release; interrupt/new turn/change/connection resets old semantics. Fixed/ledger/retracted-turn resumed audio gets neutral-only lifecycle and cannot inherit previous intent. Thread is stopped off event loop; inactive status writes only on change. Explicit command wins through release, blink/gaze/articulation keep ownership. Existing A2F neutral input/mouth extraction,1.2mouth gain,+9dB,voice,PID/speeds/limits/AEC remain.
+
+Upper-face intent follows actualDAC and local listening/thinking/relaxing states. Shared MouthSmile uses symmetric common weight, max12% blend only in weak articulation,2% of smaller neutral-to-limit headroom, original limits; never jaw/tongue/gaze, including no-A2F fallback. All input arrays remain unmodified. Module or shared mouth can independently disable via config then restart. Logs conversation_expression_state and control preview are targets, not skin proof.
+
+Final fixed-version1408tests passed(3optional skips); final no-A2F jaw guard rechecked18new+9legacy expression+7mouth tests.15cached voice clips/1874frames all bounded, jaw/tongue/gaze unchanged;530frames small shared delta,max9.06counts. Full assets/three examples/P1 offline checks pass. Word iteration02 remains15pages, now prioritizes chat expressions; ACCEPTANCE40 gives combined tests and P1_REALTIME_VOICE19 explains rollback. Evidence outputs/diagnostics/conversation_expression_20261126. Live model selection, visible silicone naturalness and actualCH340 stream still require operator reboot/test; USB remains root hubs only/P1 failed. No remote push.
+
 ## Sound direction and next two weeks (2026-11-26, latest)
 
 User provisionally accepted iteration01 identity; small issues are deferred, not permission to retune thresholds. Iteration02 Word now includes a two-week expressive-conversation plan (15pages), current A2F neutral input/mouth-only consumption, semantic intent, DAC-bound expression lifecycle and conservative shared-actuator blending. No expression runtime change was made in this task. Multispeaker sessions, voice-assisted enrollment and independent Live works remain later work.

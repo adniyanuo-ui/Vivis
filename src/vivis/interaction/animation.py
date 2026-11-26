@@ -149,3 +149,42 @@ class FrameMapper:
             if sid in self.ids and sid not in protected:result[self.ids.index(sid)]=mapped[1,i]
         self.last_social_delta=result-baseline
         return result
+
+    def conversation_target(self, target, base_weights, expression, speech, policy, protected_ids=()):
+        """Upper-face overlay plus a bounded symmetric smile in low articulation."""
+        self.prepare_expression_mapping()
+        protected=set(protected_ids)
+        for name,axes in self.expression_axes.items():
+            if name.startswith(('Jaw','Tongue')):protected|=axes
+        upper={k:v for k,v in expression.items() if not k.startswith(('Mouth','Jaw','Tongue','EyeLook'))}
+        result=np.array(self.apply_expression(target,base_weights,upper,1.,'social',protected_ids=protected),copy=True)
+        self.last_conversation_ids=list(self.last_expression_ids)
+        self.last_conversation_mouth_delta={}
+        if speech is None or not policy['enabled']:return result
+        smile=min(expression.get('MouthSmileLeft',0.),expression.get('MouthSmileRight',0.))
+        if smile<=1e-5:return result
+        articulation=max((speech[i] for i,name in enumerate(self.order[:52])
+            if name.startswith(('Mouth','Jaw','Tongue')) and not name.startswith('MouthSmile')),default=0.)
+        blend=policy['max_blend']*max(0.,1-articulation/policy['articulation_threshold'])**2
+        if blend<=1e-8:return result
+        self.prepare_expression_mapping()
+        values=np.zeros((2,61));values[:,:52]=np.clip(np.asarray(base_weights)*self.gains,0,1)
+        for name in ('MouthSmileLeft','MouthSmileRight'):
+            i=self.order.index(name);values[1,i]=max(values[1,i],smile)
+        mapped,_=self.expression_mapping.map(values)
+        forbidden=set(protected_ids)|set(self.profile.get('gaze_owner_ids',[]))
+        for name,axes in self.expression_axes.items():
+            if name.startswith(('Jaw','Tongue')):forbidden|=axes
+        allowed=(self.expression_axes['MouthSmileLeft']|self.expression_axes['MouthSmileRight'])
+        allowed&=set(self.speech_owned_ids)
+        allowed-=forbidden
+        motors={m['id']:m for m in self.profile['motors']}
+        for j,sid in enumerate(self.expression_mapping.active):
+            if sid not in allowed:continue
+            m=motors[sid];col=self.ids.index(sid)
+            low=max(m['safe_min'],m['device_min']);high=min(m['safe_max'],m['device_max'])
+            cap=policy['max_range_fraction']*min(m['neutral']-low,high-m['neutral'])
+            delta=float(np.clip((mapped[1,j]-mapped[0,j])*blend,-cap,cap))
+            before=result[col];result[col]=np.clip(before+delta,low,high)
+            if abs(result[col]-before)>1e-8:self.last_conversation_mouth_delta[sid]=float(result[col]-before)
+        return result

@@ -124,6 +124,13 @@ class IdleFrames:
         if self.expression_response and self.expression_response.state in ('concern','listening'):desired=0.
         if getattr(self,'expression_intent',None) is not None:
             desired=self.expression_intent.step(desired,now)
+        conversation=getattr(self,'conversation_expression',None)
+        explicit=getattr(self,'expression_intent',None)
+        active=explicit.active if explicit is not None else None
+        command=bool(active and active['source']=='command' and active['expression']!='auto'
+            and (now<active['expires_monotonic'] or explicit.blend>.01))
+        talking_pose=conversation.step(now) if conversation is not None else {}
+        if conversation is not None and not command:desired*=conversation.smile_scale
         self.smile+=(desired-self.smile)*(-math.expm1(-dt/self.response_tau))
         speech=self.mouth.sample(now) if self.mouth else None
         if speech is not None:
@@ -136,7 +143,7 @@ class IdleFrames:
                 self.mapper.profile['mouth_motion_gain'])[0][0]
         envelope=getattr(self,'expression_intent',None)
         blink_axes=set()
-        if automatic or envelope is not None:
+        if automatic or envelope is not None or conversation is not None:
             self.mapper.prepare_expression_mapping()
             for name in ('EyeBlinkLeft','EyeBlinkRight'):
                 if weights[self.mapper.order.index(name)]>0:blink_axes|=self.mapper.expression_axes[name]
@@ -159,6 +166,14 @@ class IdleFrames:
             if envelope.active and envelope.active['weights']:self.mapper.prepare_expression_mapping()
             blocked=(set(self.mapper.speech_owned_ids)|set(self.mapper.profile.get('gaze_owner_ids',[]))|blink_axes) if envelope.channel_source=='social' else set()
             envelope.acknowledge(self.mapper.expression_axes,blocked)
+        if conversation is not None and not command and talking_pose:
+            target=self.mapper.conversation_target(target,weights,talking_pose,speech,
+                conversation.c['shared_mouth'],protected_ids=blink_axes)
+            conversation.diagnostic.update(target_actuator_ids=self.mapper.last_conversation_ids,
+                shared_mouth_delta_counts=self.mapper.last_conversation_mouth_delta)
+        elif conversation is not None:
+            conversation.diagnostic.update(target_actuator_ids=[],shared_mouth_delta_counts={},
+                suppressed_by_explicit_command=command)
         self.smile_ticks+=int(self.smile>.01);self.smile_peak=max(self.smile_peak,self.smile)
         for sid,delta in zip(self.mapper.ids,self.mapper.last_social_delta):
             self.social_delta_by_id[sid]=max(self.social_delta_by_id.get(sid,0.),abs(float(delta)))
@@ -246,6 +261,7 @@ class StandbyGaze(MojiaPlaybackGaze):
             d['expression_eye_override_ids']=self.source.mapper.last_expression_eye_ids
         d.update(standby_glance_blend=self.glance_blend,tracking_active=d['state'] in ('tracking','holding'))
         if getattr(self.source,'expression_response',None):d['automatic_expression']=dict(self.source.expression_response.diagnostic)
+        if getattr(self.source,'conversation_expression',None):d['conversation_expression']=dict(self.source.conversation_expression.diagnostic)
         self.source.publish(now,result,d)
         return result
 
@@ -354,6 +370,9 @@ def main(argv=None,default_config=None):
         if behavior!='interaction':parser.error('Expression intents are only owned by interaction')
         from vivis.interaction.expression_intent import IntentEnvelope,configuration
         source.expression_intent=IntentEnvelope(args.expression_intent,configuration())
+        from vivis.interaction.conversation_expression import ConversationEnvelope,configuration as conversation_configuration
+        source.conversation_expression=ConversationEnvelope(args.expression_intent.with_name('conversation_expression.json'),
+            conversation_configuration())
         mapper.prepare_expression_mapping()
     needs_camera=source.tracking_enabled or source.response['enabled'] or source.presence_only
     required=[ROOT/source.perception[k] for k in ('python','model')] if source.perception else []
