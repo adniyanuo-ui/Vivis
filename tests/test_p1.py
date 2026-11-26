@@ -201,10 +201,13 @@ class IdleTests(unittest.TestCase):
         from vivis.runtime.robot import Robot
         c=read('configs/interaction/standby.json')
         for name in ('xiaoshuai','mojia'):
-            p,ids,home,mapper,_,_=plan(Robot(ROOT/f'configs/robots/{name}/robot.json'),c,1.)
+            p,ids,home,mapper,_,neutral=plan(Robot(ROOT/f'configs/robots/{name}/robot.json'),c,1.)
             idle=IdleFrames(mapper,c,seed=42);motors={m['id']:m for m in p['motors']}
             start=idle.sample(0.,0.)
-            np.testing.assert_array_equal(start,mapper.neutral)
+            # Homing keeps its mechanical zero; post-home idle eases into the
+            # warm appearance, rather than jumping to the complete smile.
+            np.testing.assert_array_equal(neutral,np.repeat(mapper.neutral[None,:],60,axis=0))
+            self.assertLess(np.max(abs(start-mapper.neutral)),10.)
             for step in range(1,3601):
                 goals=idle.sample(step/60,step/60)
                 for sid,v in zip(ids,goals):self.assertTrue(motors[sid]['safe_min']<=v<=motors[sid]['safe_max'])

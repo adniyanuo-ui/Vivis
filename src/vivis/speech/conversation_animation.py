@@ -8,6 +8,7 @@ import time
 import uuid
 
 from vivis.interaction.expression_intent import arguments, atomic_json
+from vivis.interaction.conversation_expression import resting_pose
 
 
 class ConversationAnimation:
@@ -129,10 +130,11 @@ class ConversationAnimation:
                 self.attention_since = None
             current = bool(span and span[3] <= now < span[3]+(span[2]-span[1])/48000
                            and span[0] in self.records and span[0] not in self.paused)
-            phase, style, weights, smile, rid, elapsed = 'neutral', 'neutral', {}, 1., None, None
+            phase, style, weights, smile, rid, elapsed = 'neutral', 'default_smile', resting_pose(self.c, self.expressions), 1., None, None
             intent_id=None
             if not self.enabled:
                 phase = 'disabled'
+                weights = {}
             elif self.in_speech:
                 phase, style = 'listening', 'listening'
                 weights = {k: v*self.c['listening_intensity']
@@ -143,7 +145,9 @@ class ConversationAnimation:
                 self.attention_since = None
                 elapsed = (start+min(end-start, (now-dac)*48000))/48000
                 phase = 'speaking'
-                weights = {} if self.records[rid].get('neutral_only') else dict(self.c['speaking_weights'])
+                weights = resting_pose(self.c, self.expressions)
+                if not self.records[rid].get('neutral_only'):
+                    weights.update(self.c['speaking_weights'])
                 intent = self.pending
                 if intent and intent['bound'] == rid:
                     intent_id=intent['id']
@@ -152,13 +156,17 @@ class ConversationAnimation:
                               self.expressions['presets']['listening'] if style == 'attentive' else
                               intent['weights'])
                     intensity = intent['intensity']
-                    if style == 'attentive':
+                    if style in ('neutral', 'auto'):
+                        style = 'default_smile'
+                        chosen = resting_pose(self.c, self.expressions)
+                        intensity = 1.
+                    elif style == 'attentive':
                         intensity = self.c['listening_intensity']
                     # Initial emphasis relaxes over actual played samples, never text arrival.
                     strength = intensity*(.7+.3*math.exp(-elapsed/2.))
                     strength *= math.exp(-max(0., elapsed-intent['duration_s'])/self.c['release_s'])
                     weights = {k: v*strength for k, v in chosen.items()}
-                    if style in ('concern', 'listening', 'attentive', 'neutral'):
+                    if style in ('concern', 'listening', 'attentive'):
                         smile = 0.
             elif (self.attention_since is not None
                   and 0 <= now-self.attention_since <= self.c['attention_hold_s']):

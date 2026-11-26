@@ -153,7 +153,9 @@ class StandbySocialTests(unittest.TestCase):
                 if i==60:self.assertAlmostEqual(source.smile,before)
             self.assertLess(source.smile,.0001);self.assertGreater(source.smile_ticks,0)
             self.assertGreater(source.social_delta_by_id[10],10.)
-            self.assertAlmostEqual(goals[ids.index(10)],mapper.neutral[ids.index(10)],places=2)
+            resting=mapper.conversation_target(mapper.neutral,[0.]*52,source.resting_pose,None,
+                source.conversation_expression.c['shared_mouth'])
+            self.assertAlmostEqual(goals[ids.index(10)],resting[ids.index(10)],places=1)
 
     def test_tracking_and_quiet_glances_share_one_controller_and_preserve_bounds(self):
         profile,ids,_,mapper,source,neutral=plan(robot(),settings(),30.)

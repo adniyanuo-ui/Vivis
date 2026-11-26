@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, patch
 import numpy as np
 
 from vivis.paths import ROOT
-from vivis.interaction.conversation_expression import ConversationEnvelope, configuration
+from vivis.interaction.conversation_expression import ConversationEnvelope, configuration, resting_pose
 from vivis.interaction.expression_intent import configuration as expressions, atomic_json, IntentEnvelope
 from vivis.interaction.standby import plan
 from vivis.runtime.robot import Robot
@@ -24,6 +24,7 @@ class ConversationAnimationTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.c, self.expressions = configuration(), expressions()
+        self.resting = resting_pose(self.c, self.expressions)
         self.path = Path(self.tmp.name)/'conversation_expression.json'
         self.animation = ConversationAnimation(self.path, self.c, self.expressions)
         self.animation.context(('visit', 1), True, False, 10.)
@@ -42,7 +43,7 @@ class ConversationAnimationTests(unittest.TestCase):
         self.assertNotIn('user_emotion', packet)
         a.context(self.scope, True, False, 11.)
         self.assertEqual(a.snapshot(11.1)['phase'], 'thinking')
-        self.assertEqual(a.snapshot(18.)['weights'], {})
+        self.assertEqual(a.snapshot(18.)['weights'], self.resting)
 
     def test_future_dac_not_text_or_generation_end_starts_expression(self):
         self.stage()
@@ -54,7 +55,7 @@ class ConversationAnimationTests(unittest.TestCase):
         self.assertEqual(playing['style'], 'joy')
         self.assertAlmostEqual(playing['played_seconds'], .02)
         self.assertGreater(playing['weights']['MouthSmileLeft'], 0.)
-        self.assertEqual(a.snapshot(12.1)['weights'], {})
+        self.assertEqual(a.snapshot(12.1)['weights'], self.resting)
 
     def test_late_intent_skipped_without_restarting_reply(self):
         a = self.animation
@@ -63,7 +64,7 @@ class ConversationAnimationTests(unittest.TestCase):
         result = a.stage(dict(expression='surprise', source='social'), self.scope, 11.8)
         self.assertEqual(result['status'], 'skipped_late_expression')
         self.assertFalse(result['audio_blocked'])
-        self.assertEqual(a.snapshot(11.9)['style'], 'neutral')
+        self.assertEqual(a.snapshot(11.9)['style'], 'default_smile')
         a.register('reply', self.scope, 12.)  # Duplicate metadata cannot reset its first DAC.
         self.assertEqual(a.stage(dict(expression='joy',source='social'),self.scope,12.)['status'],
                          'skipped_late_expression')
@@ -81,7 +82,8 @@ class ConversationAnimationTests(unittest.TestCase):
         self.assertEqual(a.snapshot(11.1)['style'], 'joy')
         a.cancel('reply')
         a.played('reply', 48000, 96000, 11.2)
-        self.assertEqual(a.snapshot(11.3)['weights'], {})
+        self.assertEqual(a.snapshot(11.3)['weights'], self.resting)
+        self.assertIsNone(a.snapshot(11.3)['intent_id'])
         a.register('new', self.scope, 11.3)
         a.stage(dict(expression='concern', source='social'), self.scope, 11.3)
         a.played('new', 0, 48000, 11.4)
@@ -119,11 +121,11 @@ class ConversationAnimationTests(unittest.TestCase):
         a.register('second', self.scope, 10.)
         a.played('reply', 0, 4800, 11.)
         a.played('second', 0, 4800, 11.1)
-        self.assertEqual(a.snapshot(11.15)['style'], 'neutral')
+        self.assertEqual(a.snapshot(11.15)['style'], 'default_smile')
         self.assertIsNone(a.snapshot(11.15)['intent_id'])
         a.played('unrelated-receipt', 0, 48000, 11.2)
         self.assertEqual(a.snapshot(11.3)['phase'], 'speaking')
-        self.assertEqual(a.snapshot(11.3)['weights'], {})
+        self.assertEqual(a.snapshot(11.3)['weights'], self.resting)
         self.assertIsNone(a.snapshot(11.3)['intent_id'])
 
     def test_serious_intent_suppresses_automatic_smile_only_during_its_audio(self):
@@ -132,6 +134,59 @@ class ConversationAnimationTests(unittest.TestCase):
         a.played('reply', 0, 48000, 11.)
         self.assertEqual(a.snapshot(11.2)['smile_scale'], 0.)
         self.assertEqual(a.snapshot(12.2)['smile_scale'], 1.)
+        self.assertEqual(a.snapshot(12.2)['weights'], self.resting)
+
+    def test_resting_smile_uses_existing_joy_and_does_not_replace_serious_intents(self):
+        a=self.animation
+        self.assertEqual(a.snapshot(10.)['weights'],self.resting)
+        for name,value in self.resting.items():
+            self.assertAlmostEqual(value,self.expressions['presets']['joy'][name]*self.c['resting_smile_intensity'])
+        for style in ('concern','listening','attentive'):
+            a.cancel();self.stage(style)
+            a.played('reply',0,48000,11.)
+            packet=a.snapshot(11.1)
+            self.assertEqual(packet['style'],style)
+            self.assertEqual(packet['smile_scale'],0.)
+            self.assertNotIn('MouthSmileLeft',packet['weights'])
+        a.cancel();self.stage('neutral');a.played('reply',0,48000,12.)
+        self.assertEqual(a.snapshot(12.1)['style'],'default_smile')
+        self.assertGreater(a.snapshot(12.1)['weights']['MouthSmileLeft'],0.)
+
+    def test_standby_smile_is_post_home_bounded_and_explicit_stop_smile_wins(self):
+        from vivis.interaction.expression_intent import IntentWriter
+        robot=Robot(ROOT/'configs/robots/xiaoshuai/robot.json')
+        settings=json.loads((ROOT/'configs/interaction/standby.json').read_text())
+        profile,ids,home,mapper,source,nominal=plan(robot,settings,1.)
+        np.testing.assert_array_equal(nominal,np.repeat(mapper.neutral[None,:],60,axis=0))
+        first=source.sample(0.,10.)
+        for i in range(1,180):result=source.sample(i/60,10+i/60)
+        self.assertGreater(float(np.max(abs(result-mapper.neutral))),1.)
+        self.assertLess(float(np.max(abs(first-mapper.neutral))),float(np.max(abs(result-mapper.neutral))))
+        mapper.prepare_expression_mapping()
+        protected=set(profile.get('gaze_owner_ids',[]))
+        for name,axes in mapper.expression_axes.items():
+            if name.startswith(('Jaw','Tongue','EyeLook')):protected|=axes
+        for sid in protected & set(ids):self.assertAlmostEqual(result[ids.index(sid)],mapper.neutral[ids.index(sid)])
+        for m in profile['motors']:
+            self.assertTrue(m['safe_min']<=result[ids.index(m['id'])]<=m['safe_max'])
+        path=Path(self.tmp.name)/'command.json'
+        IntentWriter(path,self.expressions).publish(dict(expression='neutral',source='command'),1,13.)
+        source.expression_intent=IntentEnvelope(path,self.expressions)
+        for i in range(60):result=source.sample(3+i/60,13+i/60)
+        np.testing.assert_allclose(result,mapper.neutral,atol=.01)
+
+    def test_stale_semantics_release_to_fresh_default_not_old_emotion(self):
+        receiver=ConversationEnvelope(self.path,self.c,self.resting)
+        self.stage('surprise');self.animation.played('reply',0,48000,11.)
+        for i in range(30):
+            now=11+i/60;atomic_json(self.path,self.animation.snapshot(now));receiver.step(now)
+        for i in range(240):receiver.step(12+i/60)
+        self.assertFalse(receiver.diagnostic['valid'])
+        self.assertEqual(receiver.diagnostic['style'],'default_smile')
+        self.assertNotIn('EyeWideLeft',receiver.weights)
+        for name,value in self.resting.items():self.assertAlmostEqual(receiver.weights[name],value,places=3)
+        for i in range(120):receiver.step(16+i/60,resting_allowed=False)
+        self.assertLess(sum(receiver.weights.values()),.002)
 
     def test_expression_changes_with_played_samples_not_network_wait(self):
         self.stage()

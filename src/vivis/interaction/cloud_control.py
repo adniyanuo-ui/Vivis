@@ -28,7 +28,7 @@ def tools(program_ids):
             parameters=dict(type='object',properties=dict(kind=dict(type='string',enum=['thinking','declined'])),
                 required=['kind'],additionalProperties=False)),
         dict(type='function',name='set_expression',
-            description='交互态表情：joy开心、concern温和关切、listening认真倾听、surprise惊喜，均为已有52通道的固定组合。smile温和微笑；neutral/attentive收回；auto恢复自动回应。也可选单个标准通道或custom和weights组合，悲伤/哭脸/大笑用custom。明确动作口令source=command，仍按执行回执回答。聊天内容值得改变表达时，在回答出声前调用一次source=social，为当前回答排表情；安排成功不等于动作已完成，不等待自动表情再说话。普通事实问答无需强行调用；不能在本句播完后补做。点头属于颈部动作，不在52通道内。',
+            description='交互态表情：joy开心、concern温和关切、listening认真倾听、surprise惊喜，均为已有52通道的固定组合。默认底态为温和微笑。smile微笑；source=command的neutral用于明确别笑了，attentive认真收笑；auto恢复微笑底态及自动回应。source=social的neutral恢复默认微笑，关切或严肃内容用concern/listening/attentive。也可选单个标准通道或custom和weights组合，悲伤/哭脸/大笑用custom。明确动作口令source=command，仍按执行回执回答。聊天内容值得改变表达时，在回答出声前调用一次source=social，为当前回答排表情；安排成功不等于动作已完成，不等待自动表情再说话。普通事实问答无需强行调用；不能在本句播完后补做。点头属于颈部动作，不在52通道内。',
             parameters=dict(type='object',properties=dict(expression=dict(type='string',enum=['smile','neutral','attentive','auto','custom',*PRESETS,*channels]),
                 intensity=dict(type='number',minimum=0,maximum=1),duration_s=dict(type='number',minimum=1,maximum=30),
                 weights=dict(type='object',properties={name:dict(type='number',minimum=0,maximum=1) for name in channels},additionalProperties=False,minProperties=1),

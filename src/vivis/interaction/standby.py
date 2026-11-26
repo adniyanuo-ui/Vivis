@@ -43,6 +43,12 @@ class IdleFrames:
         self.missing_since=None;self.missing_origin=0.
         self.smile_ticks=0;self.smile_peak=0.;self.social_delta_by_id={}
         self.mouth=None
+        from vivis.interaction.conversation_expression import ConversationEnvelope,configuration,resting_pose
+        from vivis.interaction.expression_intent import configuration as expression_configuration
+        cosmetic=configuration()
+        self.resting_pose=resting_pose(cosmetic,expression_configuration())
+        self.conversation_expression=ConversationEnvelope(None,cosmetic,self.resting_pose)
+        if self.resting_pose:mapper.prepare_expression_mapping()
         self.speech_owned_ids=sorted(set(mapper.ids)&{sid for name,axes in mapper.shapes.items()
             if name.startswith(('Mouth','Jaw','Tongue')) for sid in axes})
         self.response=settings.get('social_response',{'enabled':False})
@@ -129,7 +135,8 @@ class IdleFrames:
         active=explicit.active if explicit is not None else None
         command=bool(active and active['source']=='command' and active['expression']!='auto'
             and (now<active['expires_monotonic'] or explicit.blend>.01))
-        talking_pose=conversation.step(now) if conversation is not None else {}
+        resting_allowed=not (self.expression_response and self.expression_response.state in ('concern','listening'))
+        talking_pose=conversation.step(now,resting_allowed=resting_allowed) if conversation is not None else {}
         if conversation is not None and not command:desired*=conversation.smile_scale
         self.smile+=(desired-self.smile)*(-math.expm1(-dt/self.response_tau))
         speech=self.mouth.sample(now) if self.mouth else None
@@ -167,7 +174,12 @@ class IdleFrames:
             blocked=(set(self.mapper.speech_owned_ids)|set(self.mapper.profile.get('gaze_owner_ids',[]))|blink_axes) if envelope.channel_source=='social' else set()
             envelope.acknowledge(self.mapper.expression_axes,blocked)
         if conversation is not None and not command and talking_pose:
-            target=self.mapper.conversation_target(target,weights,talking_pose,speech,
+            base=np.asarray(self.mapper.last_fused)/self.mapper.gains
+            if conversation.diagnostic.get('style')=='default_smile':
+                # The default is a floor, not a replacement for the user's
+                # stronger mirrored smile or the already established blink.
+                talking_pose={k:max(v,base[self.mapper.order.index(k)]) for k,v in talking_pose.items()}
+            target=self.mapper.conversation_target(target,base,talking_pose,speech,
                 conversation.c['shared_mouth'],protected_ids=blink_axes)
             conversation.diagnostic.update(target_actuator_ids=self.mapper.last_conversation_ids,
                 shared_mouth_delta_counts=self.mapper.last_conversation_mouth_delta)
@@ -194,6 +206,7 @@ class IdleFrames:
     def publish(self,now,target,diagnostic):
         if self.publisher is not None and now-self.last_publish>=.2:
             if self.expression_response:diagnostic=dict(diagnostic,automatic_expression=self.expression_response.diagnostic)
+            diagnostic=dict(diagnostic,conversation_expression=dict(self.conversation_expression.diagnostic))
             self.publisher.submit(dict(active=True,program=self.behavior,updated_monotonic=now,
                 **diagnostic,command_ids=self.mapper.profile['diagnostic_command_ids'],social_smile_strength=self.smile,
                 social_response_ticks=self.smile_ticks,nominal_goals=dict(zip(self.mapper.ids,map(float,target)))))
@@ -203,6 +216,8 @@ class IdleFrames:
         return dict(blinks=self.blinks,glances=self.looks,tracking_enabled=self.tracking_enabled,
             attention_enabled=self.attention.enabled,attention_aversion_count=self.attention.count,
             smile_enabled=self.response['enabled'],smile_channel_gain=self.mapper.smile_strength,
+            resting_smile_enabled=bool(self.resting_pose and self.conversation_expression.c['resting_smile_intensity']>0),
+            resting_smile_intensity=self.conversation_expression.c['resting_smile_intensity'],
             social_response_ticks=self.smile_ticks,social_envelope_peak=self.smile_peak,
             social_target_delta_peak_by_id=self.social_delta_by_id,
             expression_responses_enabled=self.expression_response is not None,
@@ -338,7 +353,7 @@ def main(argv=None,default_config=None):
     parser.add_argument('--seconds',type=float,default=600);parser.add_argument('--session-stop-file',type=Path)
     parser.add_argument('--tracking',choices=('on','off'),help='交互态可对照关闭跟随；真正待机固定关闭')
     parser.add_argument('--expression-responses',choices=('on','off'),help='交互态丰富表情回应开关；不改变原微笑参数')
-    parser.add_argument('--smile',choices=('on','off'),help='交互态可对照关闭微笑；真正待机固定关闭')
+    parser.add_argument('--smile',choices=('on','off'),help='交互态视觉微笑回应开关；默认微笑底态另由表情编排配置控制')
     parser.add_argument('--smile-strength',type=float,help='单次微笑增量0..0.5，不保存配置')
     parser.add_argument('--overlap-warmup',action='store_true',help=argparse.SUPPRESS)
     parser.add_argument('--home-speed',type=int,help='Single-session homing cap in counts/s; saved parameters unchanged')
@@ -372,7 +387,7 @@ def main(argv=None,default_config=None):
         source.expression_intent=IntentEnvelope(args.expression_intent,configuration())
         from vivis.interaction.conversation_expression import ConversationEnvelope,configuration as conversation_configuration
         source.conversation_expression=ConversationEnvelope(args.expression_intent.with_name('conversation_expression.json'),
-            conversation_configuration())
+            conversation_configuration(),source.resting_pose)
         mapper.prepare_expression_mapping()
     needs_camera=source.tracking_enabled or source.response['enabled'] or source.presence_only
     required=[ROOT/source.perception[k] for k in ('python','model')] if source.perception else []
@@ -381,6 +396,8 @@ def main(argv=None,default_config=None):
         print(json.dumps(dict(offline_valid=True,program=behavior,ids=ids,camera_opened=False,hardware_opened=False,
             continuous=args.continuous,tracking_enabled=source.tracking_enabled,smile_enabled=source.response['enabled'],
             smile_channel_gain=mapper.smile_strength,a2f_used=False,audio_opened=False,
+            resting_smile_enabled=source.summary()['resting_smile_enabled'],
+            resting_smile_intensity=source.summary()['resting_smile_intensity'],
             missing_dependencies=[str(x) for x in required if not x.is_file()]),ensure_ascii=False));return 0
     for path in required:
         if not path.is_file():parser.error('缺少待机视觉依赖：'+str(path)+'；运行python3 tools/setup_face_landmarker.py')

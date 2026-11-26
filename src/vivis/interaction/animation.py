@@ -157,6 +157,10 @@ class FrameMapper:
         for name,axes in self.expression_axes.items():
             if name.startswith(('Jaw','Tongue')):protected|=axes
         upper={k:v for k,v in expression.items() if not k.startswith(('Mouth','Jaw','Tongue','EyeLook'))}
+        if speech is None:
+            # No phoneme owns the mouth: the same calibrated smile may serve as
+            # the quiet resting appearance. Jaw/tongue and gaze remain reserved.
+            upper.update({k: v for k, v in expression.items() if k in ('MouthSmileLeft','MouthSmileRight')})
         result=np.array(self.apply_expression(target,base_weights,upper,1.,'social',protected_ids=protected),copy=True)
         self.last_conversation_ids=list(self.last_expression_ids)
         self.last_conversation_mouth_delta={}

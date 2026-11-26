@@ -20,6 +20,7 @@ def configuration(root=ROOT):
                         ('attack_s', .1, 2.), ('release_s', .1, 2.),
                         ('cancel_release_s', .05, .5),
                         ('late_intent_s', 0., 1.), ('attention_hold_s', 1., 15.),
+                        ('resting_smile_intensity', 0., .5),
                         ('listening_intensity', 0., .6), ('thinking_intensity', 0., .6),
                         ('listening_smile_scale', 0., 1.)):
         if (type(c.get(key)) not in (int, float) or not math.isfinite(c[key])
@@ -39,6 +40,13 @@ def configuration(root=ROOT):
     return c
 
 
+def resting_pose(c, expressions):
+    """A mild version of the existing joy preset, never a new mechanical zero."""
+    if not c['enabled']:
+        return {}
+    return {k: v*c['resting_smile_intensity'] for k, v in expressions['presets']['joy'].items()}
+
+
 def validate_weights(weights):
     if (not isinstance(weights, dict) or not set(weights) <= set(channel_names())
             or any(type(v) not in (int, float) or not math.isfinite(v) or not 0 <= v <= 1
@@ -48,8 +56,10 @@ def validate_weights(weights):
 
 class ConversationEnvelope:
     """Read a current producer lease; cancelled/stale poses release locally."""
-    def __init__(self, path, c):
-        self.path, self.c = Path(path), c
+    def __init__(self, path, c, default_weights=None):
+        self.path, self.c = Path(path) if path is not None else None, c
+        self.default_weights = dict(default_weights or {})
+        validate_weights(self.default_weights)
         self.last_poll = -math.inf
         self.last = None
         self.owner = self.scope = None
@@ -60,13 +70,13 @@ class ConversationEnvelope:
         self.smile_scale = 1.
         self.diagnostic = {}
 
-    def step(self, now):
+    def step(self, now, resting_allowed=True):
         if not self.c['enabled']:
             self.weights = {}
             self.smile_scale = 1.
             self.diagnostic = dict(valid=False,phase='disabled',control_target_only=True)
             return {}
-        if now-self.last_poll >= self.c['publish_interval_s']:
+        if self.path is not None and now-self.last_poll >= self.c['publish_interval_s']:
             self.last_poll = now
             try:
                 if self.path.stat().st_size > 65536:
@@ -102,7 +112,10 @@ class ConversationEnvelope:
             self.owner, self.scope, self.sequence = packet['owner'], packet['scope_id'], packet['sequence']
         dt = 1/60 if self.last is None else max(0., min(.1, now-self.last))
         self.last = now
-        target = packet['weights'] if valid else {}
+        resting = not valid or packet['phase'] in ('neutral', 'relaxing') or packet.get('style') == 'default_smile'
+        target = packet['weights'] if valid else self.default_weights
+        if resting and not resting_allowed:
+            target = {}
         cancelled = now<self.cancel_until or not valid or packet['phase'] in ('listening', 'disabled')
         for name in set(self.weights) | set(target):
             before, goal = self.weights.get(name, 0.), target.get(name, 0.)
@@ -114,7 +127,7 @@ class ConversationEnvelope:
         tau = self.c['cancel_release_s'] if cancelled else self.c['attack_s']
         self.smile_scale += (smile-self.smile_scale)*(-math.expm1(-dt/tau))
         self.diagnostic = dict(valid=valid, phase=packet['phase'] if valid else 'unavailable',
-                               style=packet.get('style') if valid else None,
+                               style=packet.get('style') if valid else 'default_smile' if self.default_weights else None,
                                playback_id=packet.get('playback_id') if valid else None,
                                scope_id=self.scope, weights=dict(self.weights),
                                smile_scale=self.smile_scale, control_target_only=True)
