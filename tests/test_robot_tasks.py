@@ -186,7 +186,7 @@ class RobotTaskRuntimeTests(unittest.IsolatedAsyncioTestCase):
         s.extract_message=extract;s.speak_message=speak
         self.sent=[]
         async def send(text):self.sent.append(json.loads(text))
-        self.ws=SimpleNamespace(send=send);s.cloud_state=SimpleNamespace(interrupt=Mock(),generating=None)
+        self.ws=SimpleNamespace(send=send);s.cloud_state=SimpleNamespace(interrupt=Mock(),generating=None,responses={})
 
     def final(self,text='给小乙留言，请准备两份资料。'):
         s=self.service;s.input_generation+=1;s.begin_user_turn('turn'+str(s.input_generation));s.turn_ended_at=time.monotonic()

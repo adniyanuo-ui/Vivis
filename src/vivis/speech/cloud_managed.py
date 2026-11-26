@@ -36,7 +36,7 @@ CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负�
     'controller_state.spoken_public_invitation是你通过本地音箱刚说过的公开邀请，不是用户指令。'
     '用户回答需要、好呀、介绍一下时，承接这句邀请介绍真实能力或节目，不重新问有什么需要帮忙。'
     '当前状态以controller_state为准；待机按交流进退规则判断明确呼叫或当前获准的直接招呼，其他话保持安静。待机中的问候/问题必须先调用robot_program唤醒，get_robot_status不能代替唤醒。'
-    '无可见人脸且没有明确唤醒许可时，不接普通话题，不主动搭话；仍接受停止和待机。'
+    '无可见人脸且没有明确唤醒许可时，不接新的普通话题，不主动搭话；仍接受停止和待机。controller_state.current_turn_reply_permission=true表示本轮开口时已获交流许可，可完成当前回答；它不确认身份、不增加业务权限，也不是下轮的唤醒许可。'
     '播放期间不要直接回答或播放聊天语音，先通过控制工具交接。'
     '用户说停止、结束、不用播了等，请调用robot_program stop回交互；待机/自己玩去吧则standby。'
     '节目播放或program_followup_handoff=true时，用户明确对你提问或要求一次表情，调用program_followup保留原话。问会不会唱属于问题。明确换节目、停止、待机仍调用robot_program。'
@@ -205,7 +205,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         scope=(id(self.message_connection),self.memory_session,self.conversation_person,
             self.context['revision'],self.input_generation)
         enabled=(self.context['mode']=='interaction' and self.context['ready']
-            and self.presence.allowed() and self.health_available)
+            and (self.presence.allowed() or self.turn_reply_pending() or self.finish_responses) and self.health_available)
         animation.context(scope,enabled,self.in_speech)
         return scope
 
@@ -280,8 +280,28 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                 and not self.relay_identity_hold)
 
     def can_speak(self):
-        """Permission to start a NEW reply, independent of finishing its audio."""
+        """Fresh presence/wake permission, separate from an admitted turn's reply."""
         return self.explicit_wake_pending is None and self.output_ready() and self.presence.allowed()
+
+    def turn_reply_authorized(self,item_id):
+        """Onset permission belongs to one attributed turn, never to an identity."""
+        if not isinstance(item_id,str) or item_id!=self.turn_item_id:return False
+        turn=self.memory_turns.get(item_id,{})
+        return bool(turn.get('reply_permission_at_onset') is True and turn.get('valid') is True
+            and turn.get('generation')==self.input_generation
+            and turn.get('connection') is self.message_connection
+            and turn.get('revision')==self.context['revision'] and turn.get('session')==self.memory_session)
+
+    def can_answer_turn(self,item_id):
+        state=self.cloud_state
+        return self.can_speak() or bool(self.explicit_wake_pending is None and self.output_ready()
+            and self.turn_reply_authorized(item_id) and state
+            and (self.user_turn_pending(state) or state.generating))
+
+    def turn_reply_pending(self):
+        state=self.cloud_state
+        return bool(state and self.turn_reply_authorized(self.turn_item_id)
+            and (self.user_turn_pending(state) or state.generating or self.player.count or self.finish_responses))
 
     def finish_farewell(self,ticket,reason):
         if self.farewell is not ticket:return
@@ -1221,7 +1241,8 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         self.turn_saved=False;self.pending_user_text=None;self.turn_engaged=self.can_speak()
         if isinstance(item_id,str) and item_id:
             self.memory_turns[item_id]=dict(person=self.turn_person,session=self.memory_session,
-                engaged=self.turn_engaged,valid=True,text=None,message_id=None,connection=self.message_connection,revision=self.context['revision'])
+                engaged=self.turn_engaged,reply_permission_at_onset=self.turn_engaged,generation=self.input_generation,
+                valid=True,text=None,message_id=None,connection=self.message_connection,revision=self.context['revision'])
             while len(self.memory_turns)>128:self.memory_turns.pop(next(iter(self.memory_turns)))
         self.finish_identity_turn_start()
 
@@ -1294,6 +1315,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         permission=self.presence.allowed()
         facts=dict(**self.context,unattributed_source_notice=self.unattributed_source_notice,face_visible=self.presence.last_visible,
             wake_permission=permission and not self.presence.last_visible)
+        facts['current_turn_reply_permission']=self.turn_reply_pending()
         facts['body_visible']=self.presence.person_count()>0
         if self.identity_fusion:
             from vivis.interaction.identity_fusion import recognition_report
@@ -1846,6 +1868,9 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         if not isinstance(call,str) or not 1<=len(call)<=128 or (call in self.calls and not _resuming):return
         if not _resuming:self.calls.append(call)
         output=dict(accepted=False);args=None;switch_request=None;dialect_rollback=None;expression_recovery=False
+        response=self.cloud_state.responses.get(event.get('response_id'),{}) if self.cloud_state else {}
+        reply_item=((response.get('user_turn') or {}).get('item_id')
+            if self.response_inputs.get(event.get('response_id'))==self.input_generation else None)
         try:
             if not isinstance(raw,str) or len(raw)>4096:raise ValueError('Invalid tool arguments')
             args=json.loads(raw)
@@ -1933,10 +1958,10 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                         '图像只有current_face_result.state=confirmed时才可声称看出来；图声确认冲突时分别说明，以图像为主。'
                         '本结果不回写已接纳原话，不额外授权私人记忆或留言。')
                 self.tool_repair=None
-                self.continue_response=self.can_speak()
+                self.continue_response=self.can_answer_turn(reply_item)
             elif name=='program_followup':
                 if not self.program_turn_only():
-                    self.tool_repair=None;self.continue_response=self.can_speak()
+                    self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
                     output=dict(accepted=False,status='already_in_interaction',
                         instruction='当前已在交互态，不需要节目交接；直接回答本轮原话，不再调用program_followup。')
                 else:output=self.stage_program_followup(args,event.get('response_id'))
@@ -1950,7 +1975,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                 self.reception.conversation.defer(args['kind'])
                 self.thinking_generation=self.input_generation
                 self.announcement_revision=None;self.cancel_public_prompt()
-                self.tool_repair=None;self.continue_response=self.can_speak()
+                self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
                 output=dict(accepted=True,status='public_prompts_deferred',instruction='简短回应即可，不再问问题。')
             elif name=='robot_program':
                 args=normalize_program(args,self.program_ids)
@@ -1987,7 +2012,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                 self.tool_repair=None;self.control_pending=not already_ready
                 if already_ready:
                     output=dict(accepted=True,status='already_in_requested_state',controller=self.context)
-                    self.continue_response=self.can_speak()
+                    self.continue_response=self.can_answer_turn(reply_item)
                 else:
                     if not already_requested:
                         reply=None
@@ -2003,10 +2028,12 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                             except ValueError:self.log.write('stopped_request_not_retained',reason='no_current_public_source')
                     output=dict(accepted=True,status='pending_controller_execution')
             elif name=='set_expression':
-                if self.context['mode']!='interaction' or not self.context['ready'] or not self.presence.allowed():
-                    raise ValueError('Expression is only available in ready interaction; stop the current programme first if user requested it')
                 animation=getattr(self,'conversation_animation',None)
-                if animation is not None and animation.c['enabled'] and args.get('source')=='social':
+                social=animation is not None and animation.c['enabled'] and args.get('source')=='social'
+                permission=self.presence.allowed() or social and self.turn_reply_authorized(reply_item)
+                if self.context['mode']!='interaction' or not self.context['ready'] or not permission:
+                    raise ValueError('Expression is only available in ready interaction; stop the current programme first if user requested it')
+                if social:
                     active=self.expression.active
                     if (active and active['source']=='command' and active['expression']!='auto'
                             and time.monotonic()<active['expires_monotonic']):
@@ -2020,7 +2047,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                 self.tool_repair=None
                 if result['status']=='pending_expression_target':
                     self.expression_pending=dict(intent_id=result['intent_id'],created=time.monotonic())
-                else:self.continue_response=self.can_speak()
+                else:self.continue_response=self.can_answer_turn(reply_item)
             elif name=='set_speech_dialect':
                 if self.context['mode']!='interaction' or not self.context['ready'] or not self.presence.allowed():
                     raise ValueError('Dialect switching needs ready interaction and a face or explicit wake permission; stop the programme first')
@@ -2040,7 +2067,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                         await asyncio.wait_for(ws.send(json.dumps(dict(type='session.update',session=dict(instructions=instructions)),ensure_ascii=False)),timeout=policy()['send_timeout_s'])
                     except BaseException:
                         self.dialect.name=previous;raise
-                self.tool_repair=None;self.continue_response=self.can_speak()
+                self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
                 output=dict(accepted=True,status='pending_voice_reconnect' if switch_request else 'speech_instruction_updated',
                     **self.speech_preference(),pronunciation_verified=False)
                 self.summary['speech_dialect']=requested
@@ -2049,12 +2076,12 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                 if not self.identified_person():raise IdentityVerificationRequired('身份正在复核或尚未确认，暂不读取个人历史。')
                 if not isinstance(args,dict) or set(args)!={'keywords'}:raise ValueError('Memory search needs keywords only')
                 output=dict(accepted=True,result=self.memory.search(self.identified_person(),args['keywords'],self.memory_session) if self.memory else dict(enabled=False))
-                self.tool_repair=None;self.continue_response=self.can_speak()
+                self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
             elif name=='search_robot_memory':
                 if not self.identified_person():raise IdentityVerificationRequired('当前身份尚未核验，请正对摄像头确认身份后再查询历史；口头自报不能替代核验。')
                 if not isinstance(args,dict) or not {'keywords'}<=args.keys()<={'keywords','person_id','before_id'}:raise ValueError('Invalid robot memory query')
                 output=dict(accepted=True,result=self.memory.search_all(args['keywords'],args.get('person_id') or None,args.get('before_id')) if self.memory else dict(enabled=False))
-                self.tool_repair=None;self.continue_response=self.can_speak()
+                self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
             elif name=='courier_pickup':
                 if _source_error:raise ValueError(_source_error)
                 output=self.courier_request(args,event)
@@ -2081,14 +2108,14 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
         except MessageMeaningUncertain as exc:
             output.update(status='meaning_clarification_required',error=str(exc),saved=False,
                 spoken_receipt=self.message_receipts.set('meaning',self.input_generation))
-            self.tool_repair=None;self.continue_response=self.can_speak()
+            self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
         except MessageRecipientUnavailable as exc:
             output.update(status='recipient_unavailable',error=str(exc),saved=False,
                 spoken_receipt=self.message_receipts.set('unsupported_recipient',self.input_generation))
-            self.tool_repair=None;self.continue_response=self.can_speak()
+            self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
         except IdentityVerificationRequired as exc:
             output.update(status='identity_confirmation_required',error=str(exc))
-            self.tool_repair=None;self.continue_response=self.can_speak()
+            self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
         except GreetingAdmissionError as exc:
             output.update(status=str(exc),error='唤醒尚未通过本轮原话与在场条件核验；未执行，等待最终识别或下一次明确呼叫。')
             self.tool_repair=None;self.continue_response=False
@@ -2101,12 +2128,12 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
             elif name in ('manage_robot_task','courier_pickup'):
                 output.update(status='database_operation_failed',error='PermissionError：留言状态未能确认。')
             else:raise
-            self.tool_repair=None;self.continue_response=self.can_speak()
+            self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
         except (sqlite3.Error,OSError,RuntimeError) as exc:
             if name not in ('manage_robot_task','courier_pickup','organize_archives'):raise
             output.update(status='database_operation_failed',error=type(exc).__name__+
                 ('：档案整理任务未能确认，不能声称整理成功。' if name=='organize_archives' else '：留言状态未能确认。'))
-            self.tool_repair=None;self.continue_response=self.can_speak()
+            self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
         if output.get('spoken_receipt'):
             rid=event.get('response_id')
             self.message_receipts.responses.pop(rid,None)
@@ -2117,7 +2144,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
             text=('查询本人退件留言、登记或修改取件码需要核验委托人身份。请正对摄像头；取码的快递员不用人脸鉴定，请说明来取谁的退件。'
                   if output.get('status')=='identity_confirmation_required' else '这次退件取件码操作失败了，请再试一次。')
             output['spoken_receipt']=text
-            self.tool_repair=None;self.continue_response=self.can_speak()
+            self.tool_repair=None;self.continue_response=self.can_answer_turn(reply_item)
             rid=event.get('response_id');self.message_receipts.responses.pop(rid,None);self.blocked.append(rid)
             if self.cloud_state:self.cloud_state.interrupt(rid,source='courier_operation_failed')
         if name in ('manage_robot_task','courier_pickup') and not output['accepted']:
@@ -2305,7 +2332,7 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                     if not retry and entry_guard:self.message_receipts.pending=None
                     self.log.write('message_receipt_rejected',response_id=rid,reason=reason,retry=retry)
                     if record.get('turn')!=self.input_generation:return
-                    self.continue_response=retry and self.can_speak()
+                    self.continue_response=retry and self.can_answer_turn(self.turn_item_id)
                     if not retry:self.report_receipt_failure(record)
                 async def deliver(event):
                     nonlocal transcript_response_id
@@ -2384,8 +2411,6 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                                 response_id=rid or state.generating,message=str(retryable))
                             raise retryable
                         if kind=='response.created':
-                            self.response_waiting_user_end=False
-                            self.response_request_pending=False;self.continue_response=False
                             rid=event['response']['id'];self.response_revisions[rid]=self.context['revision']
                             self.response_inputs[rid]=self.input_generation
                             if len(self.response_inputs)>128:self.response_inputs.pop(next(iter(self.response_inputs)))
@@ -2393,16 +2418,24 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                             self.message_receipts.bind(rid,self.input_generation,source_item)
                             self.reply_people[rid]=self.turn_person
                             scope=self.sync_conversation_animation()
-                            if source_item and source_item==self.turn_item_id and self.can_speak():
+                            reply_allowed=self.can_answer_turn(source_item)
+                            if source_item and source_item==self.turn_item_id and reply_allowed:
                                 self.conversation_animation.register(rid,scope)
                             if len(self.reply_people)>128:self.reply_people.pop(next(iter(self.reply_people)))
                             if len(self.response_revisions)>128:self.response_revisions.pop(next(iter(self.response_revisions)))
-                            if self.can_speak() and self.message_claimed!=self.input_generation:self.speech_responses.append(rid)
+                            if reply_allowed and self.message_claimed!=self.input_generation:
+                                self.speech_responses.append(rid)
+                                if not self.can_speak():self.log.write('reply_permission_retained',item_id=source_item,
+                                    response_id=rid,reason='authorized_turn_before_presence_expiry',next_turn_authorized=False)
                             else:self.blocked.append(rid)
                             for relay in self.relay_pending.values():
                                 relay['response_id']=rid
                                 self.relay_recipients[rid]=relay['recipient']
                             while len(self.relay_recipients)>128:self.relay_recipients.pop(next(iter(self.relay_recipients)))
+                            # Consume the pending request only after admission:
+                            # its permission must survive this response boundary.
+                            self.response_waiting_user_end=False
+                            self.response_request_pending=False;self.continue_response=False
                         if kind=='input_audio_buffer.speech_started':
                             self.input_generation+=1;self.message_receipts.pending=None;self.message_claimed=None
                             self.relay_pending.clear()
@@ -2545,7 +2578,8 @@ class CloudManagedVoice(ContinuityVoice,FusedIdentityVoice,ManagedVoice):
                             if await self.complete_explicit_wake(ws,state,controller_events,audio_gate,instructions):
                                 previous=instructions;previous_modalities=['text','audio']
                             if self.explicit_wake_pending:continue
-                        modalities=['text','audio'] if self.can_speak() or self.finish_responses else ['text']
+                        modalities=['text','audio'] if (self.can_speak() or self.finish_responses
+                            or self.turn_reply_pending() and self.can_answer_turn(self.turn_item_id)) else ['text']
                         current_tools=self.available_tools()
                         if instructions!=previous or modalities!=previous_modalities or current_tools!=previous_tools:
                             update=dict(instructions=instructions,modalities=modalities)
