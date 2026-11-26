@@ -204,6 +204,7 @@ def main(argv=None):
                         collect=bool((social_config.get('enabled') or expression_config.get('enabled'))
                             and body['fresh'] and body.get('persons',0)<=1))
                     familiar.publish(recognized)
+                    packet['visitor']=recognized.get('visitor')
                     metrics['familiar_recognition_available']=familiar.available
                     metrics['photo_collection_error']=familiar.photo_error
                     metrics['photo_collection_last_attempt']=getattr(familiar.photo_pool,'last_attempt',None)

@@ -75,13 +75,13 @@ class AdmissionDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result,(False,None));self.assertEqual(g.diagnostic['reason'],'same_direction')
         vad.assert_called_once_with(b'x')
 
-    def test_denied_motion_is_explained_without_lowering_any_gate(self):
+    def test_unsettled_gaze_does_not_discard_semantics_but_echo_is_still_denied(self):
         c=configuration();g=SideSpeechGate(c,lambda _:True)
         feedback=dict(updated_monotonic=10.,phase='idle',single_face=True,settled=False,main_bearing_deg=0.)
         direction=dict(updated_monotonic=10.,frame_valid=True,sector=0)
         metrics=dict(clean_rms=.01,reference_rms=0.)
-        self.assertEqual(g.observe(10.,b'x',metrics,direction,feedback,available=True,now=10.),(False,None))
-        self.assertEqual(g.diagnostic['reason'],'gaze_not_settled')
+        self.assertEqual(g.observe(10.,b'x',metrics,direction,feedback,available=True,now=10.),(True,None))
+        self.assertEqual(g.diagnostic['reason'],'collecting_speech')
         feedback['settled']=True;metrics['reference_rms']=.1
         self.assertEqual(g.observe(10.02,b'x',metrics,direction,feedback,available=True,now=10.02),(False,None))
         self.assertEqual(g.diagnostic['reason'],'robot_playback_overlap')

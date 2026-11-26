@@ -26,6 +26,8 @@ class SoundAttentionVoice:
         self.side_onsets={}
         self.side_response_sources={}
         self.side_wire_item=None;self.side_task=None;self.side_stable=None
+        self.side_dialogue=None;self.side_preroll=deque(maxlen=16)
+        self.side_tasks=set()
         c=configuration()
         self.sound_config=c
         definition=json.loads(self.robot_path.read_text())
@@ -55,7 +57,8 @@ class SoundAttentionVoice:
         status=observer.status(now) if observer is not None and callable(getattr(observer,'status',None)) else dict(status='disabled')
         result=dict(getattr(self,'sound_capabilities',{}),observer_status=status['status'],
             side_attention_runtime_available=getattr(self,'sound_gate',None) is not None,
-            side_glance_active=self.sound_frozen(),current_speaker_location_confirmed=False,
+            side_glance_active=self.sound_frozen() and not self.sound_attention.get('motion_returned'),
+            side_dialogue_active=self.sound_frozen(),current_speaker_location_confirmed=False,
             notice='本体支持限位内眼颈跟随和自动短暂循声；没有手动转头工具，不承诺已执行。固定底座不等于头颈不能转。最近声源不等于本轮说话人位置，不确认身份；未知或未标定时不猜您在正前方。')
         if details:
             gate=getattr(getattr(self,'sound_gate',None),'diagnostic',{})
@@ -92,10 +95,12 @@ class SoundAttentionVoice:
         publisher=getattr(self,'sound_status_publisher',None)
         if publisher:publisher.submit(dict(updated_monotonic=now,**data))
 
-    def acoustic_microphone(self,stamp,pcm,metrics):
+    def acoustic_microphone(self,stamp,pcm,metrics,*,far=None):
         """Runs on the existing async drain, never on the PortAudio callback."""
         gate=getattr(self,'sound_gate',None)
         if gate is None:return False
+        far=bytes(len(pcm)) if far is None else far
+        self.side_preroll.append((stamp,pcm,far))
         if not self.sound_started:
             self.sound_started=True;self.sound_mailbox.start();self.direction_observer.start()
             from vivis.motion.ownership import PreviewPublisher
@@ -114,36 +119,56 @@ class SoundAttentionVoice:
             business_pending=bool(self.message_lane and self.message_lane.task) or bool(self.relay_pending))
         available=(state is not None and self.context['mode']=='interaction' and self.context['ready']
             and self.health_available and self.enabled and not self.in_speech and not self.control_pending
-            and single
-            and not self.sound_frozen() and not reply_busy and self.farewell is None
-            and not self.expression_pending and not (self.message_lane and self.message_lane.task)
-            and not self.relay_pending)
+            and (single or self.sound_frozen()) and self.farewell is None)
         # Do not pause confidential/unfinished business output to answer a stranger.
         # Ordinary already-complete conversational speech may be paused briefly.
-        if state and self.player.count and not self.in_speech:
-            available=available and state.generating is None
+        feedback=self.sound_mailbox.latest
+        previous=getattr(self,'sound_attention',None)
+        if previous and recent(feedback,now,self.sound_config['lease_s']):
+            # The camera may briefly face B; the main-person bearing stays A's.
+            feedback=dict(feedback,phase='idle',single_face=True,main_bearing_deg=gate.main_anchor)
         suppressed,request=gate.observe(stamp,pcm,metrics,self.direction_observer.latest,
-            self.sound_mailbox.latest,available=available,now=now)
+            feedback,available=available,now=now)
         self.side_suppressed=suppressed
         self.poll_sound_diagnostics(now,metrics)
         if request:
             audio=self.side_audio
-            if audio is None:
-                self.log.write('sound_attention_skipped',reason='verified_short_audio_missing')
-                return suppressed
             self.side_stable=self.stable_identity()
+            self.cancel_public_prompt();self.reception.conversation.user_started()
+            previous_guest=previous.get('guest') if previous else None
+            if previous:self.cancel_sound_attention('new_side_turn')
             request.update(person=self.side_stable['person_id'],session=self.memory_session,
                 revision=self.context['revision'],connection=self.message_connection,
-                stable=self.side_stable,audio=audio)
+                generation=self.input_generation,stable=self.side_stable,audio=audio)
+            request['guest']=previous_guest if previous else (self.sound_mailbox.latest or {}).get('visitor')
+            request['motion_returned']=not request.get('glance_permitted',True)
+            guest=request['guest'] or {}
+            request['guest_key']=guest.get('token') or request['id']
             self.sound_attention=request
             if self.continuity:self.continuity.submit('invalidate_identity_audio')
             self.log.write('sound_attention_begin',attention_id=request['id'],sector=request['sector'],
                 bearing_deg=request['bearing_deg'],main_person=request['person'],
-                business_identity_retained=True,side_business_authorized=False)
+                business_identity_retained=True,side_identity_separate=True)
             self.emit(dict(kind='voice_warning',epoch=self.epoch,
-                message='声源插话：短暂转向回应，保留主聊天身份；不办理侧方私人业务。'))
-            self.side_task=asyncio.create_task(self.side_acknowledgement(request,state))
+                message='声源插话：听取侧方原话并回应，保留主聊天身份；侧方业务单独核验。'))
+            from vivis.speech.side_dialogue import SideDialogue
+            self.side_dialogue=SideDialogue(self,request)
+            self.side_dialogue.paused.update(self.player.pause(state.generating)['responses'])
+            for frame in self.side_preroll:
+                if frame[0]>=request['heard_monotonic']-.04:self.side_dialogue.feed(*frame)
+            self.side_task=asyncio.create_task(asyncio.wait_for(self.side_dialogue.run(),130))
+            self.side_tasks.add(self.side_task);self.side_task.add_done_callback(self.side_finished)
+        elif self.side_dialogue and not self.side_dialogue.capture_done.is_set():
+            if suppressed:self.side_dialogue.feed(stamp,pcm,far)
+            elif metrics['clean_rms']<self.sound_config['minimum_clean_rms']:
+                self.side_dialogue.end()
+            else:
+                self.cancel_sound_attention('main_user_started')
         return suppressed
+
+    def side_finished(self,task):
+        self.side_tasks.discard(task)
+        if not task.cancelled():task.exception()  # Observed again by acoustic_tick when current.
 
     async def side_acknowledgement(self,request,state):
         """Priority cached audio through the SAME DAC/AEC/mouth; no cloud wait."""
@@ -182,14 +207,26 @@ class SoundAttentionVoice:
         same=(request['connection'] is self.message_connection and request['session']==self.memory_session
             and request['revision']==self.context['revision'] and self.context['mode']=='interaction'
             and self.context['ready'] and self.health_available)
-        if not same or now-request['created_monotonic']>12:
+        if not same or now-request['created_monotonic']>130:
             self.cancel_sound_attention('state_changed_or_deadline');return
+        if self.side_task and self.side_task.done():
+            try:self.side_task.result()
+            except (asyncio.CancelledError,Exception) as exc:
+                self.log.write('side_dialogue_task_finished',error_type=type(exc).__name__)
+            if request.get('motion_returned'):self.cancel_sound_attention('returned');return
+        if request.get('motion_returned'):return
         fresh_feedback=recent(feedback,now,self.sound_config['lease_s']) and feedback.get('owner')==request['owner']
         if fresh_feedback and feedback.get('attention_id')==request['id']:request['motion_seen']=True
-        if not request.get('motion_seen') and now-request['created_monotonic']>min(1.,self.sound_config['budget_s']/2):
-            self.cancel_sound_attention('motion_not_admitted');return
+        if not request.get('motion_seen') and now-request['created_monotonic']>self.sound_config['budget_s']:
+            request['motion_returned']=True
+            self.sound_mailbox.submit(dict(id=request['id'],owner=request['owner'],action='cancel',updated_monotonic=now))
+            self.log.write('sound_glance_skipped',reason='motion_not_admitted',semantic_listening_continues=True);return
         main_present=((self.knowledge.current_identity().get('state')=='recognized'
             and self.recognized_person()==request['person']) if request['person'] else self.presence.single_visible())
+        if request.get('guest'):
+            current=(feedback or {}).get('visitor') or {}
+            main_present=(current.get('owner')==request['guest']['owner']
+                and current.get('token')==request['guest']['token'])
         wire={key:request[key] for key in ('id','owner','sector','bearing_deg','heard_monotonic',
             'created_monotonic','action','mount_calibrated')}
         wire.update(updated_monotonic=now,main_present=main_present)
@@ -201,13 +238,18 @@ class SoundAttentionVoice:
                 self.log.write('sound_attention_returned',**feedback['completed'],
                     target_budget_s=self.sound_config['budget_s'],elapsed_is_target_timeline=True)
             if feedback.get('phase')=='idle':
-                self.cancel_sound_attention(feedback.get('result') or 'returned')
+                request['motion_returned']=True
+                self.sound_mailbox.submit(dict(id=request['id'],owner=request['owner'],action='cancel',updated_monotonic=now))
+                if feedback.get('result') in ('found','empty'):
+                    self.cancel_sound_attention(feedback['result'])
 
     def cancel_sound_attention(self,reason):
         request=getattr(self,'sound_attention',None)
         if request is None:return
         self.sound_attention=None
         self.sound_mailbox.submit(dict(id=request['id'],owner=request['owner'],action='cancel',updated_monotonic=time.monotonic()))
+        dialogue=getattr(self,'side_dialogue',None)
+        if dialogue:dialogue.stop()
         if self.side_task and not self.side_task.done():self.side_task.cancel()
         self.log.write('sound_attention_finished',attention_id=request['id'],reason=reason,
             elapsed_s=time.monotonic()-request['heard_monotonic'])

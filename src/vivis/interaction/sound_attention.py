@@ -125,7 +125,6 @@ class SideSpeechGate:
             'gaze_feedback_unavailable' if not recent(feedback,now,self.c['lease_s']) else
             'gaze_busy' if feedback.get('phase')!='idle' else
             'main_face_unavailable' if feedback.get('single_face') is not True else
-            'gaze_not_settled' if feedback.get('settled') is not True else
             'mount_unconfirmed' if not (self.c['mount']['calibrated'] or self.c['mount']['allow_provisional']) else None)
         if reason:
             self.run=0.;self.candidate=None;self.note(reason);return False,None
@@ -146,20 +145,21 @@ class SideSpeechGate:
         self.run+=.02
         if self.run+1e-9<self.c['speech_run_s']:
             self.note('collecting_speech',sector=direction['sector']);return True,None
-        may_start=available and now-self.last_episode>=self.c['cooldown_s']
-        self.mask_reason='accepted' if may_start else 'main_busy' if not available else 'cooldown'
-        self.last_voice=now;self.suppressed_until=now+8.
+        may_glance=now-self.last_episode>=self.c['cooldown_s']
+        may_start=available
+        self.mask_reason='accepted' if may_start else 'main_busy'
+        self.last_voice=now;self.suppressed_until=now+90.
         self.side_sequence=direction.get('sequence');self.main_anchor=feedback['main_bearing_deg']
         onset=stamp-self.run+.02
-        self.intervals.append([onset-.25,now+8.])
+        self.intervals.append([onset-.25,now+90.])
         self.run=0.
         if not may_start:
             self.note('main_busy' if not available else 'cooldown',sector=direction['sector']);return True,None
-        self.last_episode=now
+        if may_glance:self.last_episode=now
         self.note('accepted',sector=direction['sector'],difference_deg=round(difference,1))
         return True,dict(id=uuid.uuid4().hex,owner=feedback['owner'],sector=direction['sector'],
             bearing_deg=azimuth,heard_monotonic=onset,created_monotonic=now,
-            action='glance',mount_calibrated=self.c['mount']['calibrated'])
+            action='glance',glance_permitted=may_glance,mount_calibrated=self.c['mount']['calibrated'])
 
     def contains(self,stamp):
         return stamp is not None and any(start<=stamp<=end for start,end in self.intervals)
@@ -285,4 +285,7 @@ class GlanceMotion:
             result=self.phase if not self.episode else None,completed=self.completed,settled=settled,
             single_face=fresh_face and packet.get('faces',1)==1,
             main_bearing_deg=angle((position[32]-2047)/self.c['yaw_counts_per_deg']+target_x*self.c['camera_half_fov_deg']))
+        status['visitor']=packet.get('visitor') if fresh_face else None
+        status['brake_requested']=bool(self.episode is None and live and request.get('action')=='glance'
+            and request.get('id') not in self.seen and not settled)
         return output,status

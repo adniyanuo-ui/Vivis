@@ -51,6 +51,8 @@ class FamiliarFaces:
         self.lock=threading.Lock();self.job=BestEffortJob('familiar-face');self.candidate=None;self.hits=0;self.last_bbox=None
         self.confirmed=None;self.last_confirmed=-math.inf
         self.result=self.unknown();self.available=False;self.error=None;self.published=None
+        from vivis.vision.visitor_registration import VisitorRegistration
+        self.visitors=VisitorRegistration(self.root,config,self.owner)
         if (config.get('schema_version')!='vivis-familiar-faces-1.0'
                 or type(config.get('confirmation_samples')) is not int or not 2<=config['confirmation_samples']<=10
                 or not .35<=config['score_threshold']<=.95 or not .01<=config['minimum_margin']<=.5
@@ -126,11 +128,12 @@ class FamiliarFaces:
     def reset(self):
         with self.lock:self._reset_locked()
 
-    def infer(self,image,row,stamp,epoch,collect=False):
+    def infer(self,image,row,stamp,epoch,collect=False,guest_token=None):
         try:
             begin=time.perf_counter();observation={}
             if self.photo_pool:
                 try:
+                    self.visitors.refresh(self.photo_pool)
                     self.photo_pool.refresh();self.vectors,self.ids=self.photo_pool.gallery()
                     self.photo_error=self.photo_pool.error
                 except Exception as exc:self.photo_error=type(exc).__name__
@@ -176,6 +179,12 @@ class FamiliarFaces:
                     reason=observation.get('decision_reason'),owner=self.owner)
                 if self.confirmed:self.result['confirmed_monotonic']=self.last_confirmed
                 self.error=None
+            if guest_token:
+                try:
+                    compare=self.model.compare if self.c['backend']=='seeta6' else lambda a,b:float(a@b)
+                    self.visitors.observe(guest_token,image,row,vector,observation,stamp,self.confirmed,compare)
+                    self.visitors.complete(time.monotonic())
+                except Exception as exc:self.photo_error='introduction:'+type(exc).__name__
             # Diagnostic capture is independent of photo enrollment: rejected
             # unknown faces and full personal pools still provide useful evidence.
             if self.brightness_samples:
@@ -199,6 +208,7 @@ class FamiliarFaces:
 
     def step(self,sample,row,now=None,*,faces=1,collect=False):
         now=time.monotonic() if now is None else now
+        self.visitors.track(row,now,faces)
         # Invalidate old evidence BEFORE submitting a new asynchronous sample.
         # Otherwise a fast result could reuse confirmation hits from a stale face.
         with self.lock:
@@ -217,12 +227,13 @@ class FamiliarFaces:
                     and 0<=now-sample[1]<=self.c['max_result_age_s']):
                 epoch=self.epoch
                 arguments=(sample[2].copy(),np.asarray(row,dtype=np.float32).copy(),sample[1],epoch)
-                if collect:arguments=(*arguments,True)
+                arguments=(*arguments,collect,self.visitors.token)
                 if self.job.offer(self.infer,*arguments):self.last_submit=now
         with self.lock:result=dict(self.result)
         if (not 0<=now-result['observed_monotonic']<=self.c['max_result_age_s']
                 or (result['state']=='reviewing' and now-result['confirmed_monotonic']>=self.c.get('review_hold_s',5.))):
             result=self.unknown()
+        result['visitor']=self.visitors.status(now,result.get('person_id'))
         return result
 
     def publish(self,result):

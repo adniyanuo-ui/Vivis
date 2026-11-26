@@ -1327,6 +1327,12 @@ class CloudManagedVoice(SoundAttentionVoice,ContinuityVoice,FusedIdentityVoice,M
             wake_permission=permission and not self.presence.last_visible)
         facts['current_turn_reply_permission']=self.turn_reply_pending()
         facts['sound_attention']=self.sound_status()
+        introduction=getattr(self,'introduced_guest',None)
+        if introduction and introduction['session']==self.memory_session:
+            visitor=(getattr(self,'sound_mailbox',None).latest or {}).get('visitor') if getattr(self,'sound_mailbox',None) else None
+            if visitor and visitor.get('token')==introduction['guest']['token'] and visitor.get('owner')==introduction['guest']['owner']:
+                facts['introduced_visitor']=dict(information=introduction['information'],
+                    notice='熟人刚介绍的当前访客，可用介绍中的称呼交流；不是新的图像或声纹确认，不额外授予私人业务权限。')
         facts['body_visible']=self.presence.person_count()>0
         if self.identity_fusion:
             from vivis.interaction.identity_fusion import recognition_report
@@ -1582,7 +1588,7 @@ class CloudManagedVoice(SoundAttentionVoice,ContinuityVoice,FusedIdentityVoice,M
 
     def public_prompt_available(self,state):
         latest_dac=max((r.get('empty_dac',0) for r in state.responses.values()),default=0)
-        return (self.context['ready'] and self.presence.single_visible() and self.can_speak()
+        return (not self.sound_frozen() and self.context['ready'] and self.presence.single_visible() and self.can_speak()
                 and not self.awaiting_recovery_user and not self.user_turn_pending(state) and state.generating is None
                 and not self.player.response_ids() and time.monotonic()>=latest_dac and not self.finish_responses
                 and not self.program_followup and not (self.message_lane and self.message_lane.task and not self.message_lane.task.done())
@@ -1603,7 +1609,7 @@ class CloudManagedVoice(SoundAttentionVoice,ContinuityVoice,FusedIdentityVoice,M
         address=self.knowledge.people.get(person,{}).get('preferred_address') if person else None
         observed_style=None
         def current():
-            return (self.cloud_state is state and connection is self.message_connection and session==self.memory_session
+            return (not self.sound_frozen() and self.cloud_state is state and connection is self.message_connection and session==self.memory_session
                     and (self.public_prompt_started or (generation==self.input_generation and not self.in_speech))
                     and revision==self.context['revision']
                     and not conversation.declined and not conversation.paused and self.context['ready'] and self.can_speak()

@@ -59,6 +59,13 @@ class SideAdmissionTests(unittest.TestCase):
         self.assertEqual(bearing(0,self.c),-120)
         self.assertEqual(bearing(5,self.c),90)
 
+    def test_head_cooldown_does_not_discard_a_new_side_utterance(self):
+        for n in range(4):_,first=self.frame(10+n*.02)
+        self.assertTrue(first['glance_permitted'])
+        self.g.reset(keep_history=True,now=10.4)
+        for n in range(4):_,second=self.frame(10.5+n*.02)
+        self.assertIsNotNone(second);self.assertFalse(second['glance_permitted'])
+
     def test_one_clean_side_sentence_quarantined_then_admitted_once(self):
         requests=[]
         for n in range(30):
@@ -68,8 +75,8 @@ class SideAdmissionTests(unittest.TestCase):
         self.assertEqual(len(requests),1);self.assertEqual(requests[0]['sector'],0)
         self.assertTrue(self.g.contains(10.01));self.assertFalse(self.g.contains(9.))
 
-    def test_echo_same_direction_multiple_people_stale_and_unsettled_never_trigger(self):
-        for change in ({'reference_rms':.1},{'sector':8},{'single_face':False},{'settled':False},
+    def test_echo_same_direction_multiple_people_and_stale_never_trigger(self):
+        for change in ({'reference_rms':.1},{'sector':8},{'single_face':False},
                        {'frame_valid':False},{'updated_monotonic':1.}):
             self.g=SideSpeechGate(self.c,lambda _:True)
             for n in range(12):self.assertEqual(self.frame(10+n*.02,**change),(False,None),change)
@@ -315,7 +322,7 @@ class SideSourceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await s.filter_side_event(dict(type='response.done',response=dict(id='r2')),timeline,ws))
         self.assertIsNone(s.side_wire_item)
 
-    async def test_mic_admission_cached_dac_and_return_keep_original_session(self):
+    async def test_mic_admission_preserves_original_side_pcm_after_motion_returns(self):
         from vivis.speech.realtime import VoiceSession
         s=self.s;s.sound_config=configuration();s.sound_started=True
         s.context.update(mode='interaction',target='interaction',ready=True,revision=1)
@@ -328,18 +335,21 @@ class SideSourceTests(unittest.IsolatedAsyncioTestCase):
             owner='owner',main_bearing_deg=0.),submit=Mock())
         s.side_audio=SimpleNamespace(pcm24_bytes=np.full(17280,1000,dtype='<i2').tobytes())
         state=VoiceSession(s.player,s.log);s.cloud_state=state
+        s.public_prompt_task=Mock();s.public_prompt_task.done.return_value=False
+        s.reception.conversation.quiet_since=now-10
         session=s.memory_session
         for n in range(4):
             self.assertTrue(s.acoustic_microphone(now+n*.02,b'voice',dict(clean_rms=.01,reference_rms=0.)))
         request=s.sound_attention;self.assertIsNotNone(request);self.assertEqual(request['person'],'heyude')
-        for n in range(20):
-            await asyncio.sleep(0)
-            s.player.render(1920,time.monotonic())
-        self.assertIn('side_'+request['id'],s.player.started_responses)
+        s.public_prompt_task.cancel.assert_called_once();self.assertIsNone(s.reception.conversation.quiet_since)
+        self.assertEqual(b''.join(frame[1] for frame in s.side_dialogue.frames),b'voice'*4)
         self.assertEqual(s.memory_session,session)
         s.sound_mailbox.latest=dict(updated_monotonic=time.monotonic(),owner='owner',phase='idle',result='returned',
             completed=dict(id=request['id'],elapsed_s=1.8,excursion_fraction=.2))
         s.acoustic_tick();await asyncio.sleep(0)
+        self.assertIs(s.sound_attention,request);self.assertTrue(request['motion_returned'])
+        self.assertFalse(s.side_dialogue.capture_done.is_set())
+        s.cancel_sound_attention('shutdown');await asyncio.gather(s.side_task,return_exceptions=True)
         self.assertIsNone(s.sound_attention);self.assertEqual(s.memory_session,session)
         self.assertIsNone(s.player.priority_response)
 

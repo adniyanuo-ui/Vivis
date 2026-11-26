@@ -254,7 +254,7 @@ class FamiliarTests(unittest.TestCase):
 
     def test_first_sample_after_stale_camera_must_start_confirmation_again(self):
         for _ in range(3):self.infer(stamp=10.)
-        def offer(_fn,_image,_row,stamp,epoch):
+        def offer(_fn,_image,_row,stamp,epoch,collect=False,guest_token=None):
             self.infer(stamp=stamp,epoch=epoch);return True
         self.f.job.offer=offer
         stale=10.+self.f.c['max_result_age_s']+.1

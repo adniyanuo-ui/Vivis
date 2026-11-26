@@ -121,6 +121,7 @@ class SpeakerObserver:
         self.gallery={};self.gallery_stamp=None;self.gallery_revision=0
         self.collector=None;self.collection_epoch=0;self.audio_epoch=0;self.collection_housekeeping=0.
         self.result_handler=None;self.recognition_window=None
+        self.external_results=queue.SimpleQueue();self.external_windows={}
         if (c.get('short_recognition') or {}).get('enabled'):
             from vivis.speech.speaker_window import ShortRecognitionWindow
             self.recognition_window=ShortRecognitionWindow(c['short_recognition'])
@@ -231,7 +232,7 @@ class SpeakerObserver:
 
     def _enrich_recognition(self,pcm,far,source,result):
         result['identity_evidence']=self._identity_evidence(result,source)
-        window=self.recognition_window
+        window=source.get('_recognition_window',self.recognition_window)
         if not window:return
         if result.get('recognition_audio_error'):window.clear();return
         if result['identity_evidence']['state']=='confirmed':window.clear();return
@@ -407,8 +408,32 @@ class SpeakerObserver:
             except Exception as exc:
                 from vivis.interaction.identity_fusion import unavailable
                 result['identity_evidence']=unavailable('recognition_window:'+type(exc).__name__)
-            self.results.put(result)
-            if self.collector and source.get('_collection_managed'):self._collect_short(pcm,far,source,result)
+            (self.external_results if source.get('_external') else self.results).put(result)
+            if not source.get('_external') and self.collector and source.get('_collection_managed'):self._collect_short(pcm,far,source,result)
+
+    async def recognize_external(self,pcm,far,source,valid):
+        """Reuse the single native worker, but never enroll/fuse a side speaker."""
+        import asyncio
+        from vivis.speech.speaker_window import ShortRecognitionWindow
+        context=source['voice_context']
+        if context not in self.external_windows:
+            if len(self.external_windows)>=4:self.external_windows.pop(next(iter(self.external_windows)))
+            config=self.c.get('short_recognition') or {}
+            self.external_windows[context]=ShortRecognitionWindow(config) if config.get('enabled') else None
+        source=dict(source,_external=True,enrollment_allowed=False,visual_person=None,logical_person=None,
+            _recognition_window=self.external_windows[context])
+        deadline=time.monotonic()+8.
+        while valid() and time.monotonic()<deadline:
+            if self.job.offer(self.infer,pcm,far,source):break
+            await asyncio.sleep(.02)
+        else:return None
+        while valid() and time.monotonic()<deadline:
+            try:
+                result=self.external_results.get_nowait()
+                if result['turn_id']==source['turn_id']:return result
+            except queue.Empty:pass
+            await asyncio.sleep(.02)
+        return None
 
     def poll(self):
         now=time.monotonic()

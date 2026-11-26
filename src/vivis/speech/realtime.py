@@ -280,10 +280,14 @@ async def connect_session(ws,session,log):
             raise RuntimeError('Qwen session configuration failed: '+str(event.get('error',{})))
         if event.get('type')=='session.updated':
             accepted=event['session']
+            # Qwen omits turn_detection entirely when explicit null disables
+            # VAD. Automatic modes must still echo their requested type/threshold.
+            requested=session['turn_detection'];received=accepted.get('turn_detection')
+            detection_ok=(received is None if requested is None else
+                isinstance(received,dict) and received.get('type')==requested['type']
+                and ('threshold' not in requested or received.get('threshold')==requested['threshold']))
             if (accepted.get('voice')!=session['voice']
-                    or accepted.get('turn_detection',{}).get('type')!=session['turn_detection']['type']
-                    or ('threshold' in session['turn_detection'] and
-                        accepted.get('turn_detection',{}).get('threshold')!=session['turn_detection']['threshold'])):
+                    or not detection_ok):
                 raise RuntimeError('Server did not confirm requested voice/turn detection; do not silently fall back')
             log.write('session_ready',model=accepted.get('model'),voice=accepted.get('voice'),turn_detection=accepted.get('turn_detection'))
             return accepted

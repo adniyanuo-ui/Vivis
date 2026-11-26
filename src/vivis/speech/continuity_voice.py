@@ -128,6 +128,29 @@ class ContinuityVoice:
     async def _continuity_tick(self,state):
         if not self.continuity:return
         now=time.monotonic()
+        if now>=getattr(self,'people_refresh_at',0.):
+            self.people_refresh_at=now+1.
+            updates=await asyncio.to_thread(self.knowledge.new_profiles)
+            # Publish on the same event loop that reads contexts/tools; a
+            # background file scan must not resize a dict while it is iterated.
+            self.knowledge.people.update(updates);added=list(updates)
+            if added:
+                if self.continuity.speaker:
+                    self.continuity.speaker.labels.update({pid:self.knowledge.people[pid]['preferred_address'] for pid in added})
+                self.log.write('introduced_profiles_loaded',person_ids=added)
+            from vivis.interaction.introductions import Introductions
+            statuses=await asyncio.to_thread(Introductions(self.knowledge.root).maintain)
+            seen=getattr(self,'introduction_notices',{})
+            for row in statuses:
+                if row['session']!=self.memory_session or seen.get(row['id'])==row['status']:continue
+                seen[row['id']]=row['status']
+                if row['status'] not in ('ready','failed'):continue
+                label=row['information'].get('preferred_address') or row['information'].get('display_name')
+                message=('访客建档完成：'+label+'；初始人脸模板已登记，后续采样沿用32张／32段限额。'
+                    if row['status']=='ready' else '访客建档未完成：'+row.get('error','请重新介绍'))
+                self.log.write('introduction_registration',person_id=row['person_id'],status=row['status'])
+                self.emit(dict(kind='voice_warning',epoch=self.epoch,message=message))
+            self.introduction_notices=dict(list(seen.items())[-256:])
         speaker=self.continuity.speaker
         if ((speaker and getattr(speaker,'collector',None) or getattr(self,'identity_fusion',None))
                 and now>=getattr(self,'collection_visual_at',0.)):

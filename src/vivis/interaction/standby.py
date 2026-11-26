@@ -274,6 +274,8 @@ class StandbyGaze(MojiaPlaybackGaze):
         if self.acoustic:
             override,status=self.acoustic.step(self.acoustic_mailbox.latest,last,packet,now)
             self.acoustic_mailbox.submit(status)
+            if status.get('brake_requested'):
+                return super().apply(base,last,dt,now,attention_hold=True)
             if override is not None:
                 result=np.array(base,copy=True)
                 for sid,value in override.items():result[self.ids.index(sid)]=value

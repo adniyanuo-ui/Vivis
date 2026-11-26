@@ -58,7 +58,18 @@ def professional_profile(data):
         if type(age) is not int or not 0<=age<=120:raise ValueError('Invalid registered age')
         result['age_years']=age
     if not result['display_name']:raise ValueError('Person needs a display name')
+    if data.get('source')=='familiar_introduction':
+        source=data.get('introduction',{})
+        result['background_source']=dict(kind='familiar_introduction',verified=False,
+            provided_by=source.get('introducer'),date=source.get('date'))
     return result
+
+
+def published_profile(directory,pid,data):
+    if data.get('source')!='familiar_introduction':return True
+    path=directory.parent/'introductions/face_anchors.json'
+    try:return pid in json.loads(path.read_text())['people']
+    except (OSError,ValueError,KeyError):return False
 
 
 class Knowledge:
@@ -98,15 +109,37 @@ class Knowledge:
             for file in sorted(directory.glob('*/profile.json')):
                 if not re.fullmatch(r'[a-z][a-z0-9_-]{1,39}',file.parent.name):continue
                 if not file.resolve().is_relative_to(directory):raise ValueError('Private profile symlink escapes storage')
-                profile=professional_profile(json.loads(file.read_text()))
+                data=json.loads(file.read_text())
+                if not published_profile(directory,file.parent.name,data):continue
+                profile=professional_profile(data)
                 if profile:self.people[file.parent.name]=profile
-            if len(self.people)>50:raise ValueError('Too many people for inline context; use explicit retrieval')
+            self.people_directory=directory
         reference=c.get('recognition')
         if reference:self.recognition=json.loads((self.root/reference).read_text())
 
+    def new_profiles(self):
+        """Read off-thread without mutating the live conversation dictionary."""
+        directory=getattr(self,'people_directory',None)
+        if directory is None:return {}
+        added={}
+        for path in directory.glob('*/profile.json'):
+            pid=path.parent.name
+            if pid in self.people or not re.fullmatch(r'[a-z][a-z0-9_-]{1,39}',pid):continue
+            if not path.resolve().is_relative_to(directory):continue
+            data=json.loads(path.read_text())
+            if not published_profile(directory,pid,data):continue
+            profile=professional_profile(data)
+            if profile:
+                added[pid]=profile
+        return added
+
+    def refresh_people(self):
+        updates=self.new_profiles();self.people.update(updates)
+        return list(updates)
+
     def base_instructions(self,*,include_people=True):
         if self.config is None:return ''
-        roster=json.dumps(list(self.people.values()) if include_people else [],ensure_ascii=False)
+        roster=json.dumps(list(self.people.values())[:50] if include_people else [],ensure_ascii=False)
         return ('\n已启用的角色知识：\n'+self.persona+'\n已确认业务知识：'+self.business+'\n参考人物职业背景库（第三方背景，不表示当前身份，不可据此认人）：'+roster+
                 '\n'+ETIQUETTE+' '+IDENTITY_RULES+' 未知当前身份时不要根据职业背景猜用户是谁。现有能力以程序节目目录为准，未来愿景不是已实现功能。')
 

@@ -57,6 +57,21 @@ class RoundRecorder:
             self.dropped=True;self.drop_generation+=1;return False
 
     def capture(self,stamp,pcm,far):self.submit('capture',stamp,pcm,far)
+    def external_turn(self,item,session,person,pcm,text):
+        self.submit('external_turn',item,session,person,pcm,text)
+
+    def on_external_turn(self,item,session,person,pcm,text):
+        """Already attributed side speech: no sampling and no main ring reuse."""
+        rid,notice=self.store.begin(session,item,person)
+        if notice:self.notices.put(notice)
+        if not rid:return
+        self.live[item]=(session,rid)
+        self.store.final(rid,text)
+        path='audio/'+rid+'/user.wav';writer,stream=self.writer(path,16000)
+        try:writer.writeframes(pcm)
+        finally:writer.close();stream.close()
+        self.store.input_audio(rid,path,'side_source_contiguous')
+        self.store.close(rid,'text_only')
     def played(self,rid,values,stamp,position):self.submit('played',rid,values.copy(),stamp,position)
 
     def start(self,item,session,person,stamp,evidence=None):

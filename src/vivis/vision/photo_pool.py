@@ -180,6 +180,22 @@ class PhotoPool:
                 for vector in self.anchors[self.anchor_ids==pid]:vectors.append(vector);ids.append(pid)
         return np.asarray(vectors,np.float32),np.asarray(ids)
 
+    @synchronized
+    def add_anchors(self,pid,rows):
+        """Append an explicitly introduced base without changing old anchors."""
+        import re
+        if not re.fullmatch(r'[a-z][a-z0-9_-]{1,39}',pid):raise ValueError('Invalid introduced person ID')
+        if pid in self.anchor_ids:return
+        data=json.loads((self.directory/pid/'photo_pool.json').read_text());self.validate(data,pid)
+        if data['model_sha256']!=self.c['sha256']:raise ValueError('Introduced model mismatch')
+        vectors=np.asarray([r['vector'] for r in rows],np.float32)
+        if vectors.shape!=(len(rows),self.anchors.shape[1]) or not 1<=len(rows)<=4:
+            raise ValueError('Invalid introduced anchor dimensions')
+        self.anchors=np.concatenate([self.anchors,vectors])
+        self.anchor_ids=np.concatenate([self.anchor_ids,np.asarray([pid]*len(rows))])
+        self.hashes=np.concatenate([self.hashes,np.asarray([r['hash'] for r in rows])])
+        self.load()
+
     @opportunistic
     def refresh(self):
         # Administrator edits are loaded as a complete snapshot between inference

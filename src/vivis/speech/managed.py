@@ -331,7 +331,7 @@ class ManagedVoice:
                     level=lambda data:float(np.sqrt(np.mean((np.frombuffer(data,'<i2')/32768.)**2)))
                     metrics=dict(raw_rms=level(raw),clean_rms=level(pcm),reference_rms=level(far))
                     acoustic=getattr(self,'acoustic_microphone',None)
-                    try:side=acoustic(stamp,pcm,metrics) if acoustic else False
+                    try:side=acoustic(stamp,pcm,metrics,far=far) if acoustic else False
                     except Exception as exc:
                         side=False
                         self.log.write('sound_attention_disabled',reason=type(exc).__name__,primary_voice_continues=True)
@@ -370,6 +370,8 @@ class ManagedVoice:
             if cancel_attention:cancel_attention('shutdown')
             side_task=getattr(self,'side_task',None)
             if side_task:await asyncio.gather(side_task,return_exceptions=True)
+            side_tasks=list(getattr(self,'side_tasks',()))
+            if side_tasks:await asyncio.gather(*side_tasks,return_exceptions=True)
             closer=getattr(self,'close_sound_attention',None)
             if closer:await asyncio.to_thread(closer)
             if getattr(self,'audio_recovery',None):

@@ -65,7 +65,7 @@ class CourierHandoffs:
         db.execute('INSERT INTO courier_handoff_events(handoff_id,event,actor,details,created) VALUES(?,?,?,?,?)',
             (hid,event,actor,json.dumps(details,ensure_ascii=False),now_utc()))
 
-    def register(self,owner,label,aliases,code,source_ids,*,source_reason):
+    def register(self,owner,label,aliases,code,source_ids,*,source_reason,guard=None):
         self.ensure_schema();person_key(owner)
         if not isinstance(code,str) or not re.fullmatch(r'[0-9]{4,8}',code):raise ValueError('取件码需要4～8位数字，请本人明确说明。')
         if not isinstance(label,str) or not 1<=len(label)<=40:raise ValueError('Invalid owner label')
@@ -74,6 +74,7 @@ class CourierHandoffs:
         if not source_ids or len(source_ids)>12 or any(type(mid) is not int or mid<1 for mid in source_ids):raise ValueError('Owner source messages required')
         with self.memory.db() as db:
             db.execute('BEGIN IMMEDIATE')
+            if guard:guard()
             rows=[db.execute("SELECT person,role,text,created FROM messages WHERE id=?",(mid,)).fetchone() for mid in source_ids]
             if any(not r or r['person']!=owner or r['role']!='user' for r in rows):raise ValueError('取件码只能来自委托人本人的明确交代。')
             evidence=[r for r in rows if '码' in r['text'] and code_digits(r['text'])]
@@ -92,6 +93,7 @@ class CourierHandoffs:
                 db.execute('INSERT INTO courier_handoffs VALUES(?,?,?,?,?,?,?,?,?,?)',
                     (hid,owner,label,json.dumps(aliases,ensure_ascii=False),code,'pending',version,json.dumps(source_ids),stamp,stamp))
             self.event(db,hid,'owner_authorized_courier_release',owner,dict(version=version,source_ids=source_ids,reason=source_reason))
+            if guard:guard()
         record=self.get(hid)
         if record['code']!=code or record['version']!=version:raise RuntimeError('取件码登记读回失败。')
         return record
@@ -169,10 +171,12 @@ class CourierHandoffs:
                 (now_utc(),hid,version)).rowcount
             if changed:self.event(db,hid,'pickup_code_spoken','courier',dict(version=version,response_id=response_id,physical_collection_verified=False))
 
-    def cancel(self,hid,owner):
+    def cancel(self,hid,owner,*,guard=None):
         record=self.get(hid)
         if record['owner']!=owner:raise ValueError('只能由委托人取消自己的退件转告。')
         with self.memory.db() as db:
+            if guard:guard()
             db.execute("UPDATE courier_handoffs SET status='cancelled',updated=? WHERE id=?",(now_utc(),hid))
             self.event(db,hid,'owner_cancelled',owner,{})
+            if guard:guard()
         return self.get(hid)

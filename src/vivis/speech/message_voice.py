@@ -31,10 +31,11 @@ class BoundedTTS:
 
 
 class MessageSpeaker:
-    def __init__(self,engine,player,state,valid,emit,log,tts=None,*,source='trusted_message_tts'):
+    def __init__(self,engine,player,state,valid,emit,log,tts=None,*,source='trusted_message_tts',priority=False):
         self.engine=engine;self.player=player;self.state=state;self.valid=valid;self.emit=emit;self.log=log;self.tts=tts or BoundedTTS(engine)
         self.started=False
         self.source=source
+        self.priority=priority
 
     async def say(self,text,request):
         self.started=False
@@ -43,6 +44,7 @@ class MessageSpeaker:
             source=self.source,user_turn=None,archive_item=getattr(request,'source_item',None),
             archive_session=getattr(request,'session',None))
         self.state.responses[rid]=response
+        if self.priority:self.player.begin_priority(rid)
         try:
             for start in range(0,len(text),400):
                 if not self.valid(request):raise StaleMessageTurn()
@@ -78,6 +80,7 @@ class MessageSpeaker:
                 progress.observe(self.player.consumed.get(rid,0),time.monotonic())
                 await asyncio.sleep(.02)
         finally:
+            if self.priority:self.player.end_priority(rid)
             self.started=rid in self.player.started_responses
             if not complete:self.state.interrupt(rid,source='message_speech_interrupted')
             self.log('message_tts_finished',response_id=rid,complete=complete,audio_started=self.started,source=self.source)
