@@ -76,6 +76,11 @@ CLOUD_POLICY=(' 所有语音理解、唤醒、问答、点播和停止由你负�
     '表情target_accepted仅表示控制循环接收了平滑目标，不是实测皮肤已经到位；pending时不要声称完成。'
     '不要声称能修改摄像头、舵机参数或执行未提供的动作。')
 
+SOUND_POLICY=(' controller_state.sound_attention给出当前眼颈能力与方位状态。底座固定不等于头颈不能转；'
+    '支持范围内视觉跟随和自动短暂循声，不得笼统说本体不能转头。没有手动转头工具，不能把收到请求说成已转过去。'
+    '询问声源定位、转头能力或我在哪一边时先调用get_robot_status；observer_status非fresh或安装朝向未校准，'
+    '如实说明本轮位置尚不能确认，不猜您在正前方或看得清清楚楚。最近声源也不等于本轮说话人，不能据它确认身份或读取私密记录。')
+
 WORK_POLICY=(' 留言由本地固定流程处理：最终识别文字到齐后才提取结构化收件人和内容，程序核验并写库，固定TTS播报结果。'
     '你负责自然聊天和节目控制，不负责调用留言写入、历史查重或口头宣称已保存。'
     '用户问保存了吗由程序直接读账本；pending是已保存待转达，announced是完整播报后已转达，无需收件人确认；completed是历史完成或人工关闭记录，不再提醒，不能据此声称实际播过或事情办完。不要再询问是否收到，不把留言转达说成事情办完。'
@@ -1321,6 +1326,7 @@ class CloudManagedVoice(SoundAttentionVoice,ContinuityVoice,FusedIdentityVoice,M
         facts=dict(**self.context,unattributed_source_notice=self.unattributed_source_notice,face_visible=self.presence.last_visible,
             wake_permission=permission and not self.presence.last_visible)
         facts['current_turn_reply_permission']=self.turn_reply_pending()
+        facts['sound_attention']=self.sound_status()
         facts['body_visible']=self.presence.person_count()>0
         if self.identity_fusion:
             from vivis.interaction.identity_fusion import recognition_report
@@ -1375,7 +1381,7 @@ class CloudManagedVoice(SoundAttentionVoice,ContinuityVoice,FusedIdentityVoice,M
         facts['greeting_wake_allowed']=self.greeting_wake_allowed()
         instructions=session_with_program_context(self.session,self.last_program)['instructions']
         from vivis.interaction.presence_entry import instructions as entry_instructions
-        instructions+=CLOUD_POLICY+entry_instructions(self.entry)+WORK_POLICY+identity['instructions']+' controller_state='+json.dumps(facts,ensure_ascii=False)
+        instructions+=CLOUD_POLICY+SOUND_POLICY+entry_instructions(self.entry)+WORK_POLICY+identity['instructions']+' controller_state='+json.dumps(facts,ensure_ascii=False)
         person=confirmed
         if self.memory and person:instructions+=self.memory.context(person)
         if getattr(self,'continuity',None):
@@ -1944,6 +1950,7 @@ class CloudManagedVoice(SoundAttentionVoice,ContinuityVoice,FusedIdentityVoice,M
                         '当前尚未本地确认身份。自报称呼不等于认出，不补全熟人姓名岗位，不读取他人留言。'),
                     memory_enabled=self.memory is not None,memory_attribution='frozen_turn_identity' if self.identity_fusion else 'confirmed_single_face_only',
                     speaker_status=self.speaker_status(person_id),
+                    sound_attention=self.sound_status(details=True),
                     speech_preference=self.speech_preference(),robot_tasks=self.task_overview(),
                     message_operation=self.message_operation(),
                     known_people=self.known_people() if person else [],

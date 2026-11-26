@@ -94,6 +94,10 @@ class SideSpeechGate:
         self.c,self.vad=c,vad;self.run=0.;self.last=None;self.candidate=None
         self.last_episode=-math.inf;self.intervals=deque(maxlen=64)
         self.suppressed_until=-math.inf;self.last_voice=-math.inf
+        self.diagnostic=dict(reason='not_observed')
+
+    def note(self,reason,**fields):
+        self.diagnostic=dict(reason=reason,run_s=self.run,**fields)
 
     def reset(self,*,keep_history=False,now=None):
         self.run=0.;self.last=None;self.candidate=None
@@ -116,29 +120,43 @@ class SideSpeechGate:
             if new_main or now-self.last_voice>.35:
                 self.suppressed_until=-math.inf
                 if self.intervals:self.intervals[-1][1]=stamp
-            else:return True,None
-        valid=(recent(direction,now,.75) and direction.get('frame_valid')
-            and recent(feedback,now,self.c['lease_s']) and feedback.get('phase')=='idle'
-            and feedback.get('single_face') is True and feedback.get('settled') is True
-            and (self.c['mount']['calibrated'] or self.c['mount']['allow_provisional']))
-        if not valid:self.run=0.;self.candidate=None;return False,None
+            else:self.note('side_utterance_masked',admission=getattr(self,'mask_reason',None));return True,None
+        reason=('direction_unavailable' if not recent(direction,now,.75) or not direction.get('frame_valid') else
+            'gaze_feedback_unavailable' if not recent(feedback,now,self.c['lease_s']) else
+            'gaze_busy' if feedback.get('phase')!='idle' else
+            'main_face_unavailable' if feedback.get('single_face') is not True else
+            'gaze_not_settled' if feedback.get('settled') is not True else
+            'mount_unconfirmed' if not (self.c['mount']['calibrated'] or self.c['mount']['allow_provisional']) else None)
+        if reason:
+            self.run=0.;self.candidate=None;self.note(reason);return False,None
         azimuth=bearing(direction['sector'],self.c)
-        separated=abs(angle(azimuth-feedback['main_bearing_deg']))>=self.c['direction_difference_deg']
-        clean=(metrics['clean_rms']>=self.c['minimum_clean_rms']
-            and metrics['reference_rms']<self.c['maximum_reference_rms'] and self.vad(pcm))
-        if not separated or not clean:self.run=0.;self.candidate=None;return False,None
+        difference=abs(angle(azimuth-feedback['main_bearing_deg']))
+        # VAD is stateful: preserve its former call order even when logging a
+        # same-direction rejection. Diagnostics must not retune speech history.
+        audible=metrics['clean_rms']>=self.c['minimum_clean_rms']
+        overlap=metrics['reference_rms']>=self.c['maximum_reference_rms']
+        speech=self.vad(pcm) if audible and not overlap else False
+        reason=('same_direction' if difference<self.c['direction_difference_deg'] else
+            'quiet' if not audible else 'robot_playback_overlap' if overlap else 'not_speech' if not speech else None)
+        if reason:
+            self.run=0.;self.candidate=None
+            self.note(reason,sector=direction['sector'],difference_deg=round(difference,1));return False,None
         # Quarantine from the first candidate frame, before cloud VAD/tools.
         if self.candidate!=direction['sector']:self.run=0.;self.candidate=direction['sector']
         self.run+=.02
-        if self.run+1e-9<self.c['speech_run_s']:return True,None
+        if self.run+1e-9<self.c['speech_run_s']:
+            self.note('collecting_speech',sector=direction['sector']);return True,None
         may_start=available and now-self.last_episode>=self.c['cooldown_s']
+        self.mask_reason='accepted' if may_start else 'main_busy' if not available else 'cooldown'
         self.last_voice=now;self.suppressed_until=now+8.
         self.side_sequence=direction.get('sequence');self.main_anchor=feedback['main_bearing_deg']
         onset=stamp-self.run+.02
         self.intervals.append([onset-.25,now+8.])
         self.run=0.
-        if not may_start:return True,None  # Do not route a side voice as the busy main actor.
+        if not may_start:
+            self.note('main_busy' if not available else 'cooldown',sector=direction['sector']);return True,None
         self.last_episode=now
+        self.note('accepted',sector=direction['sector'],difference_deg=round(difference,1))
         return True,dict(id=uuid.uuid4().hex,owner=feedback['owner'],sector=direction['sector'],
             bearing_deg=azimuth,heard_monotonic=onset,created_monotonic=now,
             action='glance',mount_calibrated=self.c['mount']['calibrated'])

@@ -408,7 +408,9 @@ def main(argv=None):
     speech=json.loads(args.config.read_text())
     if args.check:
         config,*_=voice_configuration(speech,args.robot)
-        print(json.dumps(dict(valid=True,frontend=config['frontend'],hardware_opened=False,network_called=False)));return 0
+        from vivis.speech.sound_direction import runtime_dependencies
+        print(json.dumps(dict(valid=True,frontend=config['frontend'],hardware_opened=False,network_called=False,
+            sound_attention_runtime=runtime_dependencies(sys.executable))));return 0
     args.output.mkdir(parents=True,exist_ok=True)
     secret_name=json.loads((ROOT/speech['managed_voice']['config']).read_text())['api_key_env']
     secret=os.environ.get(secret_name,'');lock=threading.Lock()

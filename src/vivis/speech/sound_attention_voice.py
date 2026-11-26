@@ -8,16 +8,30 @@ from vivis.interaction.sound_attention import Mailbox,SideSpeechGate,configurati
 from vivis.speech.runtime_policy import bounded_send
 
 
+GATE_REASONS=dict(direction_unavailable='没有新鲜的声源坐标',gaze_feedback_unavailable='跟随控制反馈未就绪',
+    gaze_busy='正在进行一次转向',main_face_unavailable='当前没有单人主聊天画面',
+    gaze_not_settled='眼颈跟随尚未稳定',mount_unconfirmed='方位安装朝向尚未确认',
+    same_direction='声源与主人方向差未达到设定门槛',robot_playback_overlap='声音与音箱回采重叠',
+    main_busy='主聊天人的话轮或业务尚未结束',cooldown='距离上次转向过近')
+
+
 class SoundAttentionVoice:
     def init_sound_attention(self):
         self.sound_attention=None;self.sound_gate=None;self.sound_mailbox=None;self.direction_observer=None
+        self.sound_status_publisher=None;self.sound_diagnostic_at=0.;self.sound_observer_key=None
+        self.sound_frame_key=None;self.sound_gate_log_at=0.;self.sound_busy={}
+        self.sound_gate_warning=None;self.sound_gate_warning_at=0.
         self.side_items=deque(maxlen=128);self.side_responses=deque(maxlen=128)
         self.side_commands=deque(maxlen=128)
         self.side_onsets={}
         self.side_response_sources={}
         self.side_wire_item=None;self.side_task=None;self.side_stable=None
         c=configuration()
+        self.sound_config=c
         definition=json.loads(self.robot_path.read_text())
+        self.sound_capabilities=dict(head_yaw_supported='eyes-neck' in definition.get('supported_modes',[]),
+            side_attention_configured=c['enabled'] and definition.get('name')=='xiaoshuai',
+            manual_turn_tool_available=False,direction_reference_calibrated=c['mount']['calibrated'])
         if not c['enabled'] or definition.get('name')!='xiaoshuai':return
         try:
             import webrtcvad
@@ -26,7 +40,6 @@ class SoundAttentionVoice:
             self.log.write('sound_attention_disabled',reason='webrtcvad_not_installed');return
         self.sound_gate=SideSpeechGate(c,lambda pcm:vad.is_speech(pcm,16000))
         self.side_audio=self.fixed_audio('稍等。')  # Validate/load before audio scheduling.
-        self.sound_config=c
         hardware=json.loads((self.robot_path.parent/definition['hardware']).read_text())
         from vivis.speech.sound_direction import DirectionObserver,configuration as direction_configuration
         self.direction_observer=DirectionObserver(direction_configuration(),hardware['runtime']['port'])
@@ -36,23 +49,73 @@ class SoundAttentionVoice:
 
     def sound_frozen(self):return getattr(self,'sound_attention',None) is not None
 
+    def sound_status(self,*,details=False,now=None):
+        now=time.monotonic() if now is None else now
+        observer=getattr(self,'direction_observer',None)
+        status=observer.status(now) if observer is not None and callable(getattr(observer,'status',None)) else dict(status='disabled')
+        result=dict(getattr(self,'sound_capabilities',{}),observer_status=status['status'],
+            side_attention_runtime_available=getattr(self,'sound_gate',None) is not None,
+            side_glance_active=self.sound_frozen(),current_speaker_location_confirmed=False,
+            notice='本体支持限位内眼颈跟随和自动短暂循声；没有手动转头工具，不承诺已执行。固定底座不等于头颈不能转。最近声源不等于本轮说话人位置，不确认身份；未知或未标定时不猜您在正前方。')
+        if details:
+            gate=getattr(getattr(self,'sound_gate',None),'diagnostic',{})
+            result.update(observer=status,gate=dict(gate) if isinstance(gate,dict) else {},
+                main_busy=dict(getattr(self,'sound_busy',{})))
+        return result
+
+    def poll_sound_diagnostics(self,now,metrics):
+        if now<getattr(self,'sound_diagnostic_at',0.):return
+        self.sound_diagnostic_at=now+.25
+        data=self.sound_status(details=True,now=now);status=data['observer']
+        key=(status.get('status'),status.get('error'),status.get('generation'))
+        if key!=self.sound_observer_key:
+            self.sound_observer_key=key;self.log.write('sound_direction_state',**status)
+            error=status.get('error')
+            message=('声源串口不可用：'+error+'；普通聊天继续。' if error else
+                '声源串口已打开；等待有效坐标。' if status.get('serial_open') and status['status']=='waiting' else None)
+            if message:self.emit(dict(kind='voice_warning',epoch=self.epoch,message=message))
+        frame_key=(status.get('generation'),status.get('sequence'))
+        if status['status']=='fresh' and frame_key!=self.sound_frame_key:
+            self.sound_frame_key=frame_key
+            self.log.write('sound_direction_observation',**status)
+            self.emit(dict(kind='voice_warning',epoch=self.epoch,
+                message=f"声源方位：收到坐标{status['sector']:02d}；"+
+                    ('安装朝向已校准。' if data.get('direction_reference_calibrated') else '安装朝向尚待校准，不据此猜测说话人位置。')))
+        if metrics['clean_rms']>=self.sound_config['minimum_clean_rms'] and now-self.sound_gate_log_at>=1.:
+            self.sound_gate_log_at=now
+            self.log.write('sound_attention_gate',**data['gate'],main_busy=data['main_busy'],
+                observer_status=status['status'],clean_rms=metrics['clean_rms'],reference_rms=metrics['reference_rms'])
+            reason=data['gate'].get('reason');text=GATE_REASONS.get(reason)
+            if text and (reason!=self.sound_gate_warning or now-self.sound_gate_warning_at>=10.):
+                self.sound_gate_warning=reason;self.sound_gate_warning_at=now
+                self.emit(dict(kind='voice_warning',epoch=self.epoch,message='循声未触发：'+text+'。'))
+        publisher=getattr(self,'sound_status_publisher',None)
+        if publisher:publisher.submit(dict(updated_monotonic=now,**data))
+
     def acoustic_microphone(self,stamp,pcm,metrics):
         """Runs on the existing async drain, never on the PortAudio callback."""
         gate=getattr(self,'sound_gate',None)
         if gate is None:return False
         if not self.sound_started:
             self.sound_started=True;self.sound_mailbox.start();self.direction_observer.start()
+            from vivis.motion.ownership import PreviewPublisher
+            self.sound_status_publisher=PreviewPublisher(self.folder/'sound_direction.json')
             self.log.write('sound_attention_started',budget_s=self.sound_config['budget_s'],
                 mount_calibrated=self.sound_config['mount']['calibrated'],checksum_verified=False)
         state=self.cloud_state;now=time.monotonic()
         if (self.context['mode']!='interaction' or not self.context['ready']
                 or not self.health_available or not self.enabled):
             gate.reset(keep_history=True,now=now);self.side_suppressed=False
+            self.poll_sound_diagnostics(now,metrics)
             return False  # Standby wake and task stop retain their original input path.
+        single=self.presence.single_visible();reply_busy=self.turn_reply_pending()
+        self.sound_busy=dict(user_speaking=self.in_speech,reply_pending=reply_busy,single_face=single,
+            control_pending=self.control_pending,expression_pending=self.expression_pending is not None,
+            business_pending=bool(self.message_lane and self.message_lane.task) or bool(self.relay_pending))
         available=(state is not None and self.context['mode']=='interaction' and self.context['ready']
             and self.health_available and self.enabled and not self.in_speech and not self.control_pending
-            and self.presence.single_visible()
-            and not self.sound_frozen() and not self.turn_reply_pending() and self.farewell is None
+            and single
+            and not self.sound_frozen() and not reply_busy and self.farewell is None
             and not self.expression_pending and not (self.message_lane and self.message_lane.task)
             and not self.relay_pending)
         # Do not pause confidential/unfinished business output to answer a stranger.
@@ -62,6 +125,7 @@ class SoundAttentionVoice:
         suppressed,request=gate.observe(stamp,pcm,metrics,self.direction_observer.latest,
             self.sound_mailbox.latest,available=available,now=now)
         self.side_suppressed=suppressed
+        self.poll_sound_diagnostics(now,metrics)
         if request:
             audio=self.side_audio
             if audio is None:
@@ -211,3 +275,5 @@ class SoundAttentionVoice:
         # Joins run off the event loop; cancellation remains on that loop.
         if self.sound_mailbox:self.sound_mailbox.close()
         if self.direction_observer:self.direction_observer.close()
+        if self.sound_status_publisher:
+            self.sound_status_publisher.finish(dict(updated_monotonic=time.monotonic(),observer_status='stopped'))

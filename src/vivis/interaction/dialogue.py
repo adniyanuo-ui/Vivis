@@ -295,13 +295,16 @@ def main(argv=None):
             if p['kind'] in ('runtime_a2f','prerecorded'):robot.work(p['work'])
         from vivis.interaction.knowledge import Knowledge
         knowledge=Knowledge(robot.path)
+        from vivis.speech.sound_direction import runtime_dependencies
+        direction_dependencies=runtime_dependencies(ROOT/speech['python']) if qwen_only else None
         print(json.dumps(dict(offline_valid=True,knowledge_enabled=knowledge.config is not None,
             familiar_profiles=len(knowledge.people),familiar_faces_configured=knowledge.recognition is not None,
             programs=[p['title'] for p in catalog['programs']],
             modes=[STANDBY,INTERACTION,'task'],wake_words=wake_words,initial_mode=STANDBY,
             realtime_voice=voice_enabled,voice_control_backend=voice_options.get('control_backend','local'),reception_enabled=reception_enabled,realtime_lip_sync=bool(voice_enabled and voice_options.get('lip_sync',{}).get('enabled')),
             board_reference_device=board_reference_device,host_aec_enabled=board_reference_device is None,
-            missing_dependencies=missing,hardware_opened=False,requires_onsite=['wake ASR at intended distance','speaker double-talk/AEC','smooth mode transitions']),ensure_ascii=False));return 0
+            missing_dependencies=missing,sound_attention_runtime=direction_dependencies,
+            hardware_opened=False,requires_onsite=['wake ASR at intended distance','speaker double-talk/AEC','smooth mode transitions']),ensure_ascii=False));return 0
     if missing:parser.error('Missing optional P1 assets; run python3 tools/setup_p1.py and setup_p0.py: '+str(missing))
     if not args.listen_only:
         check_competitors(True)

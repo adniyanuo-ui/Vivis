@@ -268,7 +268,10 @@ class ManagedMessageConnectionTests(unittest.IsolatedAsyncioTestCase):
                     await until(lambda:service.cloud_state.generating is None)
                     self.assertFalse(service.tasks.list('all'));service.speak_message.assert_not_awaited()
             finally:
-                task.cancel();await asyncio.gather(task,return_exceptions=True);service.log.close()
+                task.cancel();await asyncio.gather(task,return_exceptions=True)
+                # This fixture runs _connection without ManagedVoice.run's
+                # owner cleanup. Join its real writer before deleting temp files.
+                service.conversation_animation.close();service.recorders.close();service.log.close()
 
     async def test_business_owns_write_and_voice_without_stuck_generation(self):await self.exercise(True)
     async def test_ordinary_chat_is_released_without_database_or_duplicate_reply(self):await self.exercise(False)

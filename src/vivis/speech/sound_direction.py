@@ -6,6 +6,9 @@ import math
 from pathlib import Path
 import time
 import threading
+import sys
+from importlib.machinery import PathFinder
+from importlib import invalidate_caches
 
 from vivis.paths import ROOT
 from vivis.hardware.haokai import DirectionParser, DirectionState, open_receiver, select_port
@@ -14,10 +17,23 @@ from vivis.hardware.haokai import DirectionParser, DirectionState, open_receiver
 CONFIG = ROOT / 'configs/perception/sound_direction.json'
 
 
+def runtime_dependencies(python):
+    """Inspect the SELECTED venv, not the supervisor's imports; open no device."""
+    invalidate_caches()
+    python=Path(python).absolute();prefix=python.parent.parent
+    paths=[str(p) for p in prefix.glob('lib/python*/site-packages')]
+    if python==Path(sys.executable).absolute():paths=list(sys.path)
+    if not paths:return dict(available=None,missing_modules=[],python=str(python),check='environment_not_inspectable')
+    missing=[name for name in ('serial','webrtcvad') if PathFinder.find_spec(name,paths) is None]
+    return dict(available=not missing,missing_modules=missing,python=str(python),
+        check='module_presence_only_no_device_open')
+
+
 class DirectionObserver:
     """One optional read-only UART owner, detached from audio/control scheduling."""
     def __init__(self,c,protected_port):
         self.c=c;self.protected_port=protected_port;self.latest=None;self.error=None
+        self.port=None;self.opened=False;self.generation=0;self.statistics={}
         self.stop=threading.Event();self.thread=None
 
     def start(self):
@@ -31,6 +47,7 @@ class DirectionObserver:
                 from serial.tools.list_ports import comports
                 port=select_port(list(comports()),self.c['serial'],self.protected_port)
                 receiver=open_receiver(port,self.c['serial'])
+                self.port=port;self.opened=True;self.generation+=1
                 verify=self.c.get('verify_checksum',True)
                 parser=DirectionParser(verify)
                 state=DirectionState(self.c['coordinates'],self.c['monitor']['max_age_s'],verify)
@@ -40,13 +57,27 @@ class DirectionObserver:
                     now=time.monotonic()
                     for frame in parser.feed(data):state.observe(frame,now)
                     self.latest=dict(state.snapshot(now),updated_monotonic=state.received)
+                    self.statistics=parser.statistics()
             except Exception as exc:
                 self.latest=None;self.error=type(exc).__name__+': '+str(exc)[:160]
             finally:
+                self.opened=False
                 if receiver is not None:
                     try:receiver.close()
                     except OSError:pass
             self.stop.wait(10.)  # Optional observer failure never restarts the head.
+
+    def status(self,now=None):
+        now=time.monotonic() if now is None else now
+        packet=self.latest or {};stamp=packet.get('received_monotonic')
+        age=now-stamp if type(stamp) in (int,float) else None
+        fresh=age is not None and 0<=age<=self.c['monitor']['max_age_s'] and packet.get('frame_valid') is True
+        state=('error' if self.error else 'off' if not self.opened else 'fresh' if fresh else
+            'waiting' if stamp is None else 'stale')
+        return dict(status=state,port=self.port,serial_open=self.opened,error=self.error,
+            generation=self.generation,sector=packet.get('sector') if fresh else None,
+            sequence=packet.get('sequence',0),age_s=age,statistics=dict(self.statistics),
+            checksum_verified=fresh and self.c.get('verify_checksum',True))
 
     def close(self):
         self.stop.set()
