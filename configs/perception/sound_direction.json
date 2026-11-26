@@ -1,0 +1,31 @@
+{
+  "schema_version": "vivis-sound-direction-1.0",
+  "protocol": "hk-qxmic-v3-sector12",
+  "protocol_document": {
+    "name": "HK-QXMI..V3.pdf / 声源定位串口读取坐标操作说明",
+    "sha256": "253961527fca9156f2fe3de811c7b97f3f8d68ef2d6a932c259369e873f29bcd"
+  },
+  "serial": {
+    "device": null,
+    "usb_vid": 6790,
+    "usb_pid": 29987,
+    "baud_rate": 1000000,
+    "data_bits": 8,
+    "parity": "N",
+    "stop_bits": 1,
+    "read_timeout_s": 0.2
+  },
+  "coordinates": {
+    "sector_count": 12,
+    "sector_step_deg": 30,
+    "sector_zero_nominal_deg": 180,
+    "reference": "manufacturer_board_diagram"
+  },
+  "monitor": {
+    "publish_interval_s": 0.25,
+    "max_age_s": 0.75,
+    "max_raw_bytes": 1048576,
+    "max_event_bytes": 2097152
+  },
+  "motion_enabled": false
+}

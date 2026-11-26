@@ -1,5 +1,13 @@
 # Repository Guidelines
 
+## Sound direction and next two weeks (2026-11-26, latest)
+
+User provisionally accepted iteration01 identity; small issues are deferred, not permission to retune thresholds. Iteration02 Word now includes a two-week expressive-conversation plan (15pages), current A2F neutral input/mouth-only consumption, semantic intent, DAC-bound expression lifecycle and conservative shared-actuator blending. No expression runtime change was made in this task. Multispeaker sessions, voice-assisted enrollment and independent Live works remain later work.
+
+User explicitly authorized reading the newly connected direction serial. Their separate HK-QXMI..V3.pdf contains1000000/8N1,55AA,index0..11,checksumFF-index; four-byte payload is understood, trailing sample bytes are not. The independent check_sound_direction tool selects a unique expectedCH340(1a86:7523), excludes the configured head serial even through aliases, and sends no protocol bytes. Config owns read/publication/freshness settings. Board nominal(180+30*index)%360 is not calibrated robot bearing, VAD, identity or motion permission. No audio/camera/head/service is opened by this tool.
+
+At this task's inspection only rootUSB hubs remained; kernel2026-11-26 13:09:28 recordsxHCI host not responding/HC died and mass disconnect. P1 is failed. Do not call this proven hub/power causality or a passed live direction test. No host restart, USB rebind or P1 restart was performed. Physical receiving awaits operator restoring USB; then enumerate/verify real adapter identity and capture before any direction-to-motion work. See HK_QXMIC_V3_INTEGRATION12 and ACCEPTANCE39. Initial full1389tests passed(3skips); final direction18tests include USB-close failure; all asset/example/P1 offline checks passed. Evidence outputs/diagnostics/doa_20261126.
+
 ## Identity explanation and threshold audit (2026-11-25, latest)
 
 Operator powered headOFF after21:12 and requested continued offline work/morning acceptance. Do NOT start/restart services, open devices or drive actuators. Baseline f4c98fc. Eight21:10..21:12 Heyude voice results were ALL suspected(score0.496..0.648, margin0.230..0.312), final results0.205..1.182s after ASR. Business retained21:05:03 confirmed Heyude(~0.698); this is NOT8 newly confirmed voice matches. Source final log None is pending/current-only; never reuse previous voice display or retroactively relabel a turn. Sampling no_reliable_visual_fragment does not invalidate acoustic recognition.
