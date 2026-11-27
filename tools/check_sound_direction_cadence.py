@@ -25,7 +25,7 @@ PHASES=((0.,10.,'quiet_before','保持安静10秒'),
 def phase_report(name,p,max_age):
     prefix=f"{name}：原始字节{p['raw_bytes']}，有效坐标{p['valid_frames']}个，分{p['valid_frame_batches']}批到达；"
     if not p['gap_count']:
-        detail='有效批次不足两批，无法计算相邻收包间隔（不代表没有过期）'
+        detail='有效批次不足两批，无法计算相邻收包间隔（不代表持续更新）'
     else:
         detail=(f"最长批间隔{p['gap_max_s']:.3f}秒，超过{max_age}秒{p['gaps_above_max_age']}次")
     tail=p['tail_without_coordinate_s']
@@ -198,6 +198,8 @@ def main(argv=None):
         if stats is not None:
             print(f"USB采音回调{stats['callback_count']}次，状态告警{stats['status_count']}次；音频未保存。",flush=True)
         print(f'报告：{directory}/summary.json',flush=True)
+        if c['monitor']['update_mode']=='on_change':
+            print('当前按方向变化通知理解：无新坐标不等于方向失效；以上间隔不作为心跳故障判定。',flush=True)
         return 0 if result['outcome']=='complete' and result['statistics']['valid_frames'] else 1
     except Exception as exc:
         print('收包测试未完成：'+str(exc));return 1

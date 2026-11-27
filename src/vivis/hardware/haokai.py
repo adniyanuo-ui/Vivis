@@ -59,13 +59,15 @@ class DirectionParser:
 
 class DirectionState:
     """Host receive time is not a speech timestamp or a voice-activity indicator."""
-    def __init__(self, coordinates, max_age_s, verify_checksum=True):
+    def __init__(self, coordinates, max_age_s, verify_checksum=True, update_mode='periodic'):
+        if update_mode not in ('periodic','on_change'):raise ValueError('Invalid direction update mode')
         self.coordinates = coordinates
         self.max_age_s = max_age_s
         self.frame = None
         self.received = None
         self.sequence = 0
         self.verify_checksum = verify_checksum
+        self.update_mode = update_mode
 
     def observe(self, frame, now):
         if (not isinstance(frame, DirectionFrame) or not 0 <= frame.sector < 12
@@ -80,12 +82,15 @@ class DirectionState:
             raise ValueError('Invalid observation clock')
         age = None if self.received is None else now-self.received
         fresh = age is not None and 0 <= age <= self.max_age_s
-        frame = self.frame if fresh else None
+        held = self.update_mode=='on_change' and age is not None and age>=0 and not fresh
+        frame = self.frame if fresh or held else None
         nominal = ((self.coordinates['sector_zero_nominal_deg'] +
                     frame.sector*self.coordinates['sector_step_deg']) % 360
                    if frame else None)
         return dict(schema_version='vivis-sound-direction-observation-1.0',
-                    status='fresh' if fresh else 'waiting' if age is None else 'stale',
+                    status='fresh' if fresh else 'held' if held else 'waiting' if age is None else 'stale',
+                    update_mode=self.update_mode,event_fresh=fresh,event_window_s=self.max_age_s,
+                    observed_monotonic=now,state_available=bool(frame),
                     sequence=self.sequence, received_monotonic=self.received,
                     age_s=age, frame_valid=bool(frame),
                     sector=frame.sector if frame else None,

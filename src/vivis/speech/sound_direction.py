@@ -47,21 +47,25 @@ class DirectionObserver:
                 from serial.tools.list_ports import comports
                 port=select_port(list(comports()),self.c['serial'],self.protected_port)
                 receiver=open_receiver(port,self.c['serial'])
+                self.latest=None;self.statistics={}
                 self.port=port;self.opened=True;self.generation+=1
                 verify=self.c.get('verify_checksum',True)
                 parser=DirectionParser(verify)
-                state=DirectionState(self.c['coordinates'],self.c['monitor']['max_age_s'],verify)
+                state=DirectionState(self.c['coordinates'],self.c['monitor']['max_age_s'],verify,
+                    self.c['monitor']['update_mode'])
                 self.error=None
                 while not self.stop.is_set():
                     data=receiver.read(min(4096,max(1,receiver.in_waiting)))
                     now=time.monotonic()
                     for frame in parser.feed(data):state.observe(frame,now)
-                    self.latest=dict(state.snapshot(now),updated_monotonic=state.received)
+                    self.latest=dict(state.snapshot(now),updated_monotonic=state.received,
+                        generation=self.generation,serial_open=True,
+                        observer_lease_s=self.c['monitor']['observer_lease_s'])
                     self.statistics=parser.statistics()
             except Exception as exc:
                 self.latest=None;self.error=type(exc).__name__+': '+str(exc)[:160]
             finally:
-                self.opened=False
+                self.opened=False;self.latest=None
                 if receiver is not None:
                     try:receiver.close()
                     except OSError:pass
@@ -72,15 +76,31 @@ class DirectionObserver:
         packet=self.latest or {};stamp=packet.get('received_monotonic')
         age=now-stamp if type(stamp) in (int,float) else None
         fresh=age is not None and 0<=age<=self.c['monitor']['max_age_s'] and packet.get('frame_valid') is True
+        seen=packet.get('observed_monotonic')
+        responsive=(type(seen) in (int,float) and 0<=now-seen<=self.c['monitor']['observer_lease_s'])
+        held=(self.c['monitor']['update_mode']=='on_change' and not fresh and age is not None
+            and age>=0 and packet.get('frame_valid') is True)
         state=('error' if self.error else 'off' if not self.opened else 'fresh' if fresh else
-            'waiting' if stamp is None else 'stale')
+            'waiting' if stamp is None else 'held' if held else 'stale')
+        if self.opened and stamp is not None and not responsive:state='unresponsive'
+        usable=state in ('fresh','held')
         return dict(status=state,port=self.port,serial_open=self.opened,error=self.error,
-            generation=self.generation,sector=packet.get('sector') if fresh else None,
+            generation=self.generation,sector=packet.get('sector') if usable else None,
             sequence=packet.get('sequence',0),age_s=age,statistics=dict(self.statistics),
-            checksum_verified=fresh and self.c.get('verify_checksum',True))
+            event_fresh=usable and fresh,last_known_direction_available=usable,
+            update_mode=self.c['monitor']['update_mode'],observer_responsive=responsive,
+            checksum_verified=usable and self.c.get('verify_checksum',True))
+
+    def attention_snapshot(self,now=None):
+        now=time.monotonic() if now is None else now
+        status=self.status(now);packet=self.latest
+        if (not status['last_known_direction_available'] or not isinstance(packet,dict)
+                or packet.get('generation')!=self.generation):return None
+        return dict(packet,observer_status=status['status'])
 
     def close(self):
         self.stop.set()
+        self.opened=False;self.latest=None
         if self.thread:self.thread.join(timeout=.5)
 
 
@@ -91,6 +111,7 @@ def configuration(path=CONFIG):
         raise ValueError('Invalid sound-direction protocol or motion permission')
     s, angles, monitor = c['serial'], c['coordinates'], c['monitor']
     if type(c.get('verify_checksum',True)) is not bool:raise ValueError('Invalid checksum policy')
+    if monitor.get('update_mode') not in ('periodic','on_change'):raise ValueError('Invalid coordinate update mode')
     if 'attention' in c:
         from vivis.interaction.sound_attention import configuration as attention_configuration
         attention_configuration(path)
@@ -110,6 +131,7 @@ def configuration(path=CONFIG):
                       reference='manufacturer_board_diagram'):
         raise ValueError('Direction indices must retain the vendor coordinate convention')
     limits = ((s, 'read_timeout_s', .05, .3), (monitor, 'publish_interval_s', .2, 1.),
+              (monitor, 'observer_lease_s', .3, 3.),
               (monitor, 'max_age_s', .3, 3.))
     if any(type(obj.get(key)) not in (int, float) or not math.isfinite(obj[key])
            or not low <= obj[key] <= high for obj, key, low, high in limits):
@@ -162,7 +184,7 @@ class Evidence:
 def monitor_receiver(receiver, c, seconds, evidence, emit=print, clock=time.monotonic):
     verify = c.get('verify_checksum',True)
     parser = DirectionParser(verify)
-    state = DirectionState(c['coordinates'], c['monitor']['max_age_s'],verify)
+    state = DirectionState(c['coordinates'], c['monitor']['max_age_s'],verify,c['monitor']['update_mode'])
     start = clock()
     next_publish = start
     outcome, error, failure_stage = 'complete', None, None
@@ -185,8 +207,8 @@ def monitor_receiver(receiver, c, seconds, evidence, emit=print, clock=time.mono
                 stage = 'evidence_write'
                 evidence.event(packet)
                 if packet['frame_valid']:
-                    text = (f"坐标{packet['sector']:02d}，板卡名义角度"
-                            f"{packet['board_nominal_azimuth_deg']}°")
+                    text = (f"{'保持上次坐标' if packet['status']=='held' else '坐标'}{packet['sector']:02d}，板卡名义角度"
+                            f"{packet['board_nominal_azimuth_deg']}°；非说话人身份")
                 else:
                     text = '等待有效方位帧' if packet['status'] == 'waiting' else '方位数据已过期'
                 emit(f"声源方位［{packet['status']}］：{text}；语音有效性未知，不联动运动")

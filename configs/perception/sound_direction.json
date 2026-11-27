@@ -22,8 +22,10 @@
     "reference": "manufacturer_board_diagram"
   },
   "monitor": {
+    "update_mode": "on_change",
     "publish_interval_s": 0.25,
     "max_age_s": 0.75,
+    "observer_lease_s": 1.0,
     "max_raw_bytes": 1048576,
     "max_event_bytes": 2097152
   },
@@ -38,6 +40,9 @@
     "cooldown_s": 5.0,
     "lease_s": 0.5,
     "speech_run_s": 0.08,
+    "speech_release_s": 0.4,
+    "side_utterance_silence_s": 0.6,
+    "introduction_followup_s": 120.0,
     "camera_half_fov_deg": 30.0,
     "yaw_counts_per_deg": 11.377777777777778,
     "search_s": 2.0,

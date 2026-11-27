@@ -87,11 +87,14 @@ class SideDialogue:
             '没有发送图像，不猜测画面、位置或身份。不要说固定底座所以脖子不能转。程序管理眼颈短暂侧看和返回，不要承诺已转向。'
             '明确介绍新访客时调用introduce_visitor，等工具回执后使用访客称呼自然欢迎，可顺背景问一个简单问题。'
             '介绍人、被介绍访客、主聊天身份分别独立；本轮speaker仅代表插话者，不代表被介绍人。'
+            '如果source_relation是introduction_followup_unverified，只表示接收待核验的介绍补充，不代表已确认是上一位介绍人；'
+            '只能用程序本轮speaker核验结果，不能借用历史介绍人的权限。'
             '姓名或称呼缺失时友好问“这位老师怎么称呼？”；未注册完不能声称下次一定认识或已经采集完毕。'
             '工具失败如实说明简短原因，不编造成功；查询天气等无实时数据时不猜。'
             '有效动作需求必须调工具，问会不会不等于要求执行。留言用side_message。'
             '已介绍的职业背景仅来自介绍人，不等于已核实。工具返回待识别时可以改口称呼，不能冒充图声识别成功。'
             '\ncontroller_public='+json.dumps(dict(speaker=actor,guest=self.request.get('guest'),
+                source_relation=self.request.get('source_relation','new_direction_event'),
                 unfinished_introduction=draft,
                 programs=v.programs,current_local_time=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(timespec='minutes')),
                 ensure_ascii=False))
@@ -100,7 +103,7 @@ class SideDialogue:
         draft=getattr(self.v,'introduction_draft',None)
         return draft if (draft and self.actor and draft['introducer']==self.actor
             and draft['guest_key']==self.request['guest_key'] and draft['session']==self.request['session']
-            and 0<=time.monotonic()-draft['stamp']<=120) else None
+            and 0<=time.monotonic()-draft['stamp']<=self.v.sound_config['introduction_followup_s']) else None
 
     async def tool(self,name,args):
         if not self.valid():raise ValueError('这句话已经过期，不执行旧请求')
@@ -126,7 +129,7 @@ class SideDialogue:
                 v.introduced_guest=dict(guest=guest,information=args,person_id=output['person_id'],session=r['session'])
             elif output.get('status')=='needs_address':
                 v.introduction_draft=dict(introducer=self.actor,guest_key=r['guest_key'],session=r['session'],
-                    text=original[-3000:],information=args,stamp=time.monotonic())
+                    guest_owner=guest.get('owner'),text=original[-3000:],information=args,stamp=time.monotonic())
             v.log.write('visitor_introduction',side_turn=r['id'],introducer=self.actor,**output)
             return output
         if name=='get_robot_status':

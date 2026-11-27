@@ -22,6 +22,9 @@ def configuration(path=CONFIG):
     if type(c.get('enabled')) is not bool:raise ValueError('Invalid acoustic attention switch')
     for key,low,high in [('budget_s',1,8),('dwell_s',0,3),('direction_difference_deg',30,120),
             ('cooldown_s',2,30),('lease_s',.2,1),('speech_run_s',.06,.3),
+            ('speech_release_s',.2,1),
+            ('side_utterance_silence_s',.35,1),
+            ('introduction_followup_s',30,180),
             ('camera_half_fov_deg',10,60),('yaw_counts_per_deg',1,30),
             ('search_s',.5,5),('minimum_clean_rms',.001,.1),('maximum_reference_rms',.0001,.1)]:
         value=c.get(key)
@@ -48,6 +51,26 @@ def bearing(sector,c):
 def recent(packet,now,age):
     return (isinstance(packet,dict) and type(packet.get('updated_monotonic')) in (int,float)
         and 0<=now-packet['updated_monotonic']<=age)
+
+
+def direction_available(packet,now,*,new_event=False):
+    """A live change-state is not proof of who spoke the current utterance.
+
+    Legacy/periodic packets retain expiry. On-change states require a responsive
+    receiver and its open generation; empty reads refresh only receiver health.
+    """
+    if not isinstance(packet,dict) or packet.get('frame_valid') is not True:return False
+    if type(packet.get('sector')) is not int or not 0<=packet['sector']<12:return False
+    window=packet.get('event_window_s',.75)
+    if type(window) not in (int,float) or not math.isfinite(window) or not .01<=window<=3:return False
+    if packet.get('update_mode')!='on_change':return recent(packet,now,window)
+    lease=packet.get('observer_lease_s');observed=packet.get('observed_monotonic')
+    updated=packet.get('updated_monotonic')
+    valid=(packet.get('serial_open') is True and type(packet.get('generation')) is int and packet['generation']>0
+        and type(lease) in (int,float) and math.isfinite(lease) and .2<=lease<=3
+        and type(observed) in (int,float) and math.isfinite(observed) and 0<=now-observed<=lease
+        and type(updated) in (int,float) and math.isfinite(updated) and 0<=now-updated)
+    return bool(valid and (not new_event or now-updated<=window))
 
 
 class Mailbox:
@@ -96,6 +119,7 @@ class SideSpeechGate:
         self.c,self.vad=c,vad;self.run=0.;self.last=None;self.candidate=None
         self.last_episode=-math.inf;self.intervals=deque(maxlen=64)
         self.suppressed_until=-math.inf;self.last_voice=-math.inf
+        self.source_generation=None
         self.diagnostic=dict(reason='not_observed')
 
     def note(self,reason,**fields):
@@ -108,23 +132,26 @@ class SideSpeechGate:
             if self.intervals:self.intervals[-1][1]=min(self.intervals[-1][1],now)
         else:self.intervals.clear()
 
-    def observe(self,stamp,pcm,metrics,direction,feedback,*,available,now):
+    def observe(self,stamp,pcm,metrics,direction,feedback,*,available,now,allow_held_followup=False):
         continuous=self.last is not None and .005<=stamp-self.last<=.035
         self.last=stamp
         if not continuous:self.run=0.
+        if not direction_available(direction,now):
+            self.reset(keep_history=True,now=stamp);self.note('direction_unavailable');return False,None
+        if now<self.suppressed_until and direction.get('generation')!=self.source_generation:
+            self.reset(keep_history=True,now=stamp);self.note('direction_source_changed');return False,None
         # Suppress one bounded side utterance, including its tail after returning.
         if now<self.suppressed_until:
-            new_main=(recent(direction,now,.3) and direction.get('frame_valid')
+            new_main=(direction_available(direction,now,new_event=True)
                 and direction.get('sequence')!=getattr(self,'side_sequence',None)
                 and abs(angle(bearing(direction['sector'],self.c)-self.main_anchor))<self.c['direction_difference_deg'])
             voiced=self.vad(pcm) and metrics['clean_rms']>=self.c['minimum_clean_rms']
             if voiced:self.last_voice=now
-            if new_main or now-self.last_voice>.35:
+            if new_main or now-self.last_voice>self.c['side_utterance_silence_s']:
                 self.suppressed_until=-math.inf
                 if self.intervals:self.intervals[-1][1]=stamp
             else:self.note('side_utterance_masked',admission=getattr(self,'mask_reason',None));return True,None
-        reason=('direction_unavailable' if not recent(direction,now,.75) or not direction.get('frame_valid') else
-            'gaze_feedback_unavailable' if not recent(feedback,now,self.c['lease_s']) else
+        reason=('gaze_feedback_unavailable' if not recent(feedback,now,self.c['lease_s']) else
             'gaze_busy' if feedback.get('phase')!='idle' else
             'main_face_unavailable' if feedback.get('single_face') is not True else
             'mount_unconfirmed' if not (self.c['mount']['calibrated'] or self.c['mount']['allow_provisional']) else None)
@@ -137,7 +164,9 @@ class SideSpeechGate:
         audible=metrics['clean_rms']>=self.c['minimum_clean_rms']
         overlap=metrics['reference_rms']>=self.c['maximum_reference_rms']
         speech=self.vad(pcm) if audible and not overlap else False
-        reason=('same_direction' if difference<self.c['direction_difference_deg'] else
+        event_bound=direction_available(direction,now,new_event=True)
+        reason=('direction_held_unattributed' if not event_bound and allow_held_followup is not True else
+            'same_direction' if difference<self.c['direction_difference_deg'] else
             'quiet' if not audible else 'robot_playback_overlap' if overlap else 'not_speech' if not speech else None)
         if reason:
             self.run=0.;self.candidate=None
@@ -152,6 +181,7 @@ class SideSpeechGate:
         self.mask_reason='accepted' if may_start else 'main_busy'
         self.last_voice=now;self.suppressed_until=now+90.
         self.side_sequence=direction.get('sequence');self.main_anchor=feedback['main_bearing_deg']
+        self.source_generation=direction.get('generation')
         onset=stamp-self.run+.02
         self.intervals.append([onset-.25,now+90.])
         self.run=0.
@@ -161,7 +191,9 @@ class SideSpeechGate:
         self.note('accepted',sector=direction['sector'],difference_deg=round(difference,1))
         return True,dict(id=uuid.uuid4().hex,owner=feedback['owner'],sector=direction['sector'],
             bearing_deg=azimuth,heard_monotonic=onset,created_monotonic=now,
-            action='glance',glance_permitted=may_glance,mount_calibrated=self.c['mount']['calibrated'])
+            action='glance',glance_permitted=may_glance,mount_calibrated=self.c['mount']['calibrated'],
+            direction_generation=direction.get('generation'),direction_update_mode=direction.get('update_mode','periodic'),
+            source_relation='new_direction_event' if event_bound else 'introduction_followup_unverified')
 
     def contains(self,stamp):
         return stamp is not None and any(start<=stamp<=end for start,end in self.intervals)
@@ -172,27 +204,40 @@ class NoFaceSpeechGate:
     def __init__(self,c,vad):
         self.c,self.vad=c,vad;self.last=None;self.run=0.;self.candidate=None
         self.used=deque(maxlen=64);self.last_episode=-math.inf
+        self.last_voice=None;self.source_generation=None;self.source_sector=None
         self.diagnostic=dict(reason='not_observed')
 
-    def reset(self):self.last=None;self.run=0.;self.candidate=None
+    def reset(self):
+        self.last=None;self.run=0.;self.candidate=None;self.last_voice=None
+        self.used.clear();self.source_generation=None;self.source_sector=None
 
     def observe(self,stamp,pcm,metrics,direction,feedback,*,available,now):
         continuous=self.last is not None and .005<=stamp-self.last<=.035
         self.last=stamp
         if not continuous:self.run=0.
-        reason=('direction_unavailable' if not recent(direction,now,.75) or not direction.get('frame_valid') else
+        usable=direction_available(direction,now)
+        if usable and (direction.get('generation')!=self.source_generation or direction['sector']!=self.source_sector):
+            self.used.clear();self.run=0.;self.candidate=None
+            self.source_generation=direction.get('generation')
+            self.source_sector=direction['sector']
+        overlap=metrics['reference_rms']>=self.c['maximum_reference_rms']
+        audible=metrics['clean_rms']>=self.c['minimum_clean_rms']
+        speech=audible and not overlap and self.vad(pcm)
+        if speech:self.last_voice=stamp
+        elif self.last_voice is not None and stamp-self.last_voice>=self.c['speech_release_s']:
+            self.used.clear();self.last_voice=None
+        reason=('direction_unavailable' if not usable else
             'gaze_feedback_unavailable' if not recent(feedback,now,self.c['lease_s']) or not feedback.get('visual_fresh') else
             'face_available' if feedback.get('face_count')!=0 else
             'gaze_busy' if feedback.get('phase')!='idle' else
-            'main_busy' if not available else
+            'search_busy' if not available else
             'mount_unconfirmed' if not (self.c['mount']['calibrated'] or self.c['mount']['allow_provisional']) else None)
-        if reason:self.reset();self.diagnostic=dict(reason=reason);return None
-        key=(direction.get('sequence'),direction['updated_monotonic'])
+        if reason:
+            self.run=0.;self.candidate=None;self.diagnostic=dict(reason=reason);return None
+        key=(direction.get('generation'),direction['sector'])
         reason=('already_used_direction' if key in self.used else
             'cooldown' if now-self.last_episode<self.c['cooldown_s'] else
-            'robot_playback_overlap' if metrics['reference_rms']>=self.c['maximum_reference_rms'] else
-            'quiet' if metrics['clean_rms']<self.c['minimum_clean_rms'] else
-            'not_speech' if not self.vad(pcm) else None)
+            'robot_playback_overlap' if overlap else 'quiet' if not audible else 'not_speech' if not speech else None)
         if reason:self.run=0.;self.candidate=None;self.diagnostic=dict(reason=reason);return None
         if self.candidate!=direction['sector']:self.run=0.;self.candidate=direction['sector']
         self.run+=.02;self.diagnostic=dict(reason='collecting_speech',run_s=self.run)
@@ -201,7 +246,9 @@ class NoFaceSpeechGate:
         self.run=0.;self.used.append(key);self.last_episode=now;self.diagnostic=dict(reason='no_face_seek')
         return dict(id=uuid.uuid4().hex,owner=feedback['owner'],sector=direction['sector'],
             bearing_deg=bearing(direction['sector'],self.c),heard_monotonic=onset,
-            created_monotonic=now,action='seek',mount_calibrated=self.c['mount']['calibrated'])
+            created_monotonic=now,action='seek',mount_calibrated=self.c['mount']['calibrated'],
+            direction_generation=direction.get('generation'),direction_update_mode=direction.get('update_mode','periodic'),
+            last_known_direction_only=not direction_available(direction,now,new_event=True))
 
 
 class GlanceMotion:

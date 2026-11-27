@@ -61,7 +61,7 @@ class CadenceTests(unittest.TestCase):
         phases=self.finish()['phases']
         for name in ('fixed_voice','moving_voice'):
             words=phase_report(name,phases[name],.75)
-            self.assertIn('无法计算',words);self.assertIn('不代表没有过期',words)
+            self.assertIn('无法计算',words);self.assertIn('不代表持续更新',words)
             self.assertNotIn('超过0.75秒0次',words)
         self.assertIn('10.00秒没有新坐标',phase_report('fixed_voice',phases['fixed_voice'],.75))
         self.assertIn('20.00秒没有新坐标',phase_report('moving_voice',phases['moving_voice'],.75))

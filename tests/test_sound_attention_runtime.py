@@ -124,7 +124,9 @@ class RuntimeStatusTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(status['head_yaw_supported']);self.assertFalse(status['manual_turn_tool_available'])
         self.assertFalse(status['direction_reference_calibrated'])
         self.assertEqual((s.memory_session,s.input_generation),old)
-        self.assertEqual(s.sound_status(now=11.)['observer_status'],'stale')
+        self.assertEqual(s.sound_status(now=11.)['observer_status'],'held')
+        self.assertFalse(s.sound_status(now=11.)['direction_event_fresh'])
+        self.assertEqual(s.sound_status(now=12.)['observer_status'],'unresponsive')
 
     async def test_status_tool_returns_real_capability_and_direction_error_for_anonymous_user(self):
         from vivis.speech.realtime import VoiceSession
