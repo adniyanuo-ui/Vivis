@@ -4,7 +4,7 @@ from collections import deque
 import json
 import time
 
-from vivis.interaction.sound_attention import Mailbox,SideSpeechGate,configuration,recent
+from vivis.interaction.sound_attention import Mailbox,SideSpeechGate,NoFaceSpeechGate,configuration,recent
 from vivis.speech.runtime_policy import bounded_send
 
 
@@ -18,6 +18,7 @@ GATE_REASONS=dict(direction_unavailable='没有新鲜的声源坐标',gaze_feedb
 class SoundAttentionVoice:
     def init_sound_attention(self):
         self.sound_attention=None;self.sound_gate=None;self.sound_mailbox=None;self.direction_observer=None
+        self.sound_search=None;self.search_gate=None;self.sound_active_gate=None
         self.sound_status_publisher=None;self.sound_diagnostic_at=0.;self.sound_observer_key=None
         self.sound_frame_key=None;self.sound_gate_log_at=0.;self.sound_busy={}
         self.sound_gate_warning=None;self.sound_gate_warning_at=0.
@@ -41,6 +42,7 @@ class SoundAttentionVoice:
         except ImportError:
             self.log.write('sound_attention_disabled',reason='webrtcvad_not_installed');return
         self.sound_gate=SideSpeechGate(c,lambda pcm:vad.is_speech(pcm,16000))
+        self.search_gate=NoFaceSpeechGate(c,lambda pcm:vad.is_speech(pcm,16000))
         self.side_audio=self.fixed_audio('稍等。')  # Validate/load before audio scheduling.
         hardware=json.loads((self.robot_path.parent/definition['hardware']).read_text())
         from vivis.speech.sound_direction import DirectionObserver,configuration as direction_configuration
@@ -59,9 +61,11 @@ class SoundAttentionVoice:
             side_attention_runtime_available=getattr(self,'sound_gate',None) is not None,
             side_glance_active=self.sound_frozen() and not self.sound_attention.get('motion_returned'),
             side_dialogue_active=self.sound_frozen(),current_speaker_location_confirmed=False,
-            notice='本体支持限位内眼颈跟随和自动短暂循声；没有手动转头工具，不承诺已执行。固定底座不等于头颈不能转。最近声源不等于本轮说话人位置，不确认身份；未知或未标定时不猜您在正前方。')
+            no_face_search_configured=getattr(self,'sound_config',{}).get('no_face_search_enabled',False),
+            no_face_search_active=getattr(self,'sound_search',None) is not None,
+            notice='本体支持限位内眼颈跟随、侧方插话转向和交互态无脸循声找人；没有手动转头工具，不承诺已执行。无脸寻人找到真实人脸才交还视觉跟随，未找到则回中，不额外确认身份或授权业务。待机仍按原唤醒规则。最近声源不等于本轮说话人位置；未知或未标定时不猜您在正前方。')
         if details:
-            gate=getattr(getattr(self,'sound_gate',None),'diagnostic',{})
+            gate=getattr(getattr(self,'sound_active_gate',None) or getattr(self,'sound_gate',None),'diagnostic',{})
             result.update(observer=status,gate=dict(gate) if isinstance(gate,dict) else {},
                 main_busy=dict(getattr(self,'sound_busy',{})))
         return result
@@ -111,8 +115,33 @@ class SoundAttentionVoice:
         if (self.context['mode']!='interaction' or not self.context['ready']
                 or not self.health_available or not self.enabled):
             gate.reset(keep_history=True,now=now);self.side_suppressed=False
+            if self.search_gate:self.search_gate.reset()
+            self.cancel_sound_search('state_changed')
             self.poll_sound_diagnostics(now,metrics)
             return False  # Standby wake and task stop retain their original input path.
+        feedback=self.sound_mailbox.latest
+        if self.sound_search is not None:
+            self.sound_active_gate=self.search_gate
+            self.poll_sound_diagnostics(now,metrics)
+            return False  # Seeking never steals/masks a normal user audio turn.
+        if (self.sound_config.get('no_face_search_enabled') and self.search_gate
+                and not self.sound_frozen() and isinstance(feedback,dict) and feedback.get('face_count')==0):
+            self.sound_active_gate=self.search_gate
+            if self.side_suppressed:gate.reset(keep_history=True,now=stamp)
+            self.side_suppressed=False
+            available=(state is not None and not self.control_pending and self.farewell is None)
+            request=self.search_gate.observe(stamp,pcm,metrics,self.direction_observer.latest,feedback,
+                available=available,now=now)
+            if request:
+                request.update(connection=self.message_connection,revision=self.context['revision'])
+                self.sound_search=request
+                self.cancel_public_prompt();self.reception.conversation.user_started()
+                self.log.write('sound_search_begin',attention_id=request['id'],sector=request['sector'],
+                    bearing_deg=request['bearing_deg'],business_identity_unchanged=True,audio_routed_to_main=True)
+                self.emit(dict(kind='voice_warning',epoch=self.epoch,message='无脸循声找人：朝有效声源寻找，找到人脸后恢复视觉跟随。'))
+            self.poll_sound_diagnostics(now,metrics)
+            return False
+        self.sound_active_gate=gate
         single=self.presence.single_visible();reply_busy=self.turn_reply_pending()
         self.sound_busy=dict(user_speaking=self.in_speech,reply_pending=reply_busy,single_face=single,
             control_pending=self.control_pending,expression_pending=self.expression_pending is not None,
@@ -201,6 +230,7 @@ class SoundAttentionVoice:
             if same:self.player.resume(set(paused)-state.blocked-state.server_cancelled)
 
     def acoustic_tick(self):
+        self.sound_search_tick()
         request=getattr(self,'sound_attention',None)
         if request is None:return
         now=time.monotonic();feedback=self.sound_mailbox.latest
@@ -243,7 +273,35 @@ class SoundAttentionVoice:
                 if feedback.get('result') in ('found','empty'):
                     self.cancel_sound_attention(feedback['result'])
 
+    def sound_search_tick(self):
+        request=getattr(self,'sound_search',None)
+        if request is None:return
+        now=time.monotonic();feedback=self.sound_mailbox.latest
+        valid=(request['connection'] is self.message_connection and request['revision']==self.context['revision']
+            and self.context['mode']=='interaction' and self.context['ready'] and self.health_available and self.enabled)
+        if not valid or now-request['created_monotonic']>self.sound_config['budget_s']+2*self.sound_config['search_s']+2:
+            self.cancel_sound_search('state_changed_or_deadline');return
+        if not recent(feedback,now,self.sound_config['lease_s']) or feedback.get('owner')!=request['owner']:
+            self.cancel_sound_search('motion_owner_lost');return
+        completed=feedback.get('completed') or {}
+        if feedback.get('phase')=='idle' and completed.get('id')==request['id']:
+            self.log.write('sound_search_completed',**completed,result=feedback.get('result'),elapsed_is_target_timeline=True)
+            message=('循声找到人脸，已交还视觉跟随。' if feedback.get('result')=='found' else '循声未找到人脸，眼颈已回中。')
+            self.emit(dict(kind='voice_warning',epoch=self.epoch,message=message))
+            self.cancel_sound_search(feedback.get('result') or 'completed');return
+        wire={k:request[k] for k in ('id','owner','sector','bearing_deg','heard_monotonic','created_monotonic','action','mount_calibrated')}
+        wire['updated_monotonic']=now;self.sound_mailbox.submit(wire)
+
+    def cancel_sound_search(self,reason):
+        request=getattr(self,'sound_search',None)
+        if request is None:return
+        self.sound_search=None
+        self.sound_mailbox.submit(dict(id=request['id'],owner=request['owner'],action='cancel',updated_monotonic=time.monotonic()))
+        if self.search_gate:self.search_gate.last_episode=time.monotonic()
+        self.log.write('sound_search_finished',attention_id=request['id'],reason=reason,business_identity_unchanged=True)
+
     def cancel_sound_attention(self,reason):
+        self.cancel_sound_search(reason)
         request=getattr(self,'sound_attention',None)
         if request is None:return
         self.sound_attention=None

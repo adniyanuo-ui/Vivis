@@ -31,7 +31,9 @@
   "verify_checksum": false,
   "attention": {
     "enabled": true,
-    "budget_s": 2.0,
+    "budget_s": 6.0,
+    "dwell_s": 1.5,
+    "no_face_search_enabled": true,
     "direction_difference_deg": 60,
     "cooldown_s": 5.0,
     "lease_s": 0.5,
@@ -43,7 +45,7 @@
     "maximum_reference_rms": 0.001,
     "mount": {
       "front_sector": 8,
-      "sector_sign": -1,
+      "sector_sign": 1,
       "calibrated": false,
       "allow_provisional": true
     }

@@ -187,6 +187,7 @@ def main(argv=None):
                 cycle_begin = now
                 people.submit(sample)
                 packet, jpeg, metrics = vision.detect(sample)
+                packet['faces']=metrics['faces']
                 if managed is not None:
                     packet['vision_request_id']=managed.request_id
                     metrics.update(vision_pid=os.getpid(),landmarker_loaded=landmarker is not None,

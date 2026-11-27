@@ -20,13 +20,15 @@ CONFIG = ROOT/'configs/perception/sound_direction.json'
 def configuration(path=CONFIG):
     c=json.loads(Path(path).read_text())['attention']
     if type(c.get('enabled')) is not bool:raise ValueError('Invalid acoustic attention switch')
-    for key,low,high in [('budget_s',1,4),('direction_difference_deg',30,120),
+    for key,low,high in [('budget_s',1,8),('dwell_s',0,3),('direction_difference_deg',30,120),
             ('cooldown_s',2,30),('lease_s',.2,1),('speech_run_s',.06,.3),
             ('camera_half_fov_deg',10,60),('yaw_counts_per_deg',1,30),
             ('search_s',.5,5),('minimum_clean_rms',.001,.1),('maximum_reference_rms',.0001,.1)]:
         value=c.get(key)
         if type(value) not in (int,float) or not math.isfinite(value) or not low<=value<=high:
             raise ValueError('Invalid acoustic attention setting: '+key)
+    if c['dwell_s']>c['budget_s']-.4:raise ValueError('Acoustic dwell must leave time to move and return')
+    if type(c.get('no_face_search_enabled')) is not bool:raise ValueError('Invalid no-face search switch')
     m=c['mount']
     if (type(m.get('front_sector')) is not int or not 0<=m['front_sector']<12
             or type(m.get('sector_sign')) is not int or m['sector_sign'] not in (-1,1)
@@ -165,6 +167,43 @@ class SideSpeechGate:
         return stamp is not None and any(start<=stamp<=end for start,end in self.intervals)
 
 
+class NoFaceSpeechGate:
+    """Motion request only; original PCM, speaker attribution and wake stay intact."""
+    def __init__(self,c,vad):
+        self.c,self.vad=c,vad;self.last=None;self.run=0.;self.candidate=None
+        self.used=deque(maxlen=64);self.last_episode=-math.inf
+        self.diagnostic=dict(reason='not_observed')
+
+    def reset(self):self.last=None;self.run=0.;self.candidate=None
+
+    def observe(self,stamp,pcm,metrics,direction,feedback,*,available,now):
+        continuous=self.last is not None and .005<=stamp-self.last<=.035
+        self.last=stamp
+        if not continuous:self.run=0.
+        reason=('direction_unavailable' if not recent(direction,now,.75) or not direction.get('frame_valid') else
+            'gaze_feedback_unavailable' if not recent(feedback,now,self.c['lease_s']) or not feedback.get('visual_fresh') else
+            'face_available' if feedback.get('face_count')!=0 else
+            'gaze_busy' if feedback.get('phase')!='idle' else
+            'main_busy' if not available else
+            'mount_unconfirmed' if not (self.c['mount']['calibrated'] or self.c['mount']['allow_provisional']) else None)
+        if reason:self.reset();self.diagnostic=dict(reason=reason);return None
+        key=(direction.get('sequence'),direction['updated_monotonic'])
+        reason=('already_used_direction' if key in self.used else
+            'cooldown' if now-self.last_episode<self.c['cooldown_s'] else
+            'robot_playback_overlap' if metrics['reference_rms']>=self.c['maximum_reference_rms'] else
+            'quiet' if metrics['clean_rms']<self.c['minimum_clean_rms'] else
+            'not_speech' if not self.vad(pcm) else None)
+        if reason:self.run=0.;self.candidate=None;self.diagnostic=dict(reason=reason);return None
+        if self.candidate!=direction['sector']:self.run=0.;self.candidate=direction['sector']
+        self.run+=.02;self.diagnostic=dict(reason='collecting_speech',run_s=self.run)
+        if self.run+1e-9<self.c['speech_run_s']:return None
+        onset=stamp-self.run+.02
+        self.run=0.;self.used.append(key);self.last_episode=now;self.diagnostic=dict(reason='no_face_seek')
+        return dict(id=uuid.uuid4().hex,owner=feedback['owner'],sector=direction['sector'],
+            bearing_deg=bearing(direction['sector'],self.c),heard_monotonic=onset,
+            created_monotonic=now,action='seek',mount_calibrated=self.c['mount']['calibrated'])
+
+
 class GlanceMotion:
     """One finite out/return, then bounded reacquisition; existing owner sends it.
 
@@ -205,7 +244,7 @@ class GlanceMotion:
 
     def start(self,request,current,now):
         self.episode=dict(request);self.saved=self.positions(current);self.seen.append(request['id'])
-        self.completed=None;self.phase='out'
+        self.completed=None;self.phase='seek_out' if request['action']=='seek' else 'out'
         target=dict(self.saved)
         yaw=32;desired=2047+request['bearing_deg']*self.c['yaw_counts_per_deg']
         target[yaw]=max(self.low[yaw],min(self.high[yaw],desired))
@@ -215,7 +254,10 @@ class GlanceMotion:
             endpoint=axis['positive'] if delta>=0 else axis['negative']
             target[sid]=axis['neutral']+(endpoint-axis['neutral'])*min(1.,abs(request['bearing_deg'])/30)
         # Keep pitch/roll and vertical gaze at the original positions.
-        available=max(.2,(self.c['budget_s']-(now-request['heard_monotonic'])-.12)/2)
+        remaining=max(.4,self.c['budget_s']-(now-request['heard_monotonic'])-.12)
+        self.dwell=min(self.c['dwell_s'],max(0.,remaining-.4))
+        available=max(.2,(remaining-self.dwell)/2)
+        self.travel_seconds=available
         scaled={};fractions={}
         for sid in target:
             fraction=1.
@@ -226,12 +268,14 @@ class GlanceMotion:
             scaled[sid]=self.saved[sid]+fraction*(target[sid]-self.saved[sid]);fractions[sid]=fraction
         # Fast eyes need not inherit the slower neck's shortened excursion.
         self.excursion_fraction=fractions[32]
-        self.leg(self.saved,scaled,now,max(.16,min(available,.18+abs(request['bearing_deg'])*.006)))
+        # The configured budget is an actual out/dwell/back schedule, rather
+        # than just an upper bound that can still produce a subsecond twitch.
+        self.leg(self.saved,scaled,now,available)
 
     def step(self,request,current,packet,now):
         position=self.positions(current)
-        fresh_face=(isinstance(packet,dict) and 0<=now-packet.get('timestamp_monotonic',-math.inf)<=.3
-            and packet.get('target') is not None)
+        fresh_packet=isinstance(packet,dict) and 0<=now-packet.get('timestamp_monotonic',-math.inf)<=.3
+        fresh_face=fresh_packet and packet.get('target') is not None
         if self.previous is not None and self.last is not None and now>self.last:
             speed=max(abs(position[s]-self.previous[s])/(now-self.last) for s in position)
         else:speed=math.inf
@@ -244,17 +288,22 @@ class GlanceMotion:
             and all(type(request.get(k)) in (int,float) and math.isfinite(request[k])
                     and 0<=now-request[k]<=12 for k in ('heard_monotonic','created_monotonic')))
         live=valid_request and recent(request,now,self.c['lease_s']) and request.get('owner')==self.owner
-        if self.episode is None and live and request.get('action')=='glance' and request.get('id') not in self.seen and settled:
-            self.start(request,current,now)
+        if self.episode is None and live and request.get('action') in ('glance','seek') and request.get('id') not in self.seen:
+            if request['action']=='seek' and fresh_face:
+                self.seen.append(request['id']);self.phase='found'
+                self.completed=dict(id=request['id'],elapsed_s=now-request['heard_monotonic'],excursion_fraction=0.)
+            elif settled:self.start(request,current,now)
         output=None
         if self.episode:
-            same=live and request.get('id')==self.episode['id'] and request.get('action')=='glance'
+            same=live and request.get('id')==self.episode['id'] and request.get('action')==self.episode['action']
             # Finish a smooth leg before returning, even if its lease disappears.
             # Never splice a new zero-velocity quintic into a moving trajectory.
-            if self.phase in ('out','return','search','neutral'):
+            if self.phase in ('out','return','search','neutral','seek_out','seek_neutral'):
                 output,done=self.sample(now)
                 if done:
-                    if self.phase=='out':self.phase='return';self.leg(output,self.saved,now)
+                    if self.phase=='out':
+                        if same:self.phase='hold';self.hold_until=now+self.dwell
+                        else:self.phase='return';self.leg(output,self.saved,now)
                     elif self.phase=='return':
                         self.completed=dict(id=self.episode['id'],elapsed_s=now-self.episode['heard_monotonic'],
                             excursion_fraction=self.excursion_fraction)
@@ -265,7 +314,23 @@ class GlanceMotion:
                         elif fresh_face:self.phase='found'
                         else:
                             self.phase='neutral';self.leg(output,{s:float(self.neutral[self.ids.index(s)]) for s in output},now)
+                    elif self.phase=='seek_out':
+                        if same and fresh_face:self.phase='found'
+                        elif same:self.phase='seek_hold';self.hold_until=now+self.dwell
+                        else:
+                            self.phase='seek_neutral';self.leg(output,{s:float(self.neutral[self.ids.index(s)]) for s in output},now)
                     else:self.phase='empty'
+            elif self.phase=='hold':
+                output=dict(self.goal)
+                if not same or now>=self.hold_until:
+                    self.phase='return';self.leg(output,self.saved,now,self.travel_seconds if same else None)
+            elif self.phase=='seek_hold':
+                output=dict(self.goal)
+                if same and fresh_face:self.phase='found'
+                elif not same or now>=self.hold_until:
+                    self.phase='seek_neutral'
+                    self.leg(output,{s:float(self.neutral[self.ids.index(s)]) for s in output},now,
+                        self.travel_seconds if same else None)
             elif self.phase=='check_main':
                 output=dict(self.saved)
                 if same and request.get('main_present') is True:self.phase='returned'
@@ -278,6 +343,9 @@ class GlanceMotion:
                         # giving up before the permitted neck range is explored.
                         self.phase='search';self.leg(output,goal,now,self.c['search_s'])
             if self.phase in ('returned','found','empty'):
+                if self.completed is None:
+                    self.completed=dict(id=self.episode['id'],elapsed_s=now-self.episode['heard_monotonic'],
+                        excursion_fraction=self.excursion_fraction)
                 self.episode=None
         target_x=packet['target']['x'] if fresh_face else 0.
         status=dict(owner=self.owner,updated_monotonic=now,phase=self.phase if self.episode else 'idle',
@@ -286,6 +354,8 @@ class GlanceMotion:
             single_face=fresh_face and packet.get('faces',1)==1,
             main_bearing_deg=angle((position[32]-2047)/self.c['yaw_counts_per_deg']+target_x*self.c['camera_half_fov_deg']))
         status['visitor']=packet.get('visitor') if fresh_face else None
-        status['brake_requested']=bool(self.episode is None and live and request.get('action')=='glance'
+        status['visual_fresh']=bool(fresh_packet)
+        status['face_count']=packet.get('faces',int(bool(fresh_face))) if fresh_packet else None
+        status['brake_requested']=bool(self.episode is None and live and request.get('action') in ('glance','seek')
             and request.get('id') not in self.seen and not settled)
         return output,status

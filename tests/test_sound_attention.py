@@ -56,8 +56,8 @@ class SideAdmissionTests(unittest.TestCase):
 
     def test_mounting_is_explicit_and_zero_not_automatically_forward(self):
         self.assertEqual(bearing(8,self.c),0)
-        self.assertEqual(bearing(0,self.c),-120)
-        self.assertEqual(bearing(5,self.c),90)
+        self.assertEqual(bearing(0,self.c),120)
+        self.assertEqual(bearing(5,self.c),-90)
 
     def test_head_cooldown_does_not_discard_a_new_side_utterance(self):
         for n in range(4):_,first=self.frame(10+n*.02)
@@ -106,7 +106,7 @@ class SideAdmissionTests(unittest.TestCase):
         self.assertTrue(self.g.contains(10.02))
 
 
-class MotionEpisodeTests(unittest.TestCase):
+class MotionFixture(unittest.TestCase):
     def setUp(self):
         from vivis.interaction.standby import plan
         from vivis.runtime.robot import Robot
@@ -132,15 +132,19 @@ class MotionEpisodeTests(unittest.TestCase):
         return dict(id='one',owner=self.motion.owner,action='glance',bearing_deg=azimuth,
             heard_monotonic=now-.08,created_monotonic=now,updated_monotonic=now,main_present=True)
 
+
+class MotionEpisodeTests(MotionFixture):
+
     def test_large_angle_returns_within_budget_and_never_changes_mouth_pitch_roll(self):
         request=self.request(11,120);trace=[];status=None
-        for n in range(240):
+        for n in range(540):
             now=11+n/60;request['updated_monotonic']=now
             values,status=self.step(now,request)
             trace.append(self.current.copy())
             if status.get('completed') and status['phase']=='idle':break
-        self.assertLess(status['completed']['elapsed_s'],2.15)
-        self.assertLess(status['completed']['excursion_fraction'],1.)
+        self.assertGreaterEqual(status['completed']['elapsed_s'],5.7)
+        self.assertLess(status['completed']['elapsed_s'],6.2)
+        self.assertEqual(status['completed']['excursion_fraction'],1.)
         np.testing.assert_allclose(self.current,self.neutral)
         self.assertGreater(np.ptp(np.asarray(trace)[:,self.ids.index(32)]),1)
         for sid in set(self.ids)-{8,23,32}:
@@ -176,7 +180,7 @@ class MotionEpisodeTests(unittest.TestCase):
 
     def test_duplicate_request_never_runs_twice(self):
         request=self.request(11);completions=[]
-        for n in range(360):
+        for n in range(480):
             now=11+n/60;request['updated_monotonic']=now
             values,status=self.step(now,request)
             if status.get('completed'):completions.append(status['completed']['elapsed_s'])
@@ -199,7 +203,7 @@ class MotionEpisodeTests(unittest.TestCase):
             gaze=StandbyGaze(source.tracking,profile,ids,receiver,source)
         gaze.prepare(trajectory,mapper.neutral,[],0.);gaze.set_audio_time(0.,None)
         last=mapper.neutral.copy();request=None;active=False;resumed=False
-        for n in range(360):
+        for n in range(480):
             now=10+n/60
             receiver.event=dict(schema_version='vivis-person-target-1.0',timestamp_monotonic=now,
                 sequence=n,target=dict(x=0.,y=0.,eye_line_roll_rad=0.))
