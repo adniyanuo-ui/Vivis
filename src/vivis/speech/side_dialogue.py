@@ -33,25 +33,33 @@ class SideDialogue:
         self.cancelled=False;self.actor=None;self.transcript='';self.rids=set();self.spoken=[]
         self.result=None;self.paused=set();self.message_lane=None
         self.terminal_tool=False
+        self.stop_reason=None
 
-    def valid(self):
+    def invalid_reason(self):
         v=self.v;r=self.request
-        return (not self.cancelled and not v.shutdown.is_set() and v.health_available and v.enabled
-            and r['connection'] is v.message_connection and r['session']==v.memory_session
-            and r.get('generation',v.input_generation)==v.input_generation
-            and r['revision']==v.context['revision'] and v.context['mode']=='interaction' and v.context['ready'])
+        return ('cancelled' if self.cancelled else 'shutdown' if v.shutdown.is_set() else
+            'voice_unavailable' if not v.health_available or not v.enabled else
+            'connection_changed' if r['connection'] is not v.message_connection else
+            'visit_changed' if r['session']!=v.memory_session else
+            'new_main_generation' if r.get('generation',v.input_generation)!=v.input_generation else
+            'mode_changed' if r['revision']!=v.context['revision'] or v.context['mode']!='interaction' or not v.context['ready'] else None)
+
+    def valid(self):return self.invalid_reason() is None
 
     def feed(self,stamp,pcm,far):
         if self.capture_done.is_set() or not self.valid():return
         if self.frames and not .005<=stamp-self.frames[-1][0]<=.035:
+            self.stop_reason='capture_clock_gap'
             self.cancelled=True;self.capture_done.set();return
         if len(self.frames)>=4500:
+            self.stop_reason='capture_limit'
             self.cancelled=True;self.capture_done.set();return  # 90 s, bounded.
         self.frames.append((stamp,pcm,far))
 
     def end(self):self.capture_done.set()
 
-    def stop(self):
+    def stop(self,reason='cancelled'):
+        self.stop_reason=reason
         self.cancelled=True;self.capture_done.set()
         if self.message_lane:self.message_lane.cancel()
         for rid in self.rids:self.v.player.cancel(rid)
@@ -326,8 +334,10 @@ class SideDialogue:
                         announced.add(rid);v.emit(dict(kind='cloud_transcript',epoch=v.epoch,role='assistant',text=words,source='side_dialogue'))
                 if all(self.drained(r) for r in self.rids):break
                 await asyncio.sleep(.02)
-        except asyncio.CancelledError:raise
+        except asyncio.CancelledError:
+            self.stop_reason=self.stop_reason or 'task_cancelled';raise
         except Exception as exc:
+            self.stop_reason='provider_or_playback_error'
             v.log.write('side_dialogue_failed',side_turn=self.request['id'],error_type=type(exc).__name__,error=str(exc)[:240])
             if self.valid():
                 v.emit(dict(kind='voice_warning',epoch=v.epoch,message='侧方这句话暂未完整处理，请再说一次；主聊天身份保留。'))
@@ -338,7 +348,10 @@ class SideDialogue:
             if self.valid() and v.cloud_state:
                 v.player.resume(self.paused-set(v.cloud_state.blocked)-set(v.cloud_state.server_cancelled))
             v.log.write('side_dialogue_finished',side_turn=self.request['id'],actor=self.actor,
-                main_person=self.request['person'],cancelled=self.cancelled)
+                main_person=self.request['person'],cancelled=self.cancelled,
+                reason=self.stop_reason or self.invalid_reason() or ('empty_capture' if not self.frames else
+                    'no_final_transcript' if not self.transcript else 'completed'),
+                captured_frames=len(self.frames),transcript_received=bool(self.transcript),reply_count=len(self.spoken))
 
     async def drain(self,rid):
         deadline=time.monotonic()+35

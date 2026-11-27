@@ -12,7 +12,12 @@ GATE_REASONS=dict(direction_unavailable='没有新鲜的声源坐标',gaze_feedb
     gaze_busy='正在进行一次转向',main_face_unavailable='当前没有单人主聊天画面',
     gaze_not_settled='眼颈跟随尚未稳定',mount_unconfirmed='方位安装朝向尚未确认',
     same_direction='声源与主人方向差未达到设定门槛',robot_playback_overlap='声音与音箱回采重叠',
-    main_busy='主聊天人的话轮或业务尚未结束',cooldown='距离上次转向过近')
+    main_busy='主聊天人的话轮或业务尚未结束',cooldown='距离上次转向过近',
+    inactive_mode='当前未进入就绪交互态，待机仍需先唤醒',
+    face_available='画面已有人脸，继续原视觉跟随',already_used_direction='本次方位已处理，等待新坐标',
+    quiet='声音过小',not_speech='尚未确认连续人声')
+
+PRECEDING_ONSET_MAX_S=2.0  # Only quarantine the ambiguous boundary; never infer who spoke it.
 
 
 class SoundAttentionVoice:
@@ -115,6 +120,8 @@ class SoundAttentionVoice:
         if (self.context['mode']!='interaction' or not self.context['ready']
                 or not self.health_available or not self.enabled):
             gate.reset(keep_history=True,now=now);self.side_suppressed=False
+            gate.note('inactive_mode',mode=self.context['mode'],ready=self.context['ready'])
+            self.sound_active_gate=gate
             if self.search_gate:self.search_gate.reset()
             self.cancel_sound_search('state_changed')
             self.poll_sound_diagnostics(now,metrics)
@@ -243,7 +250,8 @@ class SoundAttentionVoice:
             try:self.side_task.result()
             except (asyncio.CancelledError,Exception) as exc:
                 self.log.write('side_dialogue_task_finished',error_type=type(exc).__name__)
-            if request.get('motion_returned'):self.cancel_sound_attention('returned');return
+            if request.get('motion_returned'):
+                self.cancel_sound_attention(request.get('motion_result') or 'returned');return
         if request.get('motion_returned'):return
         fresh_feedback=recent(feedback,now,self.sound_config['lease_s']) and feedback.get('owner')==request['owner']
         if fresh_feedback and feedback.get('attention_id')==request['id']:request['motion_seen']=True
@@ -269,9 +277,10 @@ class SoundAttentionVoice:
                     target_budget_s=self.sound_config['budget_s'],elapsed_is_target_timeline=True)
             if feedback.get('phase')=='idle':
                 request['motion_returned']=True
+                request['motion_result']=feedback.get('result')
                 self.sound_mailbox.submit(dict(id=request['id'],owner=request['owner'],action='cancel',updated_monotonic=now))
-                if feedback.get('result') in ('found','empty'):
-                    self.cancel_sound_attention(feedback['result'])
+                # Finishing a motion does not finish the separately bound B
+                # utterance. Guest binding is checked again by introduction tools.
 
     def sound_search_tick(self):
         request=getattr(self,'sound_search',None)
@@ -307,7 +316,7 @@ class SoundAttentionVoice:
         self.sound_attention=None
         self.sound_mailbox.submit(dict(id=request['id'],owner=request['owner'],action='cancel',updated_monotonic=time.monotonic()))
         dialogue=getattr(self,'side_dialogue',None)
-        if dialogue:dialogue.stop()
+        if dialogue:dialogue.stop(reason)
         if self.side_task and not self.side_task.done():self.side_task.cancel()
         self.log.write('sound_attention_finished',attention_id=request['id'],reason=reason,
             elapsed_s=time.monotonic()-request['heard_monotonic'])
@@ -330,6 +339,7 @@ class SoundAttentionVoice:
             self.log.write('side_context_cleanup_failed',reason=event['error'].get('code'));return True
         if kind=='input_audio_buffer.speech_started':
             stamp=timeline.at(event.get('audio_start_ms'))
+            new_onset=isinstance(item,str) and item not in self.side_onsets
             if isinstance(item,str):
                 self.side_onsets[item]=stamp
                 if len(self.side_onsets)>128:self.side_onsets.pop(next(iter(self.side_onsets)))
@@ -337,7 +347,27 @@ class SoundAttentionVoice:
                 if not isinstance(item,str) or not item:return True
                 if item not in self.side_items:self.side_items.append(item)
                 self.side_wire_item=item
-            else:self.side_wire_item=None
+            else:
+                self.side_wire_item=None
+                request=getattr(self,'sound_attention',None)
+                # DOA may arrive after the first speech samples reached Qwen.
+                # A newly delivered onset just before local B admission is
+                # ambiguous, not a fresh A request. Quarantine its MAIN-channel
+                # copy before it changes generation/actor or executes business;
+                # B's separately captured audio retains its own scoped session.
+                # Known A onsets, genuinely new onsets, unknown ADC time and
+                # changed/revoked scopes keep the original processing rules.
+                dialogue=getattr(self,'side_dialogue',None)
+                if (new_onset and dialogue and request and dialogue.valid()
+                        and type(stamp) in (int,float)
+                        and 0<request['heard_monotonic']-stamp<=PRECEDING_ONSET_MAX_S
+                        and request.get('generation')==self.input_generation):
+                    if item not in self.side_items:self.side_items.append(item)
+                    self.side_wire_item=item
+                    self.log.write('side_ambiguous_preceding_onset',attention_id=request['id'],item_id=item,
+                        audio_started=stamp,side_started=request['heard_monotonic'],
+                        generation=self.input_generation,main_actor_unchanged=True,
+                        business_executed=False,side_actor_still_separate=True)
         elif isinstance(item,str) and item in self.side_onsets and gate.contains(self.side_onsets[item]):
             if item not in self.side_items:
                 self.side_items.append(item)
@@ -369,6 +399,12 @@ class SoundAttentionVoice:
                 await bounded_send(ws,json.dumps(dict(type='conversation.item.create',item=dict(type='function_call_output',
                     call_id=event['call_id'],output='{"accepted":false,"reason":"side_voice_has_no_main_actor_authority"}'))))
             return True
+        dialogue=getattr(self,'side_dialogue',None)
+        if kind=='response.created' and rid and dialogue and self.sound_frozen() and dialogue.valid():
+            # A delayed A reply can arrive AFTER the initial pause. Hold it
+            # before its first audio, through the existing bounded PCM buffer.
+            dialogue.paused.update(self.player.pause(rid,only=True)['responses'])
+            self.log.write('side_held_main_reply',response_id=rid,attention_id=self.sound_attention['id'])
         return False
 
     def close_sound_attention(self):

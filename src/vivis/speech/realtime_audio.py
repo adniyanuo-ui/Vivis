@@ -88,10 +88,11 @@ class VoiceBuffer:
             self.filters.pop(response_id,None)
             if self.mouth:self.mouth.finish(response_id)
 
-    def pause(self,response_id=None):
+    def pause(self,response_id=None,*,only=False):
         """Stop audibly now, retaining bounded PCM until the turn is resolved."""
         with self.lock:
-            ids={sid for sid,_ in self.blocks}|set(self.filters)
+            if only and not response_id:raise ValueError('A targeted pause requires a response id')
+            ids=set() if only else {sid for sid,_ in self.blocks}|set(self.filters)
             if response_id:ids.add(response_id)
             ids.difference_update(self.cancelled)
             fresh=ids-self.paused
