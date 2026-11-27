@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tools.check_sound_direction_cadence import CadenceEvidence,main
+from tools.check_sound_direction_cadence import CadenceEvidence,main,phase_report,active_usb_capture
 from vivis.speech.sound_direction import configuration
 
 
@@ -54,3 +54,39 @@ class CadenceTests(unittest.TestCase):
                 patch('tools.check_sound_direction_cadence.open_receiver',side_effect=AssertionError('opened')), \
                 patch('tools.check_sound_direction_cadence.subprocess.run',side_effect=AssertionError('systemctl')):
             self.assertEqual(main(['--check']),0)
+            self.assertEqual(main(['--check','--audio-active']),0)
+
+    def test_no_interval_is_reported_as_unknown_instead_of_zero_timeouts(self):
+        self.feed(20.,bytes.fromhex('55 AA 08 F7'));self.now=60.
+        phases=self.finish()['phases']
+        for name in ('fixed_voice','moving_voice'):
+            words=phase_report(name,phases[name],.75)
+            self.assertIn('无法计算',words);self.assertIn('不代表没有过期',words)
+            self.assertNotIn('超过0.75秒0次',words)
+        self.assertIn('10.00秒没有新坐标',phase_report('fixed_voice',phases['fixed_voice'],.75))
+        self.assertIn('20.00秒没有新坐标',phase_report('moving_voice',phases['moving_voice'],.75))
+
+    def test_usb_capture_uses_configured_input_without_output_or_audio_files(self):
+        import numpy as np
+        from unittest.mock import Mock
+        capture=json.loads((Path(__file__).parents[1]/'configs/perception/speech.json').read_text())['capture']
+        device=dict(name=capture['device']+' array',max_input_channels=capture['channels'])
+        stream=Mock()
+        with patch('sounddevice.query_devices',return_value=[device]), \
+                patch('sounddevice.InputStream',return_value=stream) as factory, \
+                patch('sounddevice.OutputStream',side_effect=AssertionError('output opened')):
+            with active_usb_capture(self.e,capture) as stats:
+                self.e.audio_stats=stats
+                args=factory.call_args.kwargs
+                self.assertEqual(args['samplerate'],capture['sample_rate_hz'])
+                self.assertEqual(args['channels'],capture['channels'])
+                self.assertEqual(args['blocksize'],960)
+                with patch('tools.check_sound_direction_cadence.time.monotonic',return_value=15.):
+                    args['callback'](np.full((960,capture['channels']),.1,np.float32),960,None,False)
+                self.assertEqual(stats['callback_count'],1)
+            self.assertTrue(stats['closed']);stream.start.assert_called_once();stream.close.assert_called_once()
+        summary={};self.now=60.;self.e.finish(summary)
+        self.assertTrue(summary['audio_opened']);self.assertFalse(summary['audio_saved'])
+        self.assertFalse(summary['audio_sent_to_cloud'])
+        self.assertAlmostEqual(summary['capture_only']['levels']['fixed_voice']['rms'],.1,places=5)
+        self.assertFalse(list(self.folder.glob('*.wav')))
